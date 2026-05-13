@@ -1,8 +1,8 @@
 # Noxa 配下プロダクト一覧
 
-Noxa は株式会社 EGS が運営する**夜職 DX プラットフォーム事業**。
+Noxa は田口修平（個人事業主、屋号 egshugy）が運営する**夜職 DX プラットフォーム事業**。
 このリポでは **Noxa 配下のプロダクト**のみ集約する。
-egshugy-lab（会社サイト）や Paperclip（内部運用基盤）は EGS 法人の他事業として別途運営。
+egshugy-lab（個人公式サイト）や エグタイプ診断 / Paperclip は別ラインとして別途運営。
 
 ---
 
@@ -32,23 +32,28 @@ egshugy-lab（会社サイト）や Paperclip（内部運用基盤）は EGS 法
 
 ---
 
-## 株式会社 EGS の他事業（Noxa 配下ではない）
+## 別ライン（同じ運営者の他事業、Noxa 配下ではない）
 
-### egshugy-lab（会社サイト + 診断/ミニゲーム）
+### egshugy-lab（田口修平の個人公式サイト・親サイト）
 
-- **役割**: 株式会社 EGS の**コーポレートサイト**兼、診断・ミニゲーム配信
-- **位置づけ**: 法人の親サイト的役割。Noxa 事業を含む全事業の入口
-- **プロジェクト例**:
-  - kuzu-type（タイピングゲーム）
-  - ramune-puzzle（パズル）
-  - 会社概要 / 採用 / プレスリリース 等（追加予定）
+- **役割**: 田口修平（個人事業主、屋号 egshugy）の**個人公式サイト**
+- **位置づけ**: 全プロダクトの入口・親サイト。プロダクト一覧、プロフィール、ブログ 等
 - **配信**: 社内サーバ（Proxmox CT103 webserver = 192.168.0.77:3001）
-- **リポジトリ**: egshugy-products/egshugy-lab + 各サブプロジェクト
+- **リポジトリ**: egshugy-products/egshugy-lab
 - **将来のドメイン候補**: `egshugy.com` / `egshugy.lab`
+
+### エグタイプ診断（診断・ミニゲーム集）
+
+- **役割**: 診断・ミニゲーム配信（Noxa とは別軸のコンテンツライン）
+- **プロジェクト例**:
+  - kuzu-type（タイピング診断）
+  - ramune-puzzle（パズル）
+- **配信**: 社内サーバ（egshugy-lab と同じ）
+- **リポジトリ**: egshugy-products/ 配下の各サブプロジェクト
 
 ### Paperclip（内部運用基盤）
 
-- **役割**: 株式会社 EGS 全プロダクトの統制・QA・アトリビューション・エージェント定義
+- **役割**: 全プロダクトの統制・QA・アトリビューション・エージェント定義
 - **位置づけ**: 内部運用ツール（CLI / スクリプト集、表に出ない）
 - **リポジトリ**: egshugy-ops（プライベート）
 
@@ -57,12 +62,12 @@ egshugy-lab（会社サイト）や Paperclip（内部運用基盤）は EGS 法
 ## ユーザー導線（将来）
 
 ```
-egshugy.com (egshugy-lab、会社サイト)
-├── 「Noxa 事業を見る」 → noxa.com
-├── 「診断・ゲームで遊ぶ」 → egshugy-lab 配下のミニゲーム
-└── 「会社情報・採用」 → コーポレート情報
-
-noxa.com (Noxa 事業)
-├── 「YoruLog を始める」 → yorulog.com（CRM）
-└── 「nomishugy を見る」 → nomishugy.com（バーポータル）
+egshugy.com (egshugy-lab、田口修平の個人公式サイト)
+├── プロダクト一覧
+│   ├── 「Noxa - 夜職 DX プラットフォーム」 → noxa.com
+│   │   ├── YoruLog（CRM）→ yorulog.com
+│   │   └── nomishugy（バーポータル）→ nomishugy.com
+│   └── 「エグタイプ診断 - 診断・ミニゲーム」 → サブドメイン or 別 URL
+├── プロフィール / 経歴
+└── ブログ / お問合せ
 ```
