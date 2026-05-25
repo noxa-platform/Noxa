@@ -20,7 +20,7 @@ import { auth, db, googleProvider } from '@/lib/firebase/config';
 export const ALLOWED_REDIRECT_HOSTS = [
   'yorulog.vercel.app',
   'nomishugy.vercel.app',
-  'noxa.vercel.app',
+  'noxa-delta.vercel.app',
   'localhost',
   // 本番ドメイン取得後に追加
   // 'yorulog.noxa.app',
