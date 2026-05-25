@@ -1,7 +1,33 @@
+# OS
 .DS_Store
 *.swp
 *.tmp
-node_modules/
+
+# log
+*.log
+
+# env
 .env
 .env.local
-*.log
+.env*.local
+
+# deps
+node_modules/
+
+# next.js
+/.next/
+/out/
+
+# typescript
+*.tsbuildinfo
+
+# Firebase
+firebase-debug.log
+firebase-debug.*.log
+service-account.json
+service-account-*.json
+firebase-adminsdk-*.json
+
+# IDE
+.vscode/
+.idea/

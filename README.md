@@ -82,7 +82,8 @@ egshugy-lab（田口修平の個人公式サイト、親サイト）
 - **ブランドアセット**（ロゴ、カラー、フォント）の一元管理
 - **商標 / ドメイン**の管理台帳
 - **法務情報**（プライバシーポリシー、利用規約のテンプレート）
-- 各プロダクトの個別実装は含めない（Windows でも参照しやすいよう純粋なテキスト + アセットのみ）
+- 2026-05-25 追加: 本リポは **noxa.vercel.app の Next.js Web アプリも兼ねる**
+  ブランドアセット + 実装が同居する形に進化。`src/` 配下が Web アプリ実装
 
 ## ディレクトリ構造
 
@@ -92,10 +93,50 @@ Noxa/
 ├── CLAUDE.md           ← Noxa 配下プロダクト共通の AI 開発ガイドライン
 ├── branding/           ← ロゴ・カラー・フォント仕様
 ├── apps/               ← 各プロダクトの概要 + リンク
-└── docs/               ← 商標・ドメイン・法務情報
+├── docs/               ← 商標・ドメイン・法務情報
+│
+├── package.json        ← Next.js 16 (noxa.vercel.app)
+├── src/
+│   ├── app/
+│   │   ├── page.tsx              ← noxa.vercel.app/ ブランド LP
+│   │   └── account/              ← NOXA アカウント (login/signup/profile/...)
+│   ├── lib/
+│   └── components/
+└── public/
+```
+
+## noxa.vercel.app の役割
+
+| URL | 用途 |
+|---|---|
+| `noxa.vercel.app/` | NOXA ブランド LP + 配下プロダクト紹介 |
+| `noxa.vercel.app/account/login` | NOXA アカウントログイン |
+| `noxa.vercel.app/account/signup` | NOXA アカウント作成 |
+| `noxa.vercel.app/account` | マイページ（プラン / クレジット残高 / サービスリンク） |
+| `noxa.vercel.app/account/profile` | プロフィール編集 |
+| `noxa.vercel.app/account/notifications` | 通知設定（NOXA 全サービス共通） |
+| `noxa.vercel.app/account/subscription` | プラン・課金管理 |
+| `noxa.vercel.app/account/credits` | AI クレジット履歴（ledger） |
+| `noxa.vercel.app/account/delete` | 退会（NOXA 全サービスから削除） |
+
+## クロスドメイン認証（interim, noxa.app 取得前）
+
+1. yorulog/nomishugy で「ログイン」→ `noxa.vercel.app/account/login?redirect=...` に遷移
+2. NOXA でログイン成功 → Cloud Function `exchangeAuthToken` が Custom Token 発行
+3. `?noxaAuth=<token>` 付きで `redirect` 先に戻す
+4. 各プロダクトの `NoxaAuthReceiver` が `signInWithCustomToken` で session 確立
+
+将来 `noxa.app` 取得後はサブドメイン構成（`auth.noxa.app` + `yorulog.noxa.app`）で Cookie 共有 SSO 化予定。
+
+## 開発
+
+```bash
+npm install
+NEXT_PUBLIC_USE_EMULATOR=true npm run dev  # port 3100
 ```
 
 ## 環境
 
 - macOS（iOS 開発） + Windows（Web / 設定共有）両対応
-- すべてテキスト + 画像アセットのみで、ビルド工程なし → **Windows でも触れる**
+- branding / docs / apps は純粋なテキスト + アセット（Windows でも触れる）
+- Web アプリ部分は Next.js なので開発時のみ `npm install` が必要
