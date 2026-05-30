@@ -24,7 +24,7 @@ type OsModule = {
 const MODULES: OsModule[] = [
   // MAIN ① 〜 ⑨
   {
-    number: 1, id: 'pos', title: 'POS', desc: '注文 → 会計 → レシートを 1 画面で。',
+    number: 1, id: 'pos', title: 'POS', desc: '注文 → 伝票出力に特化。決済は既存レジ運用と並走。',
     href: 'https://yorulog.vercel.app/pos', external: true, status: 'planned', group: 'main',
   },
   {
@@ -65,7 +65,8 @@ const MODULES: OsModule[] = [
     href: '/community', status: 'soon', group: 'sub',
   },
   {
-    letter: 'B', id: 'nomishugy', title: 'のみシュギ', desc: 'バー紹介・求人・コラム。お客さん側の動線。',
+    letter: 'B', id: 'nomishugy', title: 'のみシュギ',
+    desc: 'バー紹介・求人・コラム。Phase v1.3 で NOXA /bars にも内蔵予定（独立ドメインと並走）。',
     href: 'https://nomishugy.vercel.app', external: true, status: 'beta', group: 'sub',
   },
 ];

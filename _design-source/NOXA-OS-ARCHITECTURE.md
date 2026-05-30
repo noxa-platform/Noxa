@@ -44,7 +44,7 @@
 
 | # | モジュール | 主ユーザー | 現状 | 実装位置 |
 |---|---|---|---|---|
-| ① | **POS（販売時点管理）** | 店舗フロント・キャスト | 未実装 | yorulog `(app)/pos/` 予定 |
+| ① | **POS（オーダーエントリー・決済機能なし）** | 店舗フロント・キャスト | 未実装 | yorulog `(app)/pos/` 予定 |
 | ② | **売上管理** | 個人キャスト・ホスト・マネージャ | **実装済み（旧 yorulog）** | yorulog `(app)/{home, sales, daily-close, insights}/` |
 | ③ | **席回し** | フロア責任者・店長 | 未実装 | yorulog `(app)/seating/` 予定 |
 | ④ | **勤怠管理** | 店長・マネージャ | 未実装 | yorulog `(app)/attendance/` 予定 |
@@ -71,7 +71,9 @@
 ### B. のみシュギ（バー紹介 + 求人）
 - **役割**: バーディレクトリ、お客さん向けバー検索、求人マッチング、コラム
 - **現状**: 既存 nomishugy リポで運用中（Marketplace / Directory パターン）
-- **将来**: NOXA dashboard の「バー検索 / 求人」モジュールとして統合 or サブドメインで継続運用
+- **最終形態（決定済み）**: **C. ハイブリッド** — 既存 `nomishugy.vercel.app`（将来 `nomishugy.egshugy.com`）は独立ドメインで維持 + NOXA umbrella にも `/bars` で内蔵。SSO 連携で共通アカウント。
+  - **理由**: 既存 SEO 資産は捨てない / 業界従事者には NOXA umbrella からの動線が必要 / コンシューマー（バー客）に「NOXA」は刺さらない
+  - **実施タイミング**: **Phase v1.3 の業務モジュール実装と同時** — POS / 席回し / 勤怠などが揃って NOXA の価値が明確になるタイミングでブランド磨き直し
 - **データ**: nomishugy が SSR で読む bars / timeline は、すでに **noxa-platform Firestore に統合済み**
 
 ---
@@ -170,9 +172,9 @@ Firebase (noxa-platform)
 
 ユーザー判断が必要な項目：
 1. **メイン機能 9 個の実装優先順位**（Phase v1.3 → v1.4 → v1.5 の順を決める）
-2. **nomishugy の最終形態**（NOXA umbrella の `/bars` に吸収する？ 独立 `nomishugy.egshugy.com` で残す？）
+2. ~~nomishugy の最終形態~~ → **C. ハイブリッド確定**（独立ドメイン維持 + NOXA `/bars` 内蔵、Phase v1.3 で実施）
 3. **コミュニティの招待モデル**（既存ユーザーから直接招待制？ 在籍店舗オーナーからの認可制？ ハイブリッド？）
-4. **POS の決済 SDK 選定**（Square / Stripe Terminal / Airpay / 楽天ペイ）
+4. ~~POS の決済 SDK 選定~~ → **決済機能は持たない方針で確定**（既存レジ運用と並走）
 5. **オリシャン名刺発注の外部パートナー**（ラクスル？ プリントパック？ 自社印刷？）
 6. **法人化後のドメイン戦略**（`*.egshugy.com` の各種 → `noxa.app`？ `noxa.work`？）
 
