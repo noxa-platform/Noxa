@@ -1,8 +1,10 @@
 'use client';
-import { useState, Suspense } from 'react';
+import { useState, useEffect, Suspense, useRef } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
+import { onAuthStateChanged } from 'firebase/auth';
 import { loginWithEmail, signinWithGoogle, signinWithApple, handlePostLoginRedirect } from '@/lib/auth';
+import { auth } from '@/lib/firebase/config';
 
 function LoginForm() {
   const router = useRouter();
@@ -12,6 +14,30 @@ function LoginForm() {
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  // 自動 redirect 実行済みフラグ — 多重発火と無限ループを防止
+  const autoRedirectFiredRef = useRef(false);
+
+  /**
+   * ログイン済み + redirect query あり → 自動で yorulog 等に戻す
+   *
+   * 経緯: SSO ハブ化により、yorulog/login → noxa/account/login?redirect=... の
+   * フローが既存実装。だがログイン済みユーザーが /account/login に到達した
+   * ケース (別タブ・再アクセス等) で自動 redirect しないため、フォームが
+   * 表示されたまま戻れない UX バグがあった。本 useEffect で対応する。
+   */
+  useEffect(() => {
+    if (!redirect) return;
+    const unsubscribe = onAuthStateChanged(auth, (user) => {
+      if (user && !autoRedirectFiredRef.current) {
+        autoRedirectFiredRef.current = true;
+        handlePostLoginRedirect(redirect, router).catch((e) => {
+          console.error('[login] auto-redirect failed', e);
+          autoRedirectFiredRef.current = false;
+        });
+      }
+    });
+    return unsubscribe;
+  }, [redirect, router]);
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
