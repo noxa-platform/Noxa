@@ -4,5 +4,5 @@ import { AccountShell } from '@/components/AccountShell';
 import { PosClient } from '@/components/modules/pos/PosClient';
 
 export default function PosOsPage() {
-  return <AuthGuard>{(user) => <AccountShell user={user}><PosClient /></AccountShell>}</AuthGuard>;
+  return <AuthGuard>{(user) => <AccountShell user={user}><PosClient user={user} /></AccountShell>}</AuthGuard>;
 }

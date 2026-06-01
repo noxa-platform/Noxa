@@ -73,9 +73,41 @@ const fmtDate = (ms: number | null) => {
   return `${d.getMonth() + 1}/${d.getDate()}`;
 };
 
+// 営業日キー（6時より前は前日扱い。POS の checkout と一致）
+function todayKey(): string {
+  const d = new Date();
+  if (d.getHours() < 6) d.setDate(d.getDate() - 1);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+type PosSalesSummary = { total: number; today: number; count: number; todayCount: number };
+
+// 自分が owner の shop の sales（POS 会計）を集計する。
+async function loadPosSales(uid: string): Promise<PosSalesSummary> {
+  const sum: PosSalesSummary = { total: 0, today: 0, count: 0, todayCount: 0 };
+  const tk = todayKey();
+  try {
+    const shops = await getDocs(query(collection(db, 'shop_shops'), where('ownerUid', '==', uid)));
+    for (const shop of shops.docs) {
+      try {
+        const ss = await getDocs(collection(db, `shop_shops/${shop.id}/sales`));
+        ss.forEach((doc) => {
+          const d = doc.data();
+          const amount = typeof d.amount === 'number' ? d.amount : 0;
+          sum.total += amount;
+          sum.count += 1;
+          if (d.dayKey === tk) { sum.today += amount; sum.todayCount += 1; }
+        });
+      } catch { /* skip */ }
+    }
+  } catch { /* skip */ }
+  return sum;
+}
+
 export function SalesClient({ user }: { user: User }) {
   const [loading, setLoading] = useState(true);
   const [custs, setCusts] = useState<Cust[]>([]);
+  const [pos, setPos] = useState<PosSalesSummary>({ total: 0, today: 0, count: 0, todayCount: 0 });
   const [err, setErr] = useState<string | null>(null);
 
   useEffect(() => {
@@ -83,6 +115,7 @@ export function SalesClient({ user }: { user: User }) {
     loadCustomers(user.uid)
       .then((c) => { if (alive) { setCusts(c); setLoading(false); } })
       .catch((e) => { if (alive) { setErr(String(e?.message ?? e)); setLoading(false); } });
+    loadPosSales(user.uid).then((p) => { if (alive) setPos(p); }).catch(() => { /* skip */ });
     return () => { alive = false; };
   }, [user.uid]);
 
@@ -129,6 +162,19 @@ export function SalesClient({ user }: { user: User }) {
             実データ
           </div>
         </div>
+
+        {/* POS 実会計（会計確定でここに加算される） */}
+        {pos.count > 0 && (
+          <section aria-label="POS実会計" style={{ marginBottom: 20 }}>
+            <h2 className="noxa-eyebrow" style={{ fontSize: 11, marginBottom: 12 }}>POS 実会計（伝票→売上）</h2>
+            <div className="grid grid-cols-2 lg:grid-cols-4" style={{ gap: 12 }}>
+              <Kpi label="本日売上" value={yen(pos.today)} accent />
+              <Kpi label="本日会計数" value={`${pos.todayCount} 件`} />
+              <Kpi label="累計売上(POS)" value={yen(pos.total)} />
+              <Kpi label="累計会計数" value={`${pos.count} 件`} />
+            </div>
+          </section>
+        )}
 
         {loading ? (
           <div className="noxa-eyebrow" style={{ padding: '40px 0' }}>読み込み中…</div>
