@@ -15,6 +15,17 @@ interface Sub {
   currentPeriodEnd?: { seconds: number } | null;
 }
 
+const MODULES = [
+  { no: '01', label: 'POS',       tag: 'オーダー / 伝票',     href: '/pos' },
+  { no: '03', label: '席回し',    tag: 'フロアマップ',        href: '/seating' },
+  { no: '04', label: '勤怠',      tag: '打刻 / シフト',       href: '/attendance' },
+  { no: '05', label: '給与',      tag: '明細 / 月締め',       href: '/payroll' },
+  { no: '06', label: '初回案内',  tag: '新人 OJT',            href: '/first-visit' },
+  { no: '07', label: '送迎',      tag: '配車ボード',          href: '/transport' },
+  { no: '08', label: '在庫',      tag: '発注 / ボトル',       href: '/inventory' },
+  { no: '09', label: '名刺発注',  tag: 'オリシャン',          href: '/business-card' },
+];
+
 const SERVICES = [
   {
     name: 'yorulog',
@@ -210,11 +221,67 @@ function AccountDashboard({ user }: { user: User }) {
         </div>
       </div>
 
+      {/* 業務モジュール（夜の街の OS） */}
+      <div style={{ marginBottom: 16 }}>
+        <div className="flex items-baseline justify-between" style={{ marginBottom: 14 }}>
+          <h2 className="noxa-h2" style={{ margin: 0 }}>
+            業務モジュール
+          </h2>
+          <span style={{ color: 'var(--noxa-text-muted)', fontSize: 13 }}>
+            夜の街の OS
+          </span>
+        </div>
+      </div>
+      <div
+        className="grid gap-3"
+        style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', marginBottom: 36 }}
+      >
+        {MODULES.map((m) => (
+          <Link
+            key={m.href}
+            href={m.href}
+            className="flex flex-col"
+            style={{
+              background: 'var(--noxa-surface-card)',
+              border: '1px solid var(--noxa-border)',
+              borderRadius: 14,
+              padding: 18,
+              gap: 8,
+              textDecoration: 'none',
+            }}
+          >
+            <span
+              className="noxa-mono"
+              style={{ fontSize: 11, color: 'var(--noxa-accent-primary-ink)', letterSpacing: '0.1em' }}
+            >
+              № {m.no}
+            </span>
+            <span
+              style={{
+                fontFamily: 'var(--noxa-font-display-jp)',
+                fontSize: 18,
+                fontWeight: 500,
+                color: 'var(--noxa-text-primary)',
+              }}
+            >
+              {m.label}
+            </span>
+            <span style={{ color: 'var(--noxa-text-muted)', fontSize: 12 }}>{m.tag}</span>
+            <span
+              className="noxa-mono"
+              style={{ color: 'var(--noxa-accent-primary-ink)', fontSize: 12, marginTop: 'auto' }}
+            >
+              開く →
+            </span>
+          </Link>
+        ))}
+      </div>
+
       {/* Services */}
       <div style={{ marginBottom: 16 }}>
         <div className="flex items-baseline justify-between" style={{ marginBottom: 14 }}>
           <h2 className="noxa-h2" style={{ margin: 0 }}>
-            サービス
+            連携サービス
           </h2>
           <span style={{ color: 'var(--noxa-text-muted)', fontSize: 13 }}>
             {SERVICES.filter((s) => !s.soon).length} つ利用可能

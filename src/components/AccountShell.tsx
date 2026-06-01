@@ -13,10 +13,22 @@ const NAV_ACCOUNT: { label: string; href: string; icon: string }[] = [
   { label: '退会',           href: '/account/delete',       icon: '◇' },
 ];
 
+// 夜の街の OS — 業務モジュール（ガワ実装。OS のメインアプリ群）
+const NAV_MODULES: { label: string; href: string; no: string }[] = [
+  { label: 'POS',       href: '/pos',           no: '01' },
+  { label: '席回し',    href: '/seating',       no: '03' },
+  { label: '勤怠',      href: '/attendance',    no: '04' },
+  { label: '給与',      href: '/payroll',       no: '05' },
+  { label: '初回案内',  href: '/first-visit',   no: '06' },
+  { label: '送迎',      href: '/transport',     no: '07' },
+  { label: '在庫',      href: '/inventory',     no: '08' },
+  { label: '名刺発注',  href: '/business-card', no: '09' },
+];
+
 const NAV_SERVICES: { label: string; href: string; tint: string; soon?: boolean }[] = [
+  { label: 'community', href: '/community',                   tint: '#C4384A', soon: true },
   { label: 'yorulog',   href: 'https://yorulog.vercel.app',   tint: '#8B5CF6' },
   { label: 'nomishugy', href: 'https://nomishugy.vercel.app', tint: '#B89CFB' },
-  { label: 'community', href: '/community',                   tint: '#C4384A', soon: true },
 ];
 
 export function AccountShell({ user, children }: { user: User; children: React.ReactNode }) {
@@ -70,6 +82,51 @@ export function AccountShell({ user, children }: { user: User; children: React.R
               >
                 <span style={{ width: 14, color: active ? 'var(--noxa-accent-primary-ink)' : 'var(--noxa-text-faint)' }}>
                   {it.icon}
+                </span>
+                <span>{it.label}</span>
+              </Link>
+            );
+          })}
+        </div>
+
+        <div className="flex flex-col" style={{ gap: 2 }}>
+          <div
+            className="noxa-mono px-2.5 pb-2"
+            style={{
+              fontSize: 10,
+              color: 'var(--noxa-text-faint)',
+              letterSpacing: '0.1em',
+              textTransform: 'uppercase',
+            }}
+          >
+            業務モジュール
+          </div>
+          {NAV_MODULES.map((it) => {
+            const active = pathname === it.href;
+            return (
+              <Link
+                key={it.href}
+                href={it.href}
+                style={{
+                  display: 'flex', alignItems: 'center', gap: 10,
+                  padding: '8px 10px',
+                  borderRadius: 8,
+                  background: active ? 'rgba(139, 92, 246, 0.12)' : 'transparent',
+                  color: active ? 'var(--noxa-text-primary)' : 'var(--noxa-text-muted)',
+                  fontSize: 13,
+                  fontWeight: active ? 500 : 400,
+                  textDecoration: 'none',
+                }}
+              >
+                <span
+                  className="noxa-mono"
+                  style={{
+                    width: 18,
+                    fontSize: 10,
+                    color: active ? 'var(--noxa-accent-primary-ink)' : 'var(--noxa-text-faint)',
+                  }}
+                >
+                  {it.no}
                 </span>
                 <span>{it.label}</span>
               </Link>

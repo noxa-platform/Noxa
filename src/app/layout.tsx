@@ -12,7 +12,7 @@ export const viewport: Viewport = {
 };
 
 export const metadata: Metadata = {
-  metadataBase: new URL('https://noxa-delta.vercel.app'),
+  metadataBase: new URL('https://noxa.egshugy.com'),
   title: {
     default: 'Noxa — 夜の街のための統合プラットフォーム',
     template: '%s · Noxa',
