@@ -1,0 +1,7 @@
+node_modules/
+# tsc 出力先（src/lib/ は混同しないようルート直下のみ）
+/lib/
+*.log
+.env
+.env.local
+.runtimeconfig.json

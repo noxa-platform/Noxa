@@ -1,0 +1,678 @@
+// ============================================================================
+// Firestore Security Rules — v2 schema (minami-bar-guide 全面リネーム後)
+// ============================================================================
+// 設計書: Obsidian/web-knowledge/20_cases/firebase-rename-v2-design-2026-05-22.md
+//
+// 旧 firestore.rules を全面書き換え。Phase 1 のステージング検証 + 本番反映で使用する。
+// 本番反映時は: cp firestore.rules.v2 firestore.rules && firebase deploy --only firestore:rules
+//
+// 同期: yorulog / nomishugy 両リポでこのファイルを共有（rules はプロジェクト単位）。
+// ============================================================================
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ========================================
+    // 共通ヘルパー
+    // ========================================
+
+    function isAuth() {
+      return request.auth != null;
+    }
+
+    function isSelf(uid) {
+      return isAuth() && request.auth.uid == uid;
+    }
+
+    function isAdmin() {
+      return isAuth()
+        && exists(/databases/$(database)/documents/account_users/$(request.auth.uid))
+        && get(/databases/$(database)/documents/account_users/$(request.auth.uid)).data.platformRole == 'admin';
+    }
+
+    function isShopMember(shopId) {
+      return isAuth()
+        && exists(/databases/$(database)/documents/shop_shops/$(shopId)/members/$(request.auth.uid));
+    }
+
+    function shopMemberRole(shopId) {
+      return get(/databases/$(database)/documents/shop_shops/$(shopId)/members/$(request.auth.uid)).data.role;
+    }
+
+    function isShopOwnerLike(shopId) {
+      return isShopMember(shopId)
+        && shopMemberRole(shopId) in ['owner', 'manager'];
+    }
+
+    function isShopMemberWithSalesEdit(shopId) {
+      return isShopMember(shopId)
+        && shopMemberRole(shopId) in ['owner', 'manager', 'accounting'];
+    }
+
+    // ========================================
+    // account ドメイン
+    // ========================================
+
+    match /account_users/{uid} {
+      allow read: if true; // 公開プロフィール（displayName, handle, avatar 等）
+      allow create: if isSelf(uid);
+      // platformRole は server-side のみで変更可
+      allow update: if isAdmin() || (isSelf(uid)
+        && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['platformRole']));
+      allow delete: if isAdmin();
+
+      // 所属 shop 一覧の逆引きインデックス (Cloud Function で sync)
+      // クライアントから本人のみ read 可、書込は Cloud Function (admin SDK) 経由
+      match /memberships/{shopId} {
+        allow read: if isSelf(uid);
+        allow write: if false;
+      }
+    }
+
+    match /account_subscriptions/{uid} {
+      allow read: if isSelf(uid) || isAdmin();
+      allow write: if false; // API Route (Admin SDK) のみ
+    }
+
+    match /account_iap_transactions/{txnId} {
+      allow read, write: if false; // API のみ
+    }
+
+    match /account_google_tokens/{uid} {
+      allow read, write: if isSelf(uid);
+    }
+
+    match /account_premium/{uid} {
+      allow read: if isAuth();
+      allow write: if isSelf(uid);
+    }
+
+    match /account_app_settings/{uid} {
+      allow read, write: if isSelf(uid);
+    }
+
+    match /account_follows/{docId} {
+      allow read: if isAuth();
+      allow create: if isAuth() && request.resource.data.fromUid == request.auth.uid;
+      allow update: if false;
+      allow delete: if isAuth() && resource.data.fromUid == request.auth.uid;
+    }
+
+    // ========================================
+    // shop ドメイン
+    // ========================================
+    //
+    // 2026-05-25 改訂: 公開情報と内部運営を別 doc に分離。
+    //   - shop_shops          : 内部運営 (売上目標 / カスタムタグ / メンバー設定)
+    //                            members のみ read 可能
+    //   - shop_public_profiles: 公開プロフィール (name / area / gallery / hours)
+    //                            誰でも read 可能（nomishugy のバー一覧）
+    // Cloud Function trigger で shop_shops 書込時に shop_public_profiles を sync
+
+    match /shop_public_profiles/{shopId} {
+      allow read: if true;
+      // 書込は Cloud Function (admin SDK) または shop owner 経由のみ
+      allow create, update: if isAuth() && (
+        isShopOwnerLike(shopId)
+        // UGC バー作成: ownerUid が null で作成 OK (nomishugy)
+        || (request.resource.data.ownerUid == null
+            && request.resource.data.source == 'ugc'
+            && request.resource.data.keys().hasAll(['name', 'source']))
+      );
+      allow delete: if isAdmin();
+    }
+
+    match /shop_shops/{shopId} {
+      // 内部運営: members のみ read 可能 (集客側は shop_public_profiles を参照)
+      allow read: if isShopMember(shopId) || isAdmin();
+      allow create: if isAuth() && (
+        // 通常: ownerUid が自分
+        request.resource.data.ownerUid == request.auth.uid
+        // UGC: ownerUid null + source='ugc' (誰でも投稿可、後でクレーム)
+        || (request.resource.data.ownerUid == null
+            && request.resource.data.source == 'ugc')
+      );
+      allow update: if isAdmin() || (isAuth()
+        && resource.data.ownerUid == request.auth.uid
+        && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['ownerUid', 'organizationId', 'source']));
+      allow delete: if isAdmin();
+
+      match /members/{uid} {
+        allow read: if isShopMember(shopId);
+        allow write: if isShopOwnerLike(shopId) || isSelf(uid);
+      }
+
+      match /sales/{saleId} {
+        allow read: if isShopMember(shopId);
+        allow create: if isShopMemberWithSalesEdit(shopId)
+          || (isShopMember(shopId) && request.resource.data.castUid == request.auth.uid);
+        allow update: if isShopMemberWithSalesEdit(shopId)
+          || (isShopMember(shopId) && resource.data.castUid == request.auth.uid);
+        allow delete: if isShopOwnerLike(shopId);
+      }
+
+      match /customers/{cid} {
+        allow read: if isShopMember(shopId);
+        allow write: if isShopMember(shopId);
+
+        match /logs/{lid} {
+          allow read, write: if isShopMember(shopId);
+        }
+        match /gifts/{gid} {
+          allow read, write: if isShopMember(shopId);
+        }
+      }
+
+      match /shifts/{sid} {
+        allow read: if isShopMember(shopId);
+        allow write: if isShopOwnerLike(shopId)
+          || (isShopMember(shopId) && request.resource.data.castUserId == request.auth.uid);
+      }
+
+      match /goals/{gid} {
+        allow read: if isShopMember(shopId);
+        allow write: if isShopOwnerLike(shopId);
+      }
+
+      match /daily_close/{date} {
+        allow read: if isShopMember(shopId);
+        allow write: if isShopOwnerLike(shopId);
+      }
+
+      match /daily_close_disputes/{disputeId} {
+        allow read: if isShopMember(shopId);
+        allow create: if isShopMember(shopId)
+          && request.resource.data.castUid == request.auth.uid;
+        allow update: if isShopOwnerLike(shopId);
+        allow delete: if false;
+      }
+
+      match /ai_threads/{tid} {
+        // API Route (Admin SDK) のみ書込み許可
+        allow read, write: if false;
+      }
+
+      match /payrolls/{uid}/items/{periodId} {
+        allow read: if isSelf(uid) || isShopOwnerLike(shopId);
+        allow write: if isShopOwnerLike(shopId);
+      }
+
+      match /invites/{code} {
+        allow read: if isAuth();
+        allow create: if isShopOwnerLike(shopId);
+        allow update: if isAuth()
+          && (resource.data.createdBy == request.auth.uid
+              || !resource.data.keys().hasAny(['usedBy']));
+        allow delete: if isShopOwnerLike(shopId);
+      }
+
+      match /analytics/{docId} {
+        allow read: if isShopMember(shopId);
+        allow create: if isAuth()
+          && request.resource.data.keys().hasOnly(['barId', 'date', 'pageViews', 'uniqueVisitors', 'uniqueUids', 'referrers', 'updatedAt', 'createdAt']);
+        allow update: if isAuth()
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['pageViews', 'uniqueVisitors', 'uniqueUids', 'referrers', 'updatedAt']);
+        allow delete: if false;
+      }
+
+      match /terminals/{terminalId} {
+        // Phase 3 で使用。当面 read/write 不可
+        allow read, write: if false;
+      }
+
+      // POS 系（Phase 2）
+      match /pos_config/{docId} {
+        allow read: if isShopMember(shopId);
+        allow write: if isShopOwnerLike(shopId);
+      }
+      match /menus/{menuId} {
+        allow read: if isShopMember(shopId);
+        allow write: if isShopOwnerLike(shopId);
+      }
+      match /tables/{tableId} {
+        allow read: if isShopMember(shopId);
+        allow write: if isShopOwnerLike(shopId);
+      }
+      match /sessions/{sessionId} {
+        allow read: if isShopMember(shopId);
+        allow write: if isShopMember(shopId);
+        match /orders/{orderId} {
+          allow read, write: if isShopMember(shopId);
+        }
+      }
+      match /payments/{paymentId} {
+        allow read: if isShopMember(shopId);
+        allow write: if isShopMemberWithSalesEdit(shopId);
+      }
+      match /tabs/{tabId} {
+        allow read: if isShopMember(shopId);
+        allow write: if isShopMemberWithSalesEdit(shopId);
+      }
+      match /payroll_rules/{ruleId} {
+        allow read: if isShopMember(shopId);
+        allow write: if isShopOwnerLike(shopId);
+      }
+
+      // 席回し（フロア管理）。NOXA Seating モジュール。
+      // 共有端末（accounting メンバー）も含め shop メンバーが運用書込み可能。
+      match /seating_casts/{castId} {
+        allow read: if isShopMember(shopId);
+        allow write: if isShopMember(shopId);
+      }
+      match /seating_tables/{tableId} {
+        allow read: if isShopMember(shopId);
+        allow write: if isShopMember(shopId);
+      }
+      match /seating_queue/{itemId} {
+        allow read: if isShopMember(shopId);
+        allow write: if isShopMember(shopId);
+      }
+      match /seating_meta/{docId} {
+        allow read: if isShopMember(shopId);
+        allow write: if isShopMember(shopId);
+      }
+    }
+
+    // ========================================
+    // personal ドメイン (MyDeck)
+    // ========================================
+
+    match /personal_customers/{uid}/items/{cid} {
+      allow read, write: if isSelf(uid);
+      match /logs/{lid} { allow read, write: if isSelf(uid); }
+      match /gifts/{gid} { allow read, write: if isSelf(uid); }
+    }
+
+    match /personal_ai_threads/{uid}/items/{tid} {
+      // API Route 経由のみ
+      allow read, write: if false;
+    }
+
+    match /personal_templates/{uid}/items/{tid} {
+      allow read, write: if isSelf(uid);
+    }
+
+    match /personal_goals/{uid}/items/{gid} {
+      allow read, write: if isSelf(uid);
+    }
+
+    match /personal_self_styles/{uid} {
+      allow read, write: if isSelf(uid);
+    }
+
+    match /personal_sales/{uid}/items/{sid} {
+      allow read, write: if isSelf(uid);
+    }
+
+    match /personal_reminders/{uid}/items/{rid} {
+      allow read, write: if isSelf(uid);
+    }
+
+    // ========================================
+    // audit ドメイン
+    // ========================================
+
+    match /audit_logs/{logId} {
+      // Admin SDK 経由のみ write 可能 (writeAuditLog helper)。client から直接書込不可。
+      allow read: if isAdmin();
+      allow write: if false;
+    }
+
+    match /audit_reports/{reportId} {
+      allow read: if isAdmin();
+      allow create: if isAuth();
+      allow update: if isAdmin();
+      allow delete: if false;
+    }
+
+    match /audit_contact_messages/{docId} {
+      allow read: if isAdmin();
+      allow create: if request.resource.data.keys().hasOnly(['name', 'email', 'category', 'message', 'userAgent', 'createdAt'])
+                    && request.resource.data.email is string
+                    && request.resource.data.email.size() > 3
+                    && request.resource.data.email.size() < 254
+                    && request.resource.data.email.matches('.*@.*\\..*')
+                    && request.resource.data.message is string
+                    && request.resource.data.message.size() > 0
+                    && request.resource.data.message.size() <= 2000;
+      allow update, delete: if isAdmin();
+    }
+
+    match /audit_acquisition_events/{eventId} {
+      allow create: if (isAuth() && request.resource.data.uid == request.auth.uid)
+                    || (isAuth() && !('uid' in request.resource.data));
+      allow read: if isAdmin()
+                  || (isAuth() && 'uid' in resource.data && resource.data.uid == request.auth.uid);
+      allow update, delete: if false;
+    }
+
+    match /audit_waitlist_signups/{docId} {
+      allow create: if request.resource.data.keys().hasOnly([
+                      'email','name','products','source','acquisition','timestamp',
+                      'storeName','storeArea','representative','referrer'
+                    ])
+                    && request.resource.data.email is string
+                    && request.resource.data.email.size() > 3
+                    && request.resource.data.email.size() < 254
+                    && request.resource.data.email.matches('.*@.*\\..*');
+      allow read, update, delete: if isAdmin();
+    }
+
+    match /audit_crowdfunding_supporters/{docId} {
+      allow create: if request.resource.data.email is string
+                    && request.resource.data.email.matches('.*@.*\\..*');
+      allow read, update, delete: if isAdmin();
+    }
+
+    match /audit_testimonials/{tid} {
+      allow create: if isAuth()
+        && request.resource.data.uid == request.auth.uid
+        && request.resource.data.quote is string
+        && request.resource.data.quote.size() >= 5
+        && request.resource.data.quote.size() <= 500;
+      allow read: if isAuth() && resource.data.uid == request.auth.uid;
+      allow update, delete: if isAdmin();
+    }
+
+    // ========================================
+    // notification ドメイン
+    // ========================================
+
+    match /notification_inbox/{docId} {
+      allow read: if isAuth() && resource.data.userId == request.auth.uid;
+      allow create: if isAuth();
+      allow update: if isAuth() && resource.data.userId == request.auth.uid;
+      allow delete: if isAuth() && resource.data.userId == request.auth.uid;
+    }
+
+    match /notification_push_tokens/{uid} {
+      allow read, write: if isSelf(uid);
+    }
+
+    match /notification_push_failures/{date} {
+      allow read, write: if false;
+      match /{subcol=**} { allow read, write: if false; }
+    }
+
+    match /notification_push_stats/{ymd} {
+      allow read: if isAdmin();
+      allow write: if false;
+    }
+
+    // ========================================
+    // bar ドメイン (集客)
+    // ========================================
+
+    match /bar_reviews/{docId} {
+      allow read: if true;
+      allow create: if isAuth() && request.resource.data.userId == request.auth.uid;
+      allow update: if isAuth() && (resource.data.userId == request.auth.uid || isShopOwnerLike(resource.data.barId));
+      allow delete: if isAdmin();
+    }
+
+    match /bar_favorites/{docId} {
+      allow read: if isAuth();
+      allow create, update: if isAuth() && request.resource.data.uid == request.auth.uid;
+      allow delete: if isAuth() && resource.data.uid == request.auth.uid;
+    }
+
+    match /bar_checkins/{docId} {
+      allow read: if true;
+      allow create: if isAuth() && request.resource.data.userId == request.auth.uid;
+      allow update: if isAuth() && resource.data.userId == request.auth.uid;
+      allow delete: if false;
+    }
+
+    match /bar_events/{docId} {
+      allow read: if true;
+      allow create: if isAuth() && (request.resource.data.ownerUid == request.auth.uid || isShopOwnerLike(request.resource.data.barId));
+      allow update: if isAuth() && (resource.data.ownerUid == request.auth.uid || isShopOwnerLike(resource.data.barId));
+      allow delete: if isAuth() && (resource.data.ownerUid == request.auth.uid || isShopOwnerLike(resource.data.barId));
+    }
+
+    match /bar_coupons/{docId} {
+      allow read: if true;
+      allow create: if isAuth() && (request.resource.data.ownerUid == request.auth.uid || isShopOwnerLike(request.resource.data.barId));
+      allow update: if isAuth() && (resource.data.ownerUid == request.auth.uid || isShopOwnerLike(resource.data.barId));
+      allow delete: if isAuth() && (resource.data.ownerUid == request.auth.uid || isShopOwnerLike(resource.data.barId));
+    }
+
+    match /bar_reservations/{docId} {
+      allow read: if isAuth();
+      allow create: if isAuth() && request.resource.data.userId == request.auth.uid;
+      allow update: if isAuth() && (resource.data.userId == request.auth.uid || isShopOwnerLike(resource.data.barId));
+      allow delete: if false;
+    }
+
+    match /bar_banners/{docId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    match /bar_tips/{docId} {
+      allow read: if isAuth();
+      allow create: if isAuth()
+        && request.resource.data.fromUid == request.auth.uid
+        && request.resource.data.amount is int
+        && request.resource.data.amount > 0;
+      allow update, delete: if false;
+    }
+
+    match /bar_journal/{docId} {
+      allow read: if true;
+      allow create: if isAdmin() || (isAuth() && request.resource.data.authorUid == request.auth.uid);
+      allow update: if isAdmin() || (isAuth() && resource.data.authorUid == request.auth.uid);
+      allow delete: if isAdmin() || (isAuth() && resource.data.authorUid == request.auth.uid);
+    }
+
+    match /bar_boosts/{docId} {
+      allow read: if true;
+      allow create: if isAuth() && (request.resource.data.ownerUid == request.auth.uid || isShopOwnerLike(request.resource.data.barId));
+      allow update: if isAuth() && (resource.data.ownerUid == request.auth.uid || isShopOwnerLike(resource.data.barId));
+      allow delete: if false;
+    }
+
+    // bar_spotjobs (公認バーテン進化形 = 双方向スポット労働)
+    match /bar_spotjobs/{docId} {
+      allow read: if true;
+      allow create: if isAuth() && (request.resource.data.ownerUid == request.auth.uid || isShopOwnerLike(request.resource.data.shopId));
+      allow update: if isAuth() && (resource.data.ownerUid == request.auth.uid || isShopOwnerLike(resource.data.shopId));
+      allow delete: if isAdmin();
+    }
+
+    match /bar_spotjobs_applications/{docId} {
+      allow read: if isAuth();
+      allow create: if isAuth() && request.resource.data.applicantUid == request.auth.uid;
+      allow update: if isAuth() && resource.data.applicantUid == request.auth.uid;
+      allow delete: if false;
+    }
+
+    match /bar_spotjobs_ratings/{docId} {
+      allow read: if isAuth();
+      allow create: if isAuth() && request.resource.data.raterUid == request.auth.uid;
+      allow update, delete: if false;
+    }
+
+    match /bar_spotjobs_certifications/{docId} {
+      allow read: if true;
+      allow create: if isAuth() && request.resource.data.uid == request.auth.uid;
+      allow update: if isAuth() && (isAdmin() || (resource.data.uid == request.auth.uid && request.resource.data.uid == request.auth.uid));
+      allow delete: if isAdmin();
+    }
+
+    match /bar_spotjobs_profiles/{uid} {
+      allow read: if true;
+      allow create, update: if isSelf(uid);
+      allow delete: if false;
+    }
+
+    match /bar_spotjobs_nominations/{docId} {
+      allow read: if isAuth();
+      allow create: if isAuth()
+        && (isShopOwnerLike(request.resource.data.shopId) || request.resource.data.requesterUid == request.auth.uid);
+      allow update: if isAuth() && (
+        resource.data.bartenderUid == request.auth.uid
+        || isShopOwnerLike(resource.data.shopId)
+      );
+      allow delete: if false;
+    }
+
+    // ========================================
+    // recruit ドメイン
+    // ========================================
+
+    match /recruit_jobs/{docId} {
+      allow read: if true;
+      allow create: if isAuth() && (request.resource.data.ownerUid == request.auth.uid || isShopOwnerLike(request.resource.data.shopId));
+      allow update: if isAuth() && (resource.data.ownerUid == request.auth.uid || isShopOwnerLike(resource.data.shopId));
+      allow delete: if isAuth() && (resource.data.ownerUid == request.auth.uid || isShopOwnerLike(resource.data.shopId));
+    }
+
+    match /recruit_applications/{docId} {
+      allow read: if isAuth();
+      allow create: if isAuth() && request.resource.data.applicantUid == request.auth.uid;
+      allow update: if isAuth() && resource.data.applicantUid == request.auth.uid;
+      allow delete: if false;
+    }
+
+    // ========================================
+    // match ドメイン (旧 sakunomi)
+    // ========================================
+
+    match /match_recruitments/{docId} {
+      allow read: if true;
+      allow create: if isAuth() && request.resource.data.creatorUserId == request.auth.uid;
+      allow update: if isAuth() && resource.data.creatorUserId == request.auth.uid;
+      allow delete: if false;
+    }
+
+    match /match_swipes/{docId} {
+      allow read: if isAuth();
+      allow create: if isAuth() && request.resource.data.fromUserId == request.auth.uid;
+      allow delete: if false;
+    }
+
+    match /match_matches/{docId} {
+      allow read: if isAuth();
+      allow create: if isAuth()
+        && request.resource.data.participantUserIds is list
+        && request.auth.uid in request.resource.data.participantUserIds;
+      allow update: if isAuth() && request.auth.uid in resource.data.participantUserIds;
+      allow delete: if false;
+    }
+
+    match /match_logs/{docId} {
+      allow read: if isAuth();
+      allow create: if isAuth();
+      allow update, delete: if false;
+    }
+
+    match /match_profiles/{uid} {
+      allow read: if isAuth();
+      allow write: if isSelf(uid);
+    }
+
+    match /match_quick_messages/{docId} {
+      allow read: if isAuth();
+      allow create: if isAuth() && request.resource.data.senderId == request.auth.uid;
+      allow delete: if false;
+    }
+
+    match /match_ratings/{docId} {
+      allow read: if isAuth();
+      allow create: if isAuth() && request.resource.data.fromUserId == request.auth.uid;
+      allow update, delete: if false;
+    }
+
+    match /match_chats/{matchId}/messages/{messageId} {
+      allow read: if isAuth()
+        && request.auth.uid in get(/databases/$(database)/documents/match_matches/$(matchId)).data.participantUserIds;
+      allow create: if isAuth()
+        && request.resource.data.senderId == request.auth.uid
+        && request.auth.uid in get(/databases/$(database)/documents/match_matches/$(matchId)).data.participantUserIds;
+      allow update: if isAuth()
+        && resource.data.senderId == request.auth.uid;
+      allow delete: if false;
+    }
+
+    // ========================================
+    // reward ドメイン
+    // ========================================
+
+    match /reward_missions/{uid}/items/{missionId} {
+      allow read: if isSelf(uid);
+      allow write: if false; // API のみ
+    }
+
+    match /reward_referral_codes/{code} {
+      allow read, write: if false; // API のみ
+    }
+
+    match /reward_referral_owners/{uid} {
+      allow read: if isSelf(uid);
+      allow write: if false;
+    }
+
+    match /reward_grants/{uid}/items/{grantId} {
+      allow read: if isSelf(uid);
+      allow write: if false;
+    }
+
+    match /reward_campaigns/{campaignId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    // ========================================
+    // master ドメイン (運営マスター)
+    // ========================================
+
+    match /master_business_types/{templateId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+    match /master_areas/{areaId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+    match /master_districts/{districtId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+    match /master_ngwords/{wordId} {
+      allow read: if isAuth();
+      allow write: if isAdmin();
+    }
+    match /master_compliance_rules/{ruleId} {
+      allow read: if isAuth();
+      allow write: if isAdmin();
+    }
+    match /master_ai_knowledge/{docId} {
+      allow read: if false; // API のみ
+      allow write: if false;
+      match /{subcol=**} { allow read, write: if false; }
+    }
+
+    // ========================================
+    // noxa ドメイン (Phase 1 で別途実装、当面 read/write 不可)
+    // ========================================
+
+    match /noxa_users/{uid} { allow read, write: if false; }
+    match /noxa_boards/{boardId} { allow read, write: if false; }
+    match /noxa_posts/{postId} { allow read, write: if false; }
+    match /noxa_comments/{commentId} { allow read, write: if false; }
+    match /noxa_likes/{likeId} { allow read, write: if false; }
+    match /noxa_reports/{reportId} { allow read, write: if false; }
+    match /noxa_invites/{inviteId} { allow read, write: if false; }
+    match /noxa_user_settings/{uid} { allow read, write: if false; }
+
+    // ========================================
+    // global_settings (旧 app_settings)
+    // ========================================
+
+    match /global_settings/{key} {
+      allow read: if true;
+      allow create, update, delete: if isAdmin();
+    }
+  }
+}

@@ -1,0 +1,28 @@
+{
+  "name": "noxa-functions",
+  "version": "1.0.0",
+  "private": true,
+  "description": "NOXA Platform Cloud Functions（noxa-platform 共有）。認証交換・店舗デバイス認証・通知配信・売上同期・課金連携など。NOXA リポが正本（旧 yorulog/functions から移設）。",
+  "engines": {
+    "node": "22"
+  },
+  "main": "lib/index.js",
+  "scripts": {
+    "build": "tsc",
+    "build:watch": "tsc --watch",
+    "lint": "eslint --ext .ts src",
+    "serve": "npm run build && firebase emulators:start --only functions,firestore",
+    "shell": "npm run build && firebase functions:shell",
+    "start": "npm run shell",
+    "deploy": "npm run build && firebase deploy --only functions",
+    "logs": "firebase functions:log"
+  },
+  "dependencies": {
+    "firebase-admin": "^13.0.0",
+    "firebase-functions": "^6.1.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "typescript": "^5.5.4"
+  }
+}
