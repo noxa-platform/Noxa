@@ -3,27 +3,39 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import type { User } from 'firebase/auth';
 import { signOut } from '@/lib/auth';
+import { useShopContext } from '@/lib/useShopContext';
 
 const NAV_ACCOUNT: { label: string; href: string; icon: string }[] = [
   { label: 'ダッシュボード', href: '/account',              icon: '◇' },
+  { label: '通知センター',   href: '/notifications',        icon: '◆' },
   { label: 'プロフィール',   href: '/account/profile',      icon: '◇' },
-  { label: '通知設定',       href: '/account/notifications', icon: '◇' },
   { label: 'プラン',         href: '/account/subscription', icon: '◈' },
   { label: 'クレジット',     href: '/account/credits',      icon: '◆' },
   { label: '退会',           href: '/account/delete',       icon: '◇' },
 ];
 
-// 夜の街の OS — 業務モジュール（ガワ実装。OS のメインアプリ群）
-const NAV_MODULES: { label: string; href: string; no: string }[] = [
-  { label: 'POS',       href: '/pos',           no: '01' },
-  { label: '売上管理',  href: '/sales',         no: '02' },
-  { label: '席回し',    href: '/seating',       no: '03' },
-  { label: '勤怠',      href: '/attendance',    no: '04' },
-  { label: '給与',      href: '/payroll',       no: '05' },
-  { label: '初回案内',  href: '/first-visit',   no: '06' },
-  { label: '送迎',      href: '/transport',     no: '07' },
-  { label: '在庫',      href: '/inventory',     no: '08' },
-  { label: '名刺発注',  href: '/business-card', no: '09' },
+// 個人機能（常時表示）。個人で登録した人に店舗 UI は出さない。
+const NAV_PERSONAL: { label: string; href: string }[] = [
+  { label: '売上管理',  href: '/sales' },
+  { label: '顧客台帳',  href: '/customers' },
+  { label: '名刺発注',  href: '/business-card' },
+  { label: 'スケジュール', href: '/schedule' },
+  { label: '目標',      href: '/goals' },
+];
+
+// 店舗運営（店舗オーナー / 店舗ログイン時のみ）。
+const NAV_STORE: { label: string; href: string }[] = [
+  { label: 'POS',         href: '/pos' },
+  { label: '席回し',      href: '/seating' },
+  { label: '勤怠',        href: '/attendance' },
+  { label: '給与',        href: '/payroll' },
+  { label: '初回案内',    href: '/first-visit' },
+  { label: '送迎',        href: '/transport' },
+  { label: '在庫',        href: '/inventory' },
+  { label: '体験入店',    href: '/trial' },
+  { label: '予約・VIP',   href: '/reservation' },
+  { label: '売掛管理',    href: '/unpaid' },
+  { label: 'リスク客共有', href: '/risk' },
 ];
 
 const NAV_SERVICES: { label: string; href: string; tint: string; soon?: boolean }[] = [
@@ -33,6 +45,7 @@ const NAV_SERVICES: { label: string; href: string; tint: string; soon?: boolean 
 
 export function AccountShell({ user, children }: { user: User; children: React.ReactNode }) {
   const pathname = usePathname();
+  const { hasShop } = useShopContext(user.uid);
 
   return (
     <div className="flex min-h-screen" style={{ background: 'var(--noxa-bg-base)' }}>
@@ -89,50 +102,44 @@ export function AccountShell({ user, children }: { user: User; children: React.R
           })}
         </div>
 
+        {/* 個人機能（常時） */}
         <div className="flex flex-col" style={{ gap: 2 }}>
-          <div
-            className="noxa-mono px-2.5 pb-2"
-            style={{
-              fontSize: 10,
-              color: 'var(--noxa-text-faint)',
-              letterSpacing: '0.1em',
-              textTransform: 'uppercase',
-            }}
-          >
-            業務モジュール
+          <div className="noxa-mono px-2.5 pb-2" style={{ fontSize: 10, color: 'var(--noxa-text-faint)', letterSpacing: '0.1em', textTransform: 'uppercase' }}>
+            個人機能
           </div>
-          {NAV_MODULES.map((it) => {
+          {NAV_PERSONAL.map((it) => {
             const active = pathname === it.href;
             return (
-              <Link
-                key={it.href}
-                href={it.href}
-                style={{
-                  display: 'flex', alignItems: 'center', gap: 10,
-                  padding: '8px 10px',
-                  borderRadius: 8,
-                  background: active ? 'rgba(139, 92, 246, 0.12)' : 'transparent',
-                  color: active ? 'var(--noxa-text-primary)' : 'var(--noxa-text-muted)',
-                  fontSize: 13,
-                  fontWeight: active ? 500 : 400,
-                  textDecoration: 'none',
-                }}
-              >
-                <span
-                  className="noxa-mono"
-                  style={{
-                    width: 18,
-                    fontSize: 10,
-                    color: active ? 'var(--noxa-accent-primary-ink)' : 'var(--noxa-text-faint)',
-                  }}
-                >
-                  {it.no}
-                </span>
+              <Link key={it.href} href={it.href} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 10px', borderRadius: 8, background: active ? 'rgba(139, 92, 246, 0.12)' : 'transparent', color: active ? 'var(--noxa-text-primary)' : 'var(--noxa-text-muted)', fontSize: 13, fontWeight: active ? 500 : 400, textDecoration: 'none' }}>
+                <span style={{ width: 6, height: 6, borderRadius: 3, background: active ? 'var(--noxa-accent-primary-ink)' : 'var(--noxa-text-faint)' }} />
                 <span>{it.label}</span>
               </Link>
             );
           })}
         </div>
+
+        {/* 店舗運営（店舗オーナー時のみ） */}
+        {hasShop ? (
+          <div className="flex flex-col" style={{ gap: 2 }}>
+            <div className="noxa-mono px-2.5 pb-2" style={{ fontSize: 10, color: 'var(--noxa-text-faint)', letterSpacing: '0.1em', textTransform: 'uppercase' }}>
+              店舗運営
+            </div>
+            {NAV_STORE.map((it) => {
+              const active = pathname === it.href;
+              return (
+                <Link key={it.href} href={it.href} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 10px', borderRadius: 8, background: active ? 'rgba(139, 92, 246, 0.12)' : 'transparent', color: active ? 'var(--noxa-text-primary)' : 'var(--noxa-text-muted)', fontSize: 13, fontWeight: active ? 500 : 400, textDecoration: 'none' }}>
+                  <span style={{ width: 6, height: 6, borderRadius: 3, background: active ? '#8B5CF6' : 'var(--noxa-text-faint)' }} />
+                  <span>{it.label}</span>
+                </Link>
+              );
+            })}
+          </div>
+        ) : (
+          <Link href="/store/new" style={{ display: 'block', padding: '12px', borderRadius: 10, border: '1px dashed var(--noxa-border-strong)', color: 'var(--noxa-text-muted)', fontSize: 12, textDecoration: 'none', lineHeight: 1.5 }}>
+            <span style={{ color: 'var(--noxa-accent-primary-ink)', fontWeight: 600 }}>＋ 店舗を登録</span>
+            <br />店舗運営モジュール（POS / 勤怠 / 給与…）が解放されます
+          </Link>
+        )}
 
         <div className="flex flex-col" style={{ gap: 2 }}>
           <div

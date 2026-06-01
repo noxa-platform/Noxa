@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react';
 import { doc, getDoc } from 'firebase/firestore';
 import { AuthGuard } from '@/components/AuthGuard';
 import { AccountShell } from '@/components/AccountShell';
+import { useShopContext } from '@/lib/useShopContext';
 import { db } from '@/lib/firebase/config';
 import type { User } from 'firebase/auth';
 
@@ -15,16 +16,26 @@ interface Sub {
   currentPeriodEnd?: { seconds: number } | null;
 }
 
-const MODULES = [
-  { no: '01', label: 'POS',       tag: 'オーダー / 伝票',     href: '/pos' },
-  { no: '02', label: '売上管理',  tag: 'CRM・AI（実データ）', href: '/sales' },
-  { no: '03', label: '席回し',    tag: 'フロアマップ',        href: '/seating' },
-  { no: '04', label: '勤怠',      tag: '打刻 / シフト',       href: '/attendance' },
-  { no: '05', label: '給与',      tag: '明細 / 月締め',       href: '/payroll' },
-  { no: '06', label: '初回案内',  tag: '新人 OJT',            href: '/first-visit' },
-  { no: '07', label: '送迎',      tag: '配車ボード',          href: '/transport' },
-  { no: '08', label: '在庫',      tag: '発注 / ボトル',       href: '/inventory' },
-  { no: '09', label: '名刺発注',  tag: 'オリシャン',          href: '/business-card' },
+const PERSONAL_MODULES = [
+  { label: '売上管理',    tag: 'CRM・実データ',  href: '/sales', real: true },
+  { label: '顧客台帳',    tag: '個人 CRM / カルテ', href: '/customers', real: true },
+  { label: '名刺発注',    tag: 'オリシャン',     href: '/business-card' },
+  { label: 'スケジュール', tag: '出勤 / イベント / MTG', href: '/schedule' },
+  { label: '目標',        tag: '月目標 / バック',  href: '/goals' },
+];
+
+const STORE_MODULES = [
+  { label: 'POS',         tag: 'オーダー / 伝票', href: '/pos' },
+  { label: '席回し',      tag: 'フロアマップ',    href: '/seating' },
+  { label: '勤怠',        tag: '打刻 / シフト',   href: '/attendance' },
+  { label: '給与',        tag: '明細 / 月締め',   href: '/payroll' },
+  { label: '初回案内',    tag: '新人 OJT',        href: '/first-visit' },
+  { label: '送迎',        tag: '配車ボード',      href: '/transport' },
+  { label: '在庫',        tag: '発注 / ボトル',   href: '/inventory' },
+  { label: '体験入店',    tag: '体験 → 採用',     href: '/trial' },
+  { label: '予約・VIP',   tag: '来店予約',        href: '/reservation' },
+  { label: '売掛管理',    tag: '未収金',          href: '/unpaid' },
+  { label: 'リスク客共有', tag: '出禁 / 要注意',   href: '/risk' },
 ];
 
 const SERVICES = [
@@ -49,6 +60,7 @@ const SERVICES = [
 
 function AccountDashboard({ user }: { user: User }) {
   const [sub, setSub] = useState<Sub | null>(null);
+  const { hasShop } = useShopContext(user.uid);
 
   useEffect(() => {
     (async () => {
@@ -214,61 +226,45 @@ function AccountDashboard({ user }: { user: User }) {
         </div>
       </div>
 
-      {/* 業務モジュール（夜の街の OS） */}
-      <div style={{ marginBottom: 16 }}>
-        <div className="flex items-baseline justify-between" style={{ marginBottom: 14 }}>
-          <h2 className="noxa-h2" style={{ margin: 0 }}>
-            業務モジュール
-          </h2>
-          <span style={{ color: 'var(--noxa-text-muted)', fontSize: 13 }}>
-            夜の街の OS
-          </span>
-        </div>
+      {/* 個人機能 */}
+      <div style={{ marginBottom: 14 }}>
+        <h2 className="noxa-h2" style={{ margin: 0 }}>個人機能</h2>
       </div>
-      <div
-        className="grid gap-3"
-        style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', marginBottom: 36 }}
-      >
-        {MODULES.map((m) => (
-          <Link
-            key={m.href}
-            href={m.href}
-            className="flex flex-col"
-            style={{
-              background: 'var(--noxa-surface-card)',
-              border: '1px solid var(--noxa-border)',
-              borderRadius: 14,
-              padding: 18,
-              gap: 8,
-              textDecoration: 'none',
-            }}
-          >
-            <span
-              className="noxa-mono"
-              style={{ fontSize: 11, color: 'var(--noxa-accent-primary-ink)', letterSpacing: '0.1em' }}
-            >
-              № {m.no}
-            </span>
-            <span
-              style={{
-                fontFamily: 'var(--noxa-font-display-jp)',
-                fontSize: 18,
-                fontWeight: 500,
-                color: 'var(--noxa-text-primary)',
-              }}
-            >
-              {m.label}
-            </span>
+      <div className="grid gap-3" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', marginBottom: 32 }}>
+        {PERSONAL_MODULES.map((m) => (
+          <Link key={m.href} href={m.href} className="flex flex-col" style={{ background: 'var(--noxa-surface-card)', border: `1px solid ${m.real ? 'var(--noxa-border-strong)' : 'var(--noxa-border)'}`, borderRadius: 14, padding: 18, gap: 8, textDecoration: 'none', boxShadow: m.real ? 'var(--noxa-glow-soft)' : 'none' }}>
+            <span style={{ fontFamily: 'var(--noxa-font-display-jp)', fontSize: 18, fontWeight: 500, color: 'var(--noxa-text-primary)' }}>{m.label}</span>
             <span style={{ color: 'var(--noxa-text-muted)', fontSize: 12 }}>{m.tag}</span>
-            <span
-              className="noxa-mono"
-              style={{ color: 'var(--noxa-accent-primary-ink)', fontSize: 12, marginTop: 'auto' }}
-            >
-              開く →
-            </span>
+            <span className="noxa-mono" style={{ color: m.real ? 'var(--noxa-status-success)' : 'var(--noxa-accent-primary-ink)', fontSize: 12, marginTop: 'auto' }}>{m.real ? '実データ · 開く →' : '開く →'}</span>
           </Link>
         ))}
       </div>
+
+      {/* 店舗運営（店舗オーナー時のみ） */}
+      {hasShop ? (
+        <>
+          <div className="flex items-baseline justify-between" style={{ marginBottom: 14 }}>
+            <h2 className="noxa-h2" style={{ margin: 0 }}>店舗運営</h2>
+            <span style={{ color: 'var(--noxa-text-muted)', fontSize: 13 }}>店舗端末では給与/売掛/リスク客は非表示</span>
+          </div>
+          <div className="grid gap-3" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))', marginBottom: 32 }}>
+            {STORE_MODULES.map((m) => (
+              <Link key={m.href} href={m.href} className="flex flex-col" style={{ background: 'var(--noxa-surface-card)', border: '1px solid var(--noxa-border)', borderRadius: 14, padding: 16, gap: 6, textDecoration: 'none' }}>
+                <span style={{ fontFamily: 'var(--noxa-font-display-jp)', fontSize: 16, fontWeight: 500, color: 'var(--noxa-text-primary)' }}>{m.label}</span>
+                <span style={{ color: 'var(--noxa-text-muted)', fontSize: 11 }}>{m.tag}</span>
+                <span className="noxa-mono" style={{ color: '#8B5CF6', fontSize: 11, marginTop: 'auto' }}>開く →</span>
+              </Link>
+            ))}
+          </div>
+        </>
+      ) : (
+        <Link href="/store/new" className="flex flex-col" style={{ background: 'var(--noxa-surface-card)', border: '1px dashed var(--noxa-border-strong)', borderRadius: 16, padding: 24, gap: 8, textDecoration: 'none', marginBottom: 32 }}>
+          <span className="noxa-eyebrow">店舗運営</span>
+          <span style={{ fontFamily: 'var(--noxa-font-display-jp)', fontSize: 18, fontWeight: 500, color: 'var(--noxa-text-primary)' }}>＋ 店舗を登録すると解放</span>
+          <span style={{ color: 'var(--noxa-text-muted)', fontSize: 12 }}>POS・席回し・勤怠・給与・初回案内・送迎・在庫・体験入店・予約VIP・売掛・リスク客共有。店舗端末は店舗管理パスワードでデバイスログイン。</span>
+          <span className="noxa-mono" style={{ color: 'var(--noxa-accent-primary-ink)', fontSize: 12 }}>店舗を登録する →</span>
+        </Link>
+      )}
 
       {/* Services */}
       <div style={{ marginBottom: 16 }}>
