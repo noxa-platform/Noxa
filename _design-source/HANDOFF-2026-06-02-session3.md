@@ -75,3 +75,36 @@ POS（伝票計算エンジン移植・複数卓×複数伝票・Firestore・会
 ### Stage 2 着手前の注意
 - yorulog の deploy（`vercel --prod`）はカットオーバーまで現状維持（IAP webhook が生きているため）
 - `noxa/functions/src/index.ts` は yorulog の未コミット作業を取り込んだ最新版。差分が意図通りか移設前に確認推奨
+
+---
+
+## 6. 追記2: yorulog バックエンドを NOXA へ全移植（コード完了・未デプロイ）
+
+ユーザー方針「yorulog Web は統合用プロトタイプとして残す／他機能は全部 NOXA に写す／
+AI は OpenRouter 専用（Gemini 廃止＝キー削除済み）」。**コード移植は完了**。
+
+### 完了コミット（noxa）
+- `3d76043` AI 全ルート（`/api/ai/*` 24本）+ provider/lib。**OpenRouter 専用**（gemini.ts 削除・ai-provider 書換）。dep: firebase-admin
+- `09a734d` 非AI 全ルート（account/admin/auth(line)/barapp/calendar/feedback/iap/missions/referral）+ lib(missions, iap/products)。dep: googleapis
+- `2b4111f` iOS 向け AI 向き先変更プロンプト（`IOS-AI-REPOINT-PROMPT.md`）
+
+→ `noxa/src/app/api/**` に **yorulog Web の全 API ルートが揃った**。tsc・next build クリーン。
+
+### 稼働に必要な env（noxa Vercel に設定。値はユーザーのみ保有）
+- AI: `OPENROUTER_API_KEY` / `OPENROUTER_HTTP_REFERER` / `OPENROUTER_X_TITLE` / `AI_PRIMARY_MODEL_FAST`(openrouter:*) / `AI_PRIMARY_MODEL_THINK`(openrouter:*)
+- Firebase Admin: `FIREBASE_SERVICE_ACCOUNT_KEY`
+- IAP: `APPLE_IAP_BUNDLE_ID` / `GOOGLE_PLAY_PACKAGE_NAME` / `GOOGLE_PLAY_SERVICE_ACCOUNT_KEY`
+- LINE: `LINE_LOGIN_CHANNEL_ID` / `LINE_LOGIN_CHANNEL_SECRET`
+- Google OAuth(Calendar): `GOOGLE_CLIENT_SECRET` / `NEXT_PUBLIC_GOOGLE_CLIENT_ID`
+- ※ Stripe は不在（IAP は Apple/Google のみ）。functions は process.env 不使用（既定 SA で動作）
+
+### カットオーバー（本番切替・要レビュー／課金注意）
+1. noxa Vercel に上記 env を設定
+2. noxa をデプロイ（push or `vercel --prod`）＋ `firebase deploy --only firestore:rules,functions:<name> --project noxa-platform`
+3. 各コンソールに **noxa ドメインの許可リダイレクト URI** を追加:
+   - LINE Login: `https://noxa.egshugy.com/api/auth/line/callback`
+   - Google OAuth: `https://noxa.egshugy.com/api/calendar/callback`
+   （リダイレクトはコード上 `${origin}` 動的生成なのでホスト追従。コンソール許可登録だけ必要）
+4. **IAP 通知 URL の切替**（App Store Connect / Google Play）を `https://noxa.egshugy.com/api/iap/notifications-v2` へ。**切替ミスで課金通知が落ちる** → 一定期間は yorulog 側も生かして二重受信で検証
+5. iOS: `IOS-AI-REPOINT-PROMPT.md` に沿って AI を NOXA へ（まず aiBaseURL、将来 webBaseURL 全体）
+6. 全確認後に yorulog の重複バックエンド（functions/rules/該当 API）を撤去。**yorulog Web 自体はプロトタイプとして残す**
