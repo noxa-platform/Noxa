@@ -20,7 +20,20 @@ const inputStyle: React.CSSProperties = { width: '100%', minHeight: 46, padding:
 
 const BIZ = ['キャバクラ', 'ホストクラブ', 'ラウンジ', 'ガールズバー', 'スナック', 'その他'];
 
-async function createShop(uid: string, name: string, biz: string, area: string): Promise<void> {
+// 店舗デバイス PIN を SHA-256(shopId:pin) でハッシュ（Cloud Function 側と一致）。
+async function hashPin(shopId: string, pin: string): Promise<string> {
+  const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(`${shopId}:${pin}`));
+  return Array.from(new Uint8Array(buf)).map((b) => b.toString(16).padStart(2, '0')).join('');
+}
+
+// 店舗端末プロファイルの既定（給与/売掛/リスク客は端末で不可＝allowedModules に含めない）
+const DEFAULT_DEVICE_PROFILES = [
+  { id: 'floor', label: 'フロア端末', allowedModules: ['pos', 'seating', 'first-visit', 'attendance', 'transport', 'inventory', 'reservation', 'trial'] },
+  { id: 'panel', label: '初回案内パネル', allowedModules: ['first-visit'] },
+  { id: 'cashier', label: 'レジ / 締め端末', allowedModules: ['pos', 'inventory'] },
+];
+
+async function createShop(uid: string, name: string, biz: string, area: string, pin: string): Promise<void> {
   // yorulog createWorkspace（type='business'）と同等スキーマで shop_shops を作成。
   const ref = await addDoc(collection(db, 'shop_shops'), {
     name,
@@ -39,10 +52,20 @@ async function createShop(uid: string, name: string, biz: string, area: string):
     updatedAt: serverTimestamp(),
   });
   // オーナーをメンバーに
-  await setDoc(doc(db, `shop_shops/${ref.id}/members/${uid}`), {
-    role: 'owner',
-    joinedAt: serverTimestamp(),
-  });
+  await setDoc(doc(db, `shop_shops/${ref.id}/members/${uid}`), { role: 'owner', joinedAt: serverTimestamp() });
+
+  // 端末プロファイルを作成（同一 PIN を初期値に。給与等は allowedModules 外＝端末で非表示）
+  if (pin) {
+    const pinHash = await hashPin(ref.id, pin);
+    await Promise.all(DEFAULT_DEVICE_PROFILES.map((p) =>
+      setDoc(doc(db, `shop_shops/${ref.id}/device_profiles/${p.id}`), {
+        label: p.label,
+        allowedModules: p.allowedModules,
+        pinHash,
+        createdAt: serverTimestamp(),
+      })
+    ));
+  }
 }
 
 function StoreNewForm({ user }: { user: User }) {
@@ -59,7 +82,7 @@ function StoreNewForm({ user }: { user: User }) {
     e.preventDefault();
     setSaving(true); setErr(null);
     try {
-      await createShop(user.uid, name.trim(), biz, area.trim());
+      await createShop(user.uid, name.trim(), biz, area.trim(), pin);
       setDone(true);
       // 店舗運営モジュールが解放された状態でダッシュボードへ
       setTimeout(() => router.push('/account'), 1400);

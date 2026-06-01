@@ -3,7 +3,7 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import type { User } from 'firebase/auth';
 import { signOut } from '@/lib/auth';
-import { useShopContext } from '@/lib/useShopContext';
+import { useShopContext, useDeviceClaims } from '@/lib/useShopContext';
 
 const NAV_ACCOUNT: { label: string; href: string; icon: string }[] = [
   { label: 'ダッシュボード', href: '/account',              icon: '◇' },
@@ -46,6 +46,9 @@ const NAV_SERVICES: { label: string; href: string; tint: string; soon?: boolean 
 export function AccountShell({ user, children }: { user: User; children: React.ReactNode }) {
   const pathname = usePathname();
   const { hasShop } = useShopContext(user.uid);
+  const device = useDeviceClaims(user);
+  // 店舗デバイスログイン時は許可モジュールのみ（給与/売掛/リスク客は allow に含まれない）
+  const storeNav = device.isDevice ? NAV_STORE.filter((it) => device.allow.includes(it.href.slice(1))) : NAV_STORE;
 
   return (
     <div className="flex min-h-screen" style={{ background: 'var(--noxa-bg-base)' }}>
@@ -64,7 +67,15 @@ export function AccountShell({ user, children }: { user: User; children: React.R
           N<em>o</em>xa
         </Link>
 
-        <div className="flex flex-col" style={{ gap: 2 }}>
+        {device.isDevice && (
+          <div style={{ padding: '10px 12px', borderRadius: 10, background: 'rgba(139,92,246,0.10)', border: '1px solid var(--noxa-border-strong)' }}>
+            <div className="noxa-mono" style={{ fontSize: 10, color: 'var(--noxa-accent-primary-ink)', textTransform: 'uppercase', letterSpacing: '0.1em' }}>店舗端末</div>
+            <div style={{ fontSize: 13, color: 'var(--noxa-text-primary)', marginTop: 2 }}>{device.label || 'デバイス'}</div>
+            <div style={{ fontSize: 10, color: 'var(--noxa-text-faint)', marginTop: 4 }}>給与・売掛・個人機能は非表示</div>
+          </div>
+        )}
+
+        <div className="flex flex-col" style={{ gap: 2, display: device.isDevice ? 'none' : undefined }}>
           <div
             className="noxa-mono px-2.5 pb-2"
             style={{
@@ -102,8 +113,8 @@ export function AccountShell({ user, children }: { user: User; children: React.R
           })}
         </div>
 
-        {/* 個人機能（常時） */}
-        <div className="flex flex-col" style={{ gap: 2 }}>
+        {/* 個人機能（個人/オーナー。店舗端末では非表示） */}
+        <div className="flex flex-col" style={{ gap: 2, display: device.isDevice ? 'none' : undefined }}>
           <div className="noxa-mono px-2.5 pb-2" style={{ fontSize: 10, color: 'var(--noxa-text-faint)', letterSpacing: '0.1em', textTransform: 'uppercase' }}>
             個人機能
           </div>
@@ -118,13 +129,13 @@ export function AccountShell({ user, children }: { user: User; children: React.R
           })}
         </div>
 
-        {/* 店舗運営（店舗オーナー時のみ） */}
-        {hasShop ? (
+        {/* 店舗運営（店舗オーナー or 店舗デバイスログイン時。デバイスは許可モジュールのみ） */}
+        {(hasShop || device.isDevice) ? (
           <div className="flex flex-col" style={{ gap: 2 }}>
             <div className="noxa-mono px-2.5 pb-2" style={{ fontSize: 10, color: 'var(--noxa-text-faint)', letterSpacing: '0.1em', textTransform: 'uppercase' }}>
-              店舗運営
+              {device.isDevice ? `店舗端末${device.label ? ' · ' + device.label : ''}` : '店舗運営'}
             </div>
-            {NAV_STORE.map((it) => {
+            {storeNav.map((it) => {
               const active = pathname === it.href;
               return (
                 <Link key={it.href} href={it.href} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 10px', borderRadius: 8, background: active ? 'rgba(139, 92, 246, 0.12)' : 'transparent', color: active ? 'var(--noxa-text-primary)' : 'var(--noxa-text-muted)', fontSize: 13, fontWeight: active ? 500 : 400, textDecoration: 'none' }}>
@@ -141,7 +152,7 @@ export function AccountShell({ user, children }: { user: User; children: React.R
           </Link>
         )}
 
-        <div className="flex flex-col" style={{ gap: 2 }}>
+        <div className="flex flex-col" style={{ gap: 2, display: device.isDevice ? 'none' : undefined }}>
           <div
             className="noxa-mono px-2.5 pb-2"
             style={{

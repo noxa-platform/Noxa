@@ -2,6 +2,11 @@
 
 import { useState } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
+import { signInWithCustomToken } from 'firebase/auth';
+import { auth } from '@/lib/firebase/config';
+
+const FUNCTIONS_BASE = process.env.NEXT_PUBLIC_NOXA_FUNCTIONS_URL ?? 'https://asia-northeast1-noxa-platform.cloudfunctions.net';
 
 /**
  * 店舗デバイスログイン（ガワ）。共有タブレット用。オーナー個人垢を使わず、
@@ -18,10 +23,34 @@ const PROFILES = [
 ];
 
 export default function StoreLoginPage() {
+  const router = useRouter();
   const [shopId, setShopId] = useState('');
   const [profile, setProfile] = useState(PROFILES[0].id);
   const [pin, setPin] = useState('');
   const [msg, setMsg] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  const handleLogin = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setBusy(true); setMsg(null);
+    try {
+      const res = await fetch(`${FUNCTIONS_BASE}/storeDeviceLogin`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ shopId: shopId.trim(), profileId: profile, pin: pin.trim() }),
+      });
+      if (!res.ok) {
+        const err = res.status === 401 ? 'PIN が違います' : res.status === 404 ? '店舗 / プロファイルが見つかりません' : 'ログインに失敗しました';
+        setMsg(err); setBusy(false); return;
+      }
+      const { customToken } = (await res.json()) as { customToken: string };
+      await signInWithCustomToken(auth, customToken);
+      router.push('/account');
+    } catch {
+      setMsg('通信に失敗しました');
+      setBusy(false);
+    }
+  };
 
   const inputStyle: React.CSSProperties = { width: '100%', minHeight: 48, padding: '10px 14px', borderRadius: 10, background: 'var(--noxa-surface-card)', border: '1px solid var(--noxa-border)', color: 'var(--noxa-text-primary)', fontSize: 16 };
 
@@ -32,7 +61,7 @@ export default function StoreLoginPage() {
         <Link href="/" className="noxa-logo" style={{ fontSize: 24, display: 'block', marginBottom: 4 }}>N<em>o</em>xa</Link>
         <div className="noxa-eyebrow" style={{ marginBottom: 20 }}>店舗デバイスログイン</div>
 
-        <form onSubmit={(e) => { e.preventDefault(); setMsg('デバイスログイン（デモ）。実認証は店舗管理パスワードを Cloud Function で検証して有効化します。'); }} style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+        <form onSubmit={handleLogin} style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
             <label htmlFor="shop" style={{ fontFamily: mono, fontSize: 11, color: 'var(--noxa-text-muted)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>店舗 ID</label>
             <input id="shop" value={shopId} onChange={(e) => setShopId(e.target.value)} required placeholder="店舗コード" style={inputStyle} />
@@ -61,8 +90,8 @@ export default function StoreLoginPage() {
 
           {msg && <p style={{ margin: 0, fontSize: 12, color: 'var(--noxa-status-info)', lineHeight: 1.6 }}>{msg}</p>}
 
-          <button type="submit" className="noxa-btn noxa-btn-primary" style={{ appearance: 'none', cursor: 'pointer', minHeight: 50, borderRadius: 12, border: '1px solid var(--noxa-accent-primary)', background: 'var(--noxa-accent-primary)', color: '#fff', fontSize: 15, fontWeight: 600, boxShadow: 'var(--noxa-glow-soft)' }}>
-            この端末でログイン
+          <button type="submit" disabled={busy} className="noxa-btn noxa-btn-primary" style={{ appearance: 'none', cursor: busy ? 'default' : 'pointer', opacity: busy ? 0.7 : 1, minHeight: 50, borderRadius: 12, border: '1px solid var(--noxa-accent-primary)', background: 'var(--noxa-accent-primary)', color: '#fff', fontSize: 15, fontWeight: 600, boxShadow: 'var(--noxa-glow-soft)' }}>
+            {busy ? 'ログイン中…' : 'この端末でログイン'}
           </button>
         </form>
 
