@@ -17,6 +17,7 @@ interface Sub {
 
 const MODULES = [
   { no: '01', label: 'POS',       tag: 'オーダー / 伝票',     href: '/pos' },
+  { no: '02', label: '売上管理',  tag: 'CRM・AI（実データ）', href: '/sales' },
   { no: '03', label: '席回し',    tag: 'フロアマップ',        href: '/seating' },
   { no: '04', label: '勤怠',      tag: '打刻 / シフト',       href: '/attendance' },
   { no: '05', label: '給与',      tag: '明細 / 月締め',       href: '/payroll' },

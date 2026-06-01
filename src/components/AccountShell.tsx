@@ -16,6 +16,7 @@ const NAV_ACCOUNT: { label: string; href: string; icon: string }[] = [
 // 夜の街の OS — 業務モジュール（ガワ実装。OS のメインアプリ群）
 const NAV_MODULES: { label: string; href: string; no: string }[] = [
   { label: 'POS',       href: '/pos',           no: '01' },
+  { label: '売上管理',  href: '/sales',         no: '02' },
   { label: '席回し',    href: '/seating',       no: '03' },
   { label: '勤怠',      href: '/attendance',    no: '04' },
   { label: '給与',      href: '/payroll',       no: '05' },
