@@ -27,7 +27,6 @@ const NAV_MODULES: { label: string; href: string; no: string }[] = [
 
 const NAV_SERVICES: { label: string; href: string; tint: string; soon?: boolean }[] = [
   { label: 'community', href: '/community',                   tint: '#C4384A', soon: true },
-  { label: 'yorulog',   href: 'https://yorulog.vercel.app',   tint: '#8B5CF6' },
   { label: 'nomishugy', href: 'https://nomishugy.vercel.app', tint: '#B89CFB' },
 ];
 

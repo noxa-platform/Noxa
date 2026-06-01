@@ -28,14 +28,6 @@ const MODULES = [
 
 const SERVICES = [
   {
-    name: 'yorulog',
-    tag: '夜職売上 CRM',
-    url: 'https://yorulog.vercel.app',
-    tint: '#8B5CF6',
-    status: '営業中',
-    statusColor: '#7BE8A1',
-  },
-  {
     name: 'nomishugy',
     tag: '大阪バーポータル',
     url: 'https://nomishugy.vercel.app',
@@ -159,7 +151,7 @@ function AccountDashboard({ user }: { user: User }) {
               className="flex gap-5 flex-wrap"
               style={{ fontSize: 12, color: 'var(--noxa-text-muted)' }}
             >
-              <span><span style={{ color: '#7BE8A1' }}>●</span> yorulog 連携</span>
+              <span><span style={{ color: '#7BE8A1' }}>●</span> 業務モジュール 9</span>
               <span><span style={{ color: '#7BE8A1' }}>●</span> nomishugy 連携</span>
               <span><span style={{ color: 'var(--noxa-accent-primary-ink)' }}>●</span> Community 早期アクセス</span>
             </div>
