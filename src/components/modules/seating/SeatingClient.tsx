@@ -1,945 +1,445 @@
 'use client';
 
 import Link from 'next/link';
-import { useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
+import type { User } from 'firebase/auth';
+import { useSeatingStore } from '@/lib/seating/store';
+import { generateAIProposals, getSourcingCandidates } from '@/lib/seating/ai';
+import type { Cast, FloorTable, TableType, Customer, CastStatus, Rank } from '@/lib/seating/types';
 
 /**
- * ③ 席回し — フロアマップ + キャストローテーション UI モック（ガワのみ）
+ * ③ 席回し — フロア管理 / キャストローテーション（実データ）
  *
- * ロジック・永続化なし。すべて MOCK_* のモックデータ。UI 内部 state
- * （卓選択ハイライト）のみ useState で実装。ボタンは no-op。
+ * night_manager（zustand 版）を NOXA へ移植。ドラッグ&ドロップではなくタップ操作で
+ * キャストを卓へ配置（タブレット運用向け）。卓・キャスト・待機列を Firestore に
+ * リアルタイム保存し、共有端末間で同期。AI が初回卓のペアリング/席内ローテを提案。
  */
 
-// ─────────────────────────────────────────────
-// モックデータ
-// ─────────────────────────────────────────────
-
-type TableStatus = 'empty' | 'occupied' | 'checkout' | 'reserved';
-
-type MockTable = {
-  id: string;
-  name: string;
-  status: TableStatus;
-  guestName?: string;   // 客名
-  castName?: string;    // 指名キャスト名
-  elapsed?: string;     // 滞在時間（表示用）
-  elapsedMin?: number;  // 滞在時間（分、アラート判定用）
-  guests?: number;      // 来店人数
-  col: number;          // CSS grid 列（1〜4）
-  row: number;          // CSS grid 行（1〜3）
-};
-
-const MOCK_TABLES: MockTable[] = [
-  { id: 'T1',  name: '卓1',  status: 'occupied',  guestName: '田中様',  castName: '凛',  elapsed: '1:42', elapsedMin: 102, guests: 2, col: 1, row: 1 },
-  { id: 'T2',  name: '卓2',  status: 'occupied',  guestName: '山本様',  castName: '葵',  elapsed: '38分', elapsedMin: 38,  guests: 3, col: 2, row: 1 },
-  { id: 'T3',  name: '卓3',  status: 'empty',                                                               col: 3, row: 1 },
-  { id: 'T4',  name: '卓4',  status: 'reserved',  guestName: '鈴木様',                   elapsed: '21:00',                  col: 4, row: 1 },
-  { id: 'T5',  name: '卓5',  status: 'checkout',  guestName: '佐藤様',  castName: '蘭',  elapsed: '2:05', elapsedMin: 125, guests: 4, col: 1, row: 2 },
-  { id: 'T6',  name: '卓6',  status: 'occupied',  guestName: '伊藤様',  castName: '茉莉',elapsed: '55分', elapsedMin: 55,  guests: 2, col: 2, row: 2 },
-  { id: 'T7',  name: '卓7',  status: 'empty',                                                               col: 3, row: 2 },
-  { id: 'T8',  name: '卓8',  status: 'occupied',  guestName: '中村様',  castName: '雪',  elapsed: '1:10', elapsedMin: 70,  guests: 1, col: 4, row: 2 },
-  { id: 'T9',  name: '卓9',  status: 'empty',                                                               col: 1, row: 3 },
-  { id: 'T10', name: '卓10', status: 'checkout',  guestName: '小林様',  castName: '桃',  elapsed: '1:58', elapsedMin: 118, guests: 3, col: 2, row: 3 },
-];
-
-type CastStatus = 'waiting' | 'serving';
-
-type MockCast = {
-  id: string;
-  name: string;         // 源氏名
-  status: CastStatus;
-  waitMin?: number;     // 待機時間（分）
-  tableId?: string;     // 接客中の卓 ID
-  isNextCandidate?: boolean; // 次の指名候補
-};
-
-const MOCK_CASTS: MockCast[] = [
-  { id: 'C1', name: '凛',   status: 'serving',  tableId: 'T1' },
-  { id: 'C2', name: '葵',   status: 'serving',  tableId: 'T2' },
-  { id: 'C3', name: '蘭',   status: 'serving',  tableId: 'T5' },
-  { id: 'C4', name: '茉莉', status: 'serving',  tableId: 'T6' },
-  { id: 'C5', name: '雪',   status: 'serving',  tableId: 'T8' },
-  { id: 'C6', name: '桃',   status: 'serving',  tableId: 'T10' },
-  { id: 'C7', name: '柚',   status: 'waiting', waitMin: 22, isNextCandidate: true },
-  { id: 'C8', name: '紫苑', status: 'waiting', waitMin: 8 },
-];
-
-// ─────────────────────────────────────────────
-// ヘルパー
-// ─────────────────────────────────────────────
-
 const mono = 'var(--noxa-font-mono)';
+const TABLE_TYPES: TableType[] = ['初回', '初回指名', 'R', '正規'];
+const RANKS: Rank[] = ['BOSS', '役職', '非役職', '新人'];
 
-const STATUS_META: Record<
-  TableStatus,
-  { label: string; color: string; bg: string; borderColor: string }
-> = {
-  empty:    { label: '空席',   color: 'var(--noxa-text-faint)',         bg: 'transparent',                    borderColor: 'var(--noxa-border)' },
-  occupied: { label: '接客中', color: 'var(--noxa-accent-primary-ink)', bg: 'var(--noxa-surface-card)',        borderColor: 'var(--noxa-border-strong)' },
-  checkout: { label: '会計待ち',color: 'var(--noxa-status-warning)',     bg: 'rgba(245,212,114,0.06)',         borderColor: 'rgba(245,212,114,0.40)' },
-  reserved: { label: '予約',   color: 'var(--noxa-status-info)',        bg: 'rgba(103,232,249,0.06)',         borderColor: 'rgba(103,232,249,0.35)' },
+const RANK_TINT: Record<Rank, string> = {
+  BOSS: '#F5D472', 役職: '#B89CFB', 非役職: '#67E8F9', 新人: '#7BE8A1',
 };
+const STATUS_LABEL: Record<CastStatus, string> = { Free: '待機', Work: '在卓', Break: '休憩', Absent: '欠勤' };
 
-// ─────────────────────────────────────────────
-// コンポーネント
-// ─────────────────────────────────────────────
+function elapsedMin(start: number | null): number {
+  if (!start) return 0;
+  return Math.floor((Date.now() - start) / 60000);
+}
+function fmtElapsed(start: number | null): string {
+  const m = elapsedMin(start);
+  if (m < 60) return `${m}分`;
+  return `${Math.floor(m / 60)}:${String(m % 60).padStart(2, '0')}`;
+}
 
-export function SeatingClient() {
-  const [selectedTable, setSelectedTable] = useState<string | null>('T1');
+export function SeatingClient({ user }: { user: User }) {
+  const store = useSeatingStore(user);
+  const { casts, tables, queue } = store;
+  const [selectedTableId, setSelectedTableId] = useState<string | null>(null);
+  const [side, setSide] = useState<'casts' | 'queue'>('casts');
+  const [, setTick] = useState(0);
 
-  // サマリ計算
-  const occupiedCount  = MOCK_TABLES.filter((t) => t.status === 'occupied').length;
-  const checkoutCount  = MOCK_TABLES.filter((t) => t.status === 'checkout').length;
-  const emptyCount     = MOCK_TABLES.filter((t) => t.status === 'empty').length;
-  const servingCasts   = MOCK_CASTS.filter((c) => c.status === 'serving').length;
+  useEffect(() => { const t = setInterval(() => setTick((n) => n + 1), 30000); return () => clearInterval(t); }, []);
 
-  // 選択中の卓
-  const selectedT = MOCK_TABLES.find((t) => t.id === selectedTable);
+  const castById = useMemo(() => new Map(casts.map((c) => [c.id, c])), [casts]);
+  const proposals = useMemo(() => generateAIProposals(tables, casts), [tables, casts]);
+  const selected = tables.find((t) => t.id === selectedTableId) ?? null;
+
+  if (store.loading) return <Shell><div className="noxa-eyebrow" style={{ padding: '40px 0' }}>読み込み中…</div></Shell>;
+  if (!store.shopId) {
+    return (
+      <Shell>
+        <Empty>
+          席回しは店舗運営機能です。<Link href="/store/new" style={{ color: 'var(--noxa-accent-primary-ink)' }}>店舗を登録</Link> すると解放されます。
+        </Empty>
+      </Shell>
+    );
+  }
+  if (tables.length === 0) {
+    return (
+      <Shell device={store.isDevice}>
+        <Empty>
+          <p style={{ margin: '0 0 12px' }}>フロアの卓が未設定です。</p>
+          {store.canManage ? (
+            <button type="button" className="noxa-btn noxa-btn-primary" style={primaryBtn} onClick={() => store.seedTables()}>卓を初期作成する</button>
+          ) : (
+            <span style={{ fontSize: 12, color: 'var(--noxa-text-faint)' }}>オーナーが卓を作成すると表示されます。</span>
+          )}
+        </Empty>
+      </Shell>
+    );
+  }
+
+  const applyProposal = async (p: typeof proposals[number]) => {
+    if (!p.targetTableId) return;
+    if (p.type === 'ROTATION') { await store.rotateHosts(p.targetTableId); return; }
+    if (p.type === 'ASSIGN') { for (const cid of p.castIds ?? []) await store.assignCast(p.targetTableId, cid); }
+  };
 
   return (
-    <div
-      style={{
-        borderRadius: 16,
-        border: '1px solid var(--noxa-border)',
-        padding: 'clamp(16px, 3vw, 28px)',
-        position: 'relative',
-        overflow: 'hidden',
-        color: 'var(--noxa-text-primary)',
-        fontFamily: 'var(--noxa-font-sans-jp)',
-      }}
-    >
-      {/* ambient glow */}
-      <div
-        aria-hidden
-        style={{
-          position: 'absolute',
-          top: '-20%',
-          right: '-8%',
-          width: 640,
-          height: 400,
-          background: 'radial-gradient(ellipse, rgba(103,232,249,0.08) 0%, transparent 65%)',
-          pointerEvents: 'none',
-        }}
-      />
-      <div
-        aria-hidden
-        style={{
-          position: 'absolute',
-          bottom: '-15%',
-          left: '-5%',
-          width: 480,
-          height: 320,
-          background: 'radial-gradient(ellipse, rgba(139,92,246,0.09) 0%, transparent 65%)',
-          pointerEvents: 'none',
-        }}
-      />
-
-      <div style={{ position: 'relative' }}>
-        {/* ─ header ─ */}
-        <header style={{ marginBottom: 20 }}>
-          <nav aria-label="breadcrumb" style={{ marginBottom: 10 }}>
-            <ol
-              style={{
-                display: 'flex',
-                gap: 8,
-                fontFamily: mono,
-                fontSize: 11,
-                letterSpacing: '0.06em',
-                color: 'var(--noxa-text-faint)',
-                listStyle: 'none',
-                margin: 0,
-                padding: 0,
-              }}
-            >
-              <li>
-                <Link href="/" style={{ color: 'var(--noxa-text-muted)', textDecoration: 'none' }}>
-                  Noxa OS
-                </Link>
-              </li>
-              <li aria-hidden>·</li>
-              <li>seating</li>
-            </ol>
-          </nav>
-
-          <div
-            style={{
-              display: 'flex',
-              alignItems: 'flex-end',
-              justifyContent: 'space-between',
-              gap: 16,
-              flexWrap: 'wrap',
-            }}
-          >
-            <div>
-              <div className="noxa-eyebrow" style={{ marginBottom: 6 }}>
-                Noxa OS · Module 03 · Seating
-              </div>
-              <h1
-                className="noxa-display"
-                style={{
-                  fontSize: 'clamp(26px, 4vw, 38px)',
-                  margin: 0,
-                  display: 'flex',
-                  alignItems: 'baseline',
-                  gap: 10,
-                  flexWrap: 'wrap',
-                }}
-              >
-                <span
-                  style={{
-                    fontFamily: 'var(--noxa-font-display-en)',
-                    fontStyle: 'italic',
-                    color: 'var(--noxa-accent-primary-ink)',
-                    fontWeight: 400,
-                  }}
-                >
-                  № 03
-                </span>
-                <span style={{ fontFamily: 'var(--noxa-font-display-jp)', fontWeight: 500 }}>
-                  席回し
-                </span>
-              </h1>
+    <Shell device={store.isDevice}>
+      {/* AI 提案 */}
+      {proposals.length > 0 && (
+        <div style={{ marginBottom: 16, display: 'flex', flexDirection: 'column', gap: 8 }}>
+          {proposals.slice(0, 4).map((p) => (
+            <div key={p.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 14px', borderRadius: 12, background: 'rgba(139,92,246,0.08)', border: '1px solid var(--noxa-border-strong)' }}>
+              <span style={{ flex: 1, fontSize: 13, color: 'var(--noxa-text-primary)' }}>{p.message}</span>
+              <button type="button" onClick={() => applyProposal(p)} style={{ ...chipStyle(true), minHeight: 30 }}>適用</button>
             </div>
+          ))}
+        </div>
+      )}
 
-            {/* live badge */}
-            <div
-              role="status"
-              aria-label="リアルタイム更新中"
-              style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: 8,
-                padding: '6px 12px',
-                background: 'rgba(103,232,249,0.08)',
-                border: '1px solid rgba(103,232,249,0.25)',
-                borderRadius: 9999,
-                fontFamily: mono,
-                fontSize: 10,
-                letterSpacing: '0.12em',
-                color: 'var(--noxa-status-info)',
-                textTransform: 'uppercase',
-              }}
-            >
-              <span
-                aria-hidden
-                style={{
-                  width: 6,
-                  height: 6,
-                  borderRadius: 3,
-                  background: 'var(--noxa-status-info)',
-                  boxShadow: '0 0 8px var(--noxa-status-info)',
-                  animation: 'pulse 2s ease-in-out infinite',
-                }}
-              />
-              LIVE · モック表示
-            </div>
-          </div>
-        </header>
-
-        {/* ─ サマリバー ─ */}
-        <section
-          aria-label="フロアサマリ"
-          style={{
-            display: 'flex',
-            gap: 10,
-            flexWrap: 'wrap',
-            marginBottom: 20,
-          }}
-        >
-          <SummaryChip
-            label="稼働卓"
-            value={`${occupiedCount + checkoutCount} / ${MOCK_TABLES.length}`}
-            color="var(--noxa-accent-primary-ink)"
-          />
-          <SummaryChip
-            label="空席"
-            value={String(emptyCount)}
-            color="var(--noxa-status-success)"
-          />
-          <SummaryChip
-            label="接客中キャスト"
-            value={`${servingCasts}名`}
-            color="var(--noxa-status-info)"
-          />
-          <SummaryChip
-            label="会計待ち"
-            value={`${checkoutCount}卓`}
-            color="var(--noxa-status-warning)"
-          />
-        </section>
-
-        {/* ─ 2ペイン ─ */}
-        <div
-          className="grid grid-cols-1 lg:grid-cols-[1fr_260px]"
-          style={{ gap: 'clamp(12px, 1.6vw, 18px)', alignItems: 'start' }}
-        >
-          {/* 左：フロアマップ */}
-          <section aria-label="フロアマップ">
-            <PaneTitle>フロアマップ</PaneTitle>
-
-            {/* 凡例 */}
-            <div
-              style={{
-                display: 'flex',
-                gap: 16,
-                flexWrap: 'wrap',
-                marginBottom: 14,
-              }}
-              aria-label="凡例"
-            >
-              {(Object.entries(STATUS_META) as [TableStatus, typeof STATUS_META[TableStatus]][]).map(
-                ([key, meta]) => (
-                  <div
-                    key={key}
-                    style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: 6,
-                      fontSize: 11,
-                      fontFamily: mono,
-                      color: 'var(--noxa-text-faint)',
-                    }}
-                  >
-                    <span
-                      aria-hidden
-                      style={{
-                        width: 8,
-                        height: 8,
-                        borderRadius: 2,
-                        background: meta.color,
-                        border: `1px solid ${meta.borderColor}`,
-                        flex: 'none',
-                      }}
-                    />
-                    {meta.label}
-                  </div>
-                )
-              )}
-              <div
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 6,
-                  fontSize: 11,
-                  fontFamily: mono,
-                  color: 'var(--noxa-text-faint)',
-                }}
-              >
-                <span
-                  aria-hidden
-                  style={{
-                    width: 8,
-                    height: 8,
-                    borderRadius: '50%',
-                    background: 'var(--noxa-status-warning)',
-                    flex: 'none',
-                  }}
-                />
-                90分超アラート
-              </div>
-            </div>
-
-            {/* フロアグリッド */}
-            <div
-              className="grid grid-cols-2 sm:grid-cols-4"
-              style={{ gap: 10 }}
-              role="grid"
-              aria-label="フロア卓一覧"
-            >
-              {MOCK_TABLES.map((t) => {
-                const meta    = STATUS_META[t.status];
-                const active  = t.id === selectedTable;
-                const alert90 = (t.elapsedMin ?? 0) >= 90;
-
-                return (
-                  <button
-                    key={t.id}
-                    type="button"
-                    role="gridcell"
-                    onClick={() => setSelectedTable(active ? null : t.id)}
-                    aria-pressed={active}
-                    aria-label={[
-                      t.name,
-                      meta.label,
-                      t.guestName ?? '',
-                      t.castName ? `指名:${t.castName}` : '',
-                      t.elapsed  ? `滞在:${t.elapsed}` : '',
-                      alert90    ? '90分超アラート' : '',
-                    ]
-                      .filter(Boolean)
-                      .join(' ')}
-                    style={{
-                      appearance: 'none',
-                      cursor: 'pointer',
-                      textAlign: 'left',
-                      minHeight: 90,
-                      padding: '12px 14px',
-                      borderRadius: 14,
-                      background: active
-                        ? 'rgba(139,92,246,0.12)'
-                        : meta.bg,
-                      border: active
-                        ? '1px solid var(--noxa-accent-primary)'
-                        : `1px solid ${meta.borderColor}`,
-                      boxShadow: active ? 'var(--noxa-glow-ring)' : 'none',
-                      transition: 'all var(--noxa-duration-fast) var(--noxa-ease-natural)',
-                      color: 'var(--noxa-text-primary)',
-                      display: 'flex',
-                      flexDirection: 'column',
-                      gap: 5,
-                    }}
-                  >
-                    {/* 卓番号 + アラート + ステータスドット */}
-                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                      <span style={{ fontFamily: mono, fontSize: 13, fontWeight: 600 }}>
-                        {t.name}
-                      </span>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
-                        {alert90 && (
-                          <span
-                            aria-label="90分超アラート"
-                            style={{
-                              width: 7,
-                              height: 7,
-                              borderRadius: '50%',
-                              background: 'var(--noxa-status-warning)',
-                              boxShadow: '0 0 8px var(--noxa-status-warning)',
-                              flex: 'none',
-                            }}
-                          />
-                        )}
-                        <span
-                          aria-hidden
-                          style={{
-                            width: 7,
-                            height: 7,
-                            borderRadius: 3,
-                            background: meta.color,
-                            boxShadow:
-                              t.status !== 'empty'
-                                ? `0 0 7px ${meta.color}`
-                                : 'none',
-                            flex: 'none',
-                          }}
-                        />
-                      </div>
-                    </div>
-
-                    {/* ステータスラベル */}
-                    <span
-                      style={{ fontSize: 10, fontFamily: mono, color: meta.color }}
-                    >
-                      {meta.label}
-                    </span>
-
-                    {/* 客名 */}
-                    {t.guestName && (
-                      <span style={{ fontSize: 12, color: 'var(--noxa-text-primary)', fontWeight: 500 }}>
-                        {t.guestName}
-                        {t.guests != null && (
-                          <span style={{ color: 'var(--noxa-text-faint)', fontWeight: 400 }}>
-                            {' '}·{' '}{t.guests}名
-                          </span>
-                        )}
-                      </span>
-                    )}
-
-                    {/* 指名キャスト */}
-                    {t.castName && (
-                      <span style={{ fontSize: 11, color: 'var(--noxa-text-muted)' }}>
-                        指名: {t.castName}
-                      </span>
-                    )}
-
-                    {/* 滞在時間 */}
-                    {t.elapsed && (
-                      <span
-                        style={{
-                          fontFamily: mono,
-                          fontSize: 12,
-                          fontVariantNumeric: 'tabular-nums',
-                          color: alert90 ? 'var(--noxa-status-warning)' : 'var(--noxa-text-faint)',
-                          fontWeight: alert90 ? 600 : 400,
-                          marginTop: 'auto',
-                        }}
-                      >
-                        {t.elapsed}
-                      </span>
-                    )}
-                  </button>
-                );
-              })}
-            </div>
-
-            {/* 選択卓の詳細パネル */}
-            {selectedT && selectedT.status !== 'empty' && (
-              <div
-                role="region"
-                aria-label={`${selectedT.name} 詳細`}
-                style={{
-                  marginTop: 16,
-                  padding: '14px 16px',
-                  background: 'var(--noxa-surface-card)',
-                  border: '1px solid var(--noxa-accent-primary)',
-                  borderRadius: 14,
-                  boxShadow: 'var(--noxa-glow-soft)',
-                  display: 'flex',
-                  flexDirection: 'column',
-                  gap: 10,
-                }}
-              >
-                <div
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'space-between',
-                    flexWrap: 'wrap',
-                    gap: 8,
-                  }}
-                >
-                  <span
-                    style={{
-                      fontFamily: 'var(--noxa-font-display-jp)',
-                      fontSize: 16,
-                      fontWeight: 500,
-                      color: 'var(--noxa-text-primary)',
-                    }}
-                  >
-                    {selectedT.name}
-                  </span>
-                  <span
-                    style={{
-                      fontFamily: mono,
-                      fontSize: 10,
-                      letterSpacing: '0.10em',
-                      color: STATUS_META[selectedT.status].color,
-                      textTransform: 'uppercase',
-                    }}
-                  >
-                    {STATUS_META[selectedT.status].label}
-                  </span>
-                </div>
-
-                <div
-                  style={{
-                    display: 'grid',
-                    gridTemplateColumns: 'repeat(auto-fill, minmax(120px, 1fr))',
-                    gap: 10,
-                  }}
-                >
-                  {selectedT.guestName && (
-                    <DetailItem label="客名" value={selectedT.guestName} />
-                  )}
-                  {selectedT.guests != null && (
-                    <DetailItem label="来店" value={`${selectedT.guests}名`} />
-                  )}
-                  {selectedT.castName && (
-                    <DetailItem label="指名キャスト" value={selectedT.castName} />
-                  )}
-                  {selectedT.elapsed && (
-                    <DetailItem
-                      label="滞在時間"
-                      value={selectedT.elapsed}
-                      highlight={(selectedT.elapsedMin ?? 0) >= 90}
-                    />
-                  )}
-                </div>
-
-                {/* no-op アクションボタン群 */}
-                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 4 }}>
-                  {(['延長', '会計へ', '席移動', '退店'] as const).map((label) => (
-                    <button
-                      key={label}
-                      type="button"
-                      onClick={() => { /* ガワのみ: no-op */ }}
-                      aria-label={`${selectedT.name} を ${label}`}
-                      style={{
-                        appearance: 'none',
-                        cursor: 'pointer',
-                        flex: 'none',
-                        minHeight: 36,
-                        padding: '7px 14px',
-                        borderRadius: 9999,
-                        fontFamily: 'var(--noxa-font-sans-jp)',
-                        fontSize: 13,
-                        fontWeight: 500,
-                        background:
-                          label === '会計へ'
-                            ? 'rgba(245,212,114,0.12)'
-                            : label === '退店'
-                            ? 'rgba(196,56,74,0.10)'
-                            : 'var(--noxa-surface-muted)',
-                        border:
-                          label === '会計へ'
-                            ? '1px solid rgba(245,212,114,0.40)'
-                            : label === '退店'
-                            ? '1px solid rgba(196,56,74,0.35)'
-                            : '1px solid var(--noxa-border)',
-                        color:
-                          label === '会計へ'
-                            ? 'var(--noxa-status-warning)'
-                            : label === '退店'
-                            ? 'var(--noxa-status-error)'
-                            : 'var(--noxa-text-primary)',
-                        transition: 'all var(--noxa-duration-fast) var(--noxa-ease-natural)',
-                      }}
-                    >
-                      {label}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            )}
-          </section>
-
-          {/* 右：キャストローテーション */}
-          <section aria-label="キャストローテーション">
-            <PaneTitle>待機キャスト</PaneTitle>
-
-            {/* 次の指名候補 */}
-            <div style={{ marginBottom: 14 }}>
-              <div
-                style={{
-                  fontFamily: mono,
-                  fontSize: 10,
-                  letterSpacing: '0.10em',
-                  color: 'var(--noxa-status-success)',
-                  textTransform: 'uppercase',
-                  marginBottom: 8,
-                }}
-              >
-                次の指名候補
-              </div>
-              {MOCK_CASTS.filter((c) => c.isNextCandidate).map((c) => (
-                <CastCard key={c.id} cast={c} highlight />
+      <div className="grid grid-cols-1 lg:grid-cols-[1fr_320px]" style={{ gap: 'clamp(12px,1.6vw,18px)', alignItems: 'start' }}>
+        {/* 左：フロア + 卓詳細 */}
+        <div style={{ minWidth: 0, display: 'flex', flexDirection: 'column', gap: 16 }}>
+          <section aria-label="フロア">
+            <PaneTitle>フロア</PaneTitle>
+            <div className="grid grid-cols-2 sm:grid-cols-3" style={{ gap: 10 }}>
+              {tables.map((t) => (
+                <TableCard key={t.id} table={t} castById={castById} active={t.id === selectedTableId} onSelect={() => setSelectedTableId(t.id)} />
               ))}
             </div>
-
-            {/* 待機中 */}
-            <div>
-              <div
-                style={{
-                  fontFamily: mono,
-                  fontSize: 10,
-                  letterSpacing: '0.10em',
-                  color: 'var(--noxa-text-faint)',
-                  textTransform: 'uppercase',
-                  marginBottom: 8,
-                }}
-              >
-                待機中
-              </div>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                {MOCK_CASTS.filter((c) => c.status === 'waiting' && !c.isNextCandidate).map((c) => (
-                  <CastCard key={c.id} cast={c} />
-                ))}
-              </div>
-            </div>
-
-            {/* 仕切り */}
-            <div
-              aria-hidden
-              style={{
-                margin: '18px 0',
-                borderTop: '1px solid var(--noxa-divider)',
-              }}
-            />
-
-            {/* 接客中 */}
-            <div>
-              <PaneTitle>接客中キャスト</PaneTitle>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                {MOCK_CASTS.filter((c) => c.status === 'serving').map((c) => {
-                  const table = MOCK_TABLES.find((t) => t.id === c.tableId);
-                  return (
-                    <CastCard key={c.id} cast={c} tableLabel={table?.name} />
-                  );
-                })}
-              </div>
-            </div>
-
-            {/* ローテーション操作ボタン（no-op） */}
-            <div style={{ marginTop: 16, display: 'flex', flexDirection: 'column', gap: 8 }}>
-              <button
-                type="button"
-                onClick={() => { /* ガワのみ: no-op */ }}
-                style={{
-                  appearance: 'none',
-                  cursor: 'pointer',
-                  width: '100%',
-                  minHeight: 44,
-                  borderRadius: 12,
-                  border: '1px solid var(--noxa-accent-primary)',
-                  background: 'var(--noxa-accent-primary)',
-                  color: '#fff',
-                  fontFamily: 'var(--noxa-font-sans-jp)',
-                  fontSize: 14,
-                  fontWeight: 600,
-                  boxShadow: 'var(--noxa-glow-soft)',
-                  transition: 'all var(--noxa-duration-fast) var(--noxa-ease-natural)',
-                }}
-                aria-label="キャストをローテーション（次の待機へ）"
-              >
-                ローテーション実行
-              </button>
-              <button
-                type="button"
-                onClick={() => { /* ガワのみ: no-op */ }}
-                style={{
-                  appearance: 'none',
-                  cursor: 'pointer',
-                  width: '100%',
-                  minHeight: 44,
-                  borderRadius: 12,
-                  border: '1px solid var(--noxa-border-strong)',
-                  background: 'var(--noxa-surface-muted)',
-                  color: 'var(--noxa-text-primary)',
-                  fontFamily: 'var(--noxa-font-sans-jp)',
-                  fontSize: 13,
-                  fontWeight: 500,
-                  transition: 'all var(--noxa-duration-fast) var(--noxa-ease-natural)',
-                }}
-                aria-label="場内指名を記録"
-              >
-                場内指名を記録
-              </button>
-            </div>
           </section>
+
+          {selected && (
+            <TableDetail
+              table={selected}
+              casts={casts}
+              tables={tables}
+              castById={castById}
+              store={store}
+            />
+          )}
+        </div>
+
+        {/* 右：キャスト / 待機列 */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+          <div role="tablist" style={{ display: 'flex', gap: 6 }}>
+            <button type="button" role="tab" aria-selected={side === 'casts'} onClick={() => setSide('casts')} style={chipStyle(side === 'casts')}>在籍キャスト</button>
+            <button type="button" role="tab" aria-selected={side === 'queue'} onClick={() => setSide('queue')} style={chipStyle(side === 'queue')}>待ち組 {queue.length > 0 ? `(${queue.length})` : ''}</button>
+          </div>
+          {side === 'casts'
+            ? <CastRoster casts={casts} store={store} />
+            : <QueuePanel queue={queue} tables={tables} store={store} />}
         </div>
       </div>
-    </div>
+    </Shell>
   );
 }
 
-// ─────────────────────────────────────────────
-// 子コンポーネント
-// ─────────────────────────────────────────────
+// ───────────────────────── 卓カード
+
+function TableCard({ table, castById, active, onSelect }: { table: FloorTable; castById: Map<string, Cast>; active: boolean; onSelect: () => void }) {
+  const occupied = table.status !== 'EMPTY';
+  const over = table.status === 'ACTIVE' && elapsedMin(table.startTime) >= table.setTimeLength;
+  const statusColor = table.status === 'CHECK' ? 'var(--noxa-status-warning)'
+    : over ? 'var(--noxa-status-error)'
+    : occupied ? 'var(--noxa-accent-primary-ink)' : 'var(--noxa-text-faint)';
+  return (
+    <button type="button" onClick={onSelect} aria-pressed={active}
+      style={{
+        appearance: 'none', cursor: 'pointer', textAlign: 'left', minHeight: 110, padding: 12, borderRadius: 14,
+        background: occupied ? 'var(--noxa-surface-card)' : 'transparent',
+        border: active ? '1px solid var(--noxa-accent-primary)' : `1px solid ${occupied ? 'var(--noxa-border-strong)' : 'var(--noxa-border)'}`,
+        boxShadow: active ? 'var(--noxa-glow-ring)' : 'none', color: 'var(--noxa-text-primary)',
+        display: 'flex', flexDirection: 'column', gap: 8, transition: 'border-color var(--noxa-duration-fast) var(--noxa-ease-natural)',
+      }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+        <span style={{ fontFamily: 'var(--noxa-font-display-jp)', fontSize: 16, fontWeight: 600 }}>{table.name}</span>
+        <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          {table.type && occupied && <span style={{ fontSize: 10, fontFamily: mono, color: 'var(--noxa-text-muted)' }}>{table.type}</span>}
+          <span aria-hidden style={{ width: 8, height: 8, borderRadius: 4, background: statusColor, boxShadow: occupied ? `0 0 8px ${statusColor}` : 'none' }} />
+        </span>
+      </div>
+      {occupied ? (
+        <>
+          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, fontFamily: mono, color: over ? 'var(--noxa-status-error)' : 'var(--noxa-text-muted)' }}>
+            <span>{table.status === 'CHECK' ? '会計' : fmtElapsed(table.startTime)}</span>
+            <span>{table.customers.length}名 / {table.setTimeLength}分</span>
+          </div>
+          <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+            {table.currentHostIds.map((cid) => {
+              const c = castById.get(cid);
+              const isMain = table.mainHostIds.includes(cid);
+              return <span key={cid} style={{ fontSize: 10, padding: '2px 7px', borderRadius: 9999, background: 'var(--noxa-surface-muted)', color: 'var(--noxa-text-primary)', border: isMain ? '1px solid var(--noxa-accent-primary)' : '1px solid transparent' }}>{isMain ? '★' : ''}{c?.name ?? '?'}</span>;
+            })}
+            {table.currentHostIds.length === 0 && <span style={{ fontSize: 10, color: 'var(--noxa-status-warning)', fontFamily: mono }}>キャスト未配置</span>}
+          </div>
+        </>
+      ) : (
+        <span style={{ fontSize: 11, color: 'var(--noxa-text-faint)', fontFamily: mono, marginTop: 'auto' }}>空席</span>
+      )}
+    </button>
+  );
+}
+
+// ───────────────────────── 卓詳細
+
+function TableDetail({ table, casts, tables, castById, store }: {
+  table: FloorTable; casts: Cast[]; tables: FloorTable[]; castById: Map<string, Cast>;
+  store: ReturnType<typeof useSeatingStore>;
+}) {
+  const [showPicker, setShowPicker] = useState(false);
+  const [openGuests, setOpenGuests] = useState(2);
+  const [openType, setOpenType] = useState<TableType>('正規');
+
+  const candidates = useMemo(() => getSourcingCandidates(casts, tables, table)
+    .filter((c) => !table.currentHostIds.includes(c.cast.id)), [casts, tables, table]);
+
+  const startSet = async () => {
+    const now = Date.now();
+    const customers: Customer[] = Array.from({ length: Math.max(1, openGuests) }, (_, i) => ({ id: `cust_${now}_${i}`, type: openType, entryTime: now }));
+    await store.startSet(table.id, customers);
+  };
+
+  return (
+    <section aria-label="卓詳細" style={{ background: 'var(--noxa-surface-card)', border: '1px solid var(--noxa-border)', borderRadius: 16, padding: 16, display: 'flex', flexDirection: 'column', gap: 14 }}>
+      <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 8 }}>
+        <span style={{ fontFamily: 'var(--noxa-font-display-jp)', fontSize: 20, fontWeight: 600 }}>{table.name}</span>
+        <span style={{ fontFamily: mono, fontSize: 11, color: 'var(--noxa-text-muted)' }}>
+          {table.status === 'EMPTY' ? '空席' : `${table.type} · ${fmtElapsed(table.startTime)}経過 · ${table.customers.length}名`}
+          {table.entryNumber ? ` · #${table.entryNumber}` : ''}
+        </span>
+      </div>
+
+      {table.status === 'EMPTY' ? (
+        // 開卓フォーム
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'flex-end' }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+            <span style={miniLabel}>客層</span>
+            <div style={{ display: 'flex', gap: 4 }}>
+              {TABLE_TYPES.map((t) => <button key={t} type="button" onClick={() => setOpenType(t)} style={chipStyle(openType === t)}>{t}</button>)}
+            </div>
+          </div>
+          <label style={{ display: 'flex', flexDirection: 'column', gap: 4, width: 90 }}>
+            <span style={miniLabel}>人数</span>
+            <input type="number" min={1} value={openGuests} onChange={(e) => setOpenGuests(Math.max(1, Number(e.target.value)))} style={fieldStyle} inputMode="numeric" />
+          </label>
+          <button type="button" className="noxa-btn noxa-btn-primary" style={{ ...primaryBtn, width: 'auto', padding: '0 20px' }} onClick={startSet}>開卓する</button>
+        </div>
+      ) : (
+        <>
+          {/* 配置キャスト */}
+          <div>
+            <div style={{ ...miniLabel, marginBottom: 8 }}>配置キャスト（★=本指名）</div>
+            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+              {table.currentHostIds.map((cid) => {
+                const c = castById.get(cid);
+                const isMain = table.mainHostIds.includes(cid);
+                return (
+                  <span key={cid} style={{ display: 'inline-flex', alignItems: 'center', gap: 4, padding: '4px 6px 4px 10px', borderRadius: 9999, background: 'var(--noxa-surface-muted)', border: isMain ? '1px solid var(--noxa-accent-primary)' : '1px solid var(--noxa-border)' }}>
+                    <button type="button" title="本指名" onClick={() => store.toggleMainHost(table.id, cid)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: isMain ? 'var(--noxa-accent-primary-ink)' : 'var(--noxa-text-faint)', fontSize: 13 }}>★</button>
+                    <span style={{ fontSize: 12 }}>{c?.name ?? '?'}</span>
+                    <span style={{ fontFamily: mono, fontSize: 9, color: 'var(--noxa-text-faint)' }}>{fmtElapsed(table.castStartTimes[cid] ?? null)}</span>
+                    <button type="button" title="外す" onClick={() => store.removeCastFromTable(table.id, cid)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--noxa-text-faint)', fontSize: 14, paddingLeft: 2 }}>×</button>
+                  </span>
+                );
+              })}
+              <button type="button" onClick={() => setShowPicker((v) => !v)} style={{ ...chipStyle(false), borderStyle: 'dashed', color: 'var(--noxa-accent-primary-ink)' }}>＋ 配置</button>
+            </div>
+          </div>
+
+          {/* キャストピッカー */}
+          {showPicker && (
+            <div style={{ border: '1px solid var(--noxa-border)', borderRadius: 12, padding: 10, display: 'flex', flexDirection: 'column', gap: 6, maxHeight: 220, overflowY: 'auto' }}>
+              {candidates.length === 0 && <span style={{ fontSize: 12, color: 'var(--noxa-text-faint)' }}>配置可能なキャストがいません。</span>}
+              {candidates.map(({ cast, priority }) => (
+                <button key={cast.id} type="button" onClick={() => { store.assignCast(table.id, cast.id); }}
+                  style={{ appearance: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 8, padding: '7px 10px', borderRadius: 10, background: 'var(--noxa-bg-base)', border: '1px solid var(--noxa-border)', color: 'var(--noxa-text-primary)', textAlign: 'left' }}>
+                  <span aria-hidden style={{ width: 6, height: 6, borderRadius: 3, background: RANK_TINT[cast.rank], flex: 'none' }} />
+                  <span style={{ fontSize: 13, flex: 1 }}>{cast.name}</span>
+                  <span style={{ fontFamily: mono, fontSize: 10, color: 'var(--noxa-text-faint)' }}>{cast.rank}</span>
+                  <span style={{ fontFamily: mono, fontSize: 9, padding: '1px 6px', borderRadius: 9999, background: priority === 'S' ? 'rgba(245,212,114,0.15)' : 'var(--noxa-surface-muted)', color: priority === 'S' ? '#F5D472' : 'var(--noxa-text-muted)' }}>{priority === 'S' ? '指名' : priority === 'A' ? '待機' : 'ヘルプ'}</span>
+                </button>
+              ))}
+            </div>
+          )}
+
+          {/* アクション */}
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', borderTop: '1px solid var(--noxa-divider)', paddingTop: 12 }}>
+            <button type="button" onClick={() => store.rotateHosts(table.id)} style={chipStyle(false)} disabled={table.currentHostIds.length < 2}>席内ローテ</button>
+            <button type="button" onClick={() => store.toggleInnerRotation(table.id)} style={chipStyle(table.innerRotationEnabled)}>自動ローテ提案</button>
+            <button type="button" onClick={() => store.extendTime(table.id, 30)} style={chipStyle(false)}>＋30分延長</button>
+            <button type="button" onClick={() => store.checkTable(table.id)} style={chipStyle(table.status === 'CHECK')}>会計</button>
+            <button type="button" onClick={() => { if (window.confirm(`${table.name} を退店処理（リセット）しますか？`)) store.resetTable(table.id); }} style={{ ...chipStyle(false), color: 'var(--noxa-status-error)', borderColor: 'rgba(229,115,115,0.4)', marginLeft: 'auto' }}>退店</button>
+          </div>
+        </>
+      )}
+    </section>
+  );
+}
+
+// ───────────────────────── キャスト名簿
+
+function CastRoster({ casts, store }: { casts: Cast[]; store: ReturnType<typeof useSeatingStore> }) {
+  const [adding, setAdding] = useState(false);
+  const [name, setName] = useState('');
+  const [rank, setRank] = useState<Rank>('非役職');
+  const [wage, setWage] = useState(5000);
+
+  const cycleStatus = (c: Cast) => {
+    // 在卓中は卓から外すまで変更不可。Free<->Break<->Absent を循環
+    if (c.status === 'Work') return;
+    const next = c.status === 'Free' ? 'Break' : c.status === 'Break' ? 'Absent' : 'Free';
+    store.setCastBaseStatus(c.id, next);
+  };
+
+  const sorted = [...casts].sort((a, b) => RANKS.indexOf(a.rank) - RANKS.indexOf(b.rank));
+
+  return (
+    <section aria-label="在籍キャスト" style={{ background: 'var(--noxa-surface-card)', border: '1px solid var(--noxa-border)', borderRadius: 16, padding: 14, display: 'flex', flexDirection: 'column', gap: 8 }}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 6, maxHeight: 420, overflowY: 'auto' }}>
+        {sorted.length === 0 && <span style={{ fontSize: 12, color: 'var(--noxa-text-faint)' }}>キャストが未登録です。</span>}
+        {sorted.map((c) => (
+          <div key={c.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '7px 8px', borderRadius: 10, background: 'var(--noxa-bg-base)', border: '1px solid var(--noxa-border)', opacity: c.status === 'Absent' ? 0.5 : 1 }}>
+            <span aria-hidden style={{ width: 8, height: 8, borderRadius: 4, background: RANK_TINT[c.rank], flex: 'none' }} />
+            <span style={{ fontSize: 13, flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c.name}<span style={{ fontFamily: mono, fontSize: 9, color: 'var(--noxa-text-faint)', marginLeft: 6 }}>{c.rank}</span></span>
+            <button type="button" onClick={() => cycleStatus(c)} title="状態切替" style={{ ...chipStyle(c.status === 'Work'), minHeight: 26, padding: '2px 8px', fontSize: 11, cursor: c.status === 'Work' ? 'default' : 'pointer' }}>{STATUS_LABEL[c.status]}</button>
+            <button type="button" onClick={() => store.toggleLock(c.id)} title="ロック（AI除外）" style={{ background: 'none', border: 'none', cursor: 'pointer', color: c.isLocked ? 'var(--noxa-accent-primary-ink)' : 'var(--noxa-text-faint)', fontSize: 13 }}>{c.isLocked ? '🔒' : '🔓'}</button>
+          </div>
+        ))}
+      </div>
+
+      {adding ? (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 6, borderTop: '1px solid var(--noxa-divider)', paddingTop: 10 }}>
+          <input value={name} onChange={(e) => setName(e.target.value)} placeholder="名前" style={fieldStyle} />
+          <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+            {RANKS.map((r) => <button key={r} type="button" onClick={() => setRank(r)} style={chipStyle(rank === r)}>{r}</button>)}
+          </div>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <span style={miniLabel}>時給</span>
+            <input type="number" value={wage} onChange={(e) => setWage(Number(e.target.value))} style={fieldStyle} inputMode="numeric" />
+          </label>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button type="button" className="noxa-btn noxa-btn-primary" style={{ ...primaryBtn, flex: 1 }} disabled={!name.trim()}
+              onClick={async () => { await store.addCast({ name: name.trim(), rank, hourlyWage: wage }); setName(''); setAdding(false); }}>追加</button>
+            <button type="button" onClick={() => setAdding(false)} style={{ ...ghostBtn, width: 72 }}>戻る</button>
+          </div>
+        </div>
+      ) : (
+        <button type="button" onClick={() => setAdding(true)} style={{ ...chipStyle(false), borderStyle: 'dashed', alignSelf: 'flex-start' }}>＋ キャスト追加</button>
+      )}
+    </section>
+  );
+}
+
+// ───────────────────────── 待機列
+
+function QueuePanel({ queue, tables, store }: { queue: import('@/lib/seating/types').QueueItem[]; tables: FloorTable[]; store: ReturnType<typeof useSeatingStore> }) {
+  const [name, setName] = useState('');
+  const [size, setSize] = useState(2);
+  const [type, setType] = useState<TableType>('正規');
+  const [seatFor, setSeatFor] = useState<string | null>(null);
+  const emptyTables = tables.filter((t) => t.status === 'EMPTY');
+
+  return (
+    <section aria-label="待ち組" style={{ background: 'var(--noxa-surface-card)', border: '1px solid var(--noxa-border)', borderRadius: 16, padding: 14, display: 'flex', flexDirection: 'column', gap: 8 }}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 6, maxHeight: 320, overflowY: 'auto' }}>
+        {queue.length === 0 && <span style={{ fontSize: 12, color: 'var(--noxa-text-faint)' }}>待ち組はいません。</span>}
+        {queue.map((q) => (
+          <div key={q.id} style={{ padding: '8px 10px', borderRadius: 10, background: 'var(--noxa-bg-base)', border: '1px solid var(--noxa-border)', display: 'flex', flexDirection: 'column', gap: 6 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <span style={{ fontSize: 13, flex: 1 }}>{q.name}<span style={{ fontFamily: mono, fontSize: 10, color: 'var(--noxa-text-faint)', marginLeft: 6 }}>{q.type} · {q.groupSize}名</span></span>
+              <button type="button" onClick={() => store.removeFromQueue(q.id)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--noxa-text-faint)', fontSize: 14 }}>×</button>
+            </div>
+            {seatFor === q.id ? (
+              <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+                {emptyTables.length === 0 && <span style={{ fontSize: 11, color: 'var(--noxa-status-warning)' }}>空卓なし</span>}
+                {emptyTables.map((t) => (
+                  <button key={t.id} type="button" onClick={() => { store.seatQueueGroup(t.id, q); setSeatFor(null); }} style={chipStyle(false)}>{t.name}</button>
+                ))}
+              </div>
+            ) : (
+              <button type="button" onClick={() => setSeatFor(q.id)} style={{ ...chipStyle(true), minHeight: 28, alignSelf: 'flex-start' }}>卓へ案内</button>
+            )}
+          </div>
+        ))}
+      </div>
+
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 6, borderTop: '1px solid var(--noxa-divider)', paddingTop: 10 }}>
+        <input value={name} onChange={(e) => setName(e.target.value)} placeholder="名前 / 組名" style={fieldStyle} />
+        <div style={{ display: 'flex', gap: 8 }}>
+          <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', flex: 1 }}>
+            {TABLE_TYPES.map((t) => <button key={t} type="button" onClick={() => setType(t)} style={chipStyle(type === t)}>{t}</button>)}
+          </div>
+          <input type="number" min={1} value={size} onChange={(e) => setSize(Math.max(1, Number(e.target.value)))} style={{ ...fieldStyle, width: 64 }} inputMode="numeric" />
+        </div>
+        <button type="button" className="noxa-btn noxa-btn-primary" style={primaryBtn} disabled={!name.trim()}
+          onClick={async () => { await store.addToQueue({ name: name.trim(), groupSize: size, type }); setName(''); }}>待ち組に追加</button>
+      </div>
+    </section>
+  );
+}
+
+// ───────────────────────── 共通
+
+function Shell({ children, device }: { children: React.ReactNode; device?: boolean }) {
+  return (
+    <div style={{ color: 'var(--noxa-text-primary)', fontFamily: 'var(--noxa-font-sans-jp)', borderRadius: 16, border: '1px solid var(--noxa-border)', padding: 'clamp(16px, 3vw, 28px)', position: 'relative', overflow: 'hidden' }}>
+      <div aria-hidden style={{ position: 'absolute', top: '-30%', right: '-10%', width: 700, height: 420, background: 'radial-gradient(ellipse, rgba(139, 92, 246, 0.12) 0%, transparent 65%)', pointerEvents: 'none' }} />
+      <div style={{ position: 'relative' }}>
+        <nav aria-label="breadcrumb" style={{ marginBottom: 10 }}>
+          <ol style={{ display: 'flex', gap: 8, fontFamily: mono, fontSize: 11, letterSpacing: '0.06em', color: 'var(--noxa-text-faint)', listStyle: 'none', margin: 0, padding: 0 }}>
+            <li><Link href="/account" style={{ color: 'var(--noxa-text-muted)', textDecoration: 'none' }}>Noxa OS</Link></li>
+            <li aria-hidden>·</li>
+            <li>seating</li>
+          </ol>
+        </nav>
+        <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', gap: 16, flexWrap: 'wrap', marginBottom: 20 }}>
+          <div>
+            <div className="noxa-eyebrow" style={{ marginBottom: 6 }}>Noxa OS · Module 03 · Floor</div>
+            <h1 className="noxa-display" style={{ fontSize: 'clamp(26px, 4vw, 38px)', margin: 0, display: 'flex', alignItems: 'baseline', gap: 10, flexWrap: 'wrap' }}>
+              <span style={{ fontFamily: 'var(--noxa-font-display-en)', fontStyle: 'italic', color: 'var(--noxa-accent-primary-ink)', fontWeight: 400 }}>№ 03</span>
+              <span style={{ fontFamily: 'var(--noxa-font-display-jp)', fontWeight: 500 }}>席回し</span>
+            </h1>
+          </div>
+          <div role="note" style={{ display: 'inline-flex', alignItems: 'center', gap: 8, padding: '6px 12px', background: 'rgba(123,232,161,0.10)', border: '1px solid rgba(123,232,161,0.30)', borderRadius: 9999, fontFamily: mono, fontSize: 10, letterSpacing: '0.12em', color: 'var(--noxa-status-success)', textTransform: 'uppercase' }}>
+            <span aria-hidden style={{ width: 6, height: 6, borderRadius: 3, background: 'var(--noxa-status-success)', boxShadow: '0 0 8px var(--noxa-status-success)' }} />
+            {device ? '店舗端末 · 実データ' : '実データ · AI配置'}
+          </div>
+        </div>
+        {children}
+      </div>
+    </div>
+  );
+}
 
 function PaneTitle({ children }: { children: React.ReactNode }) {
-  return (
-    <h2
-      className="noxa-eyebrow"
-      style={{ fontSize: 11, marginBottom: 12, display: 'block' }}
-    >
-      {children}
-    </h2>
-  );
+  return <h2 className="noxa-eyebrow" style={{ fontSize: 11, marginBottom: 12, display: 'block' }}>{children}</h2>;
+}
+function Empty({ children }: { children: React.ReactNode }) {
+  return <div style={{ background: 'var(--noxa-surface-card)', border: '1px solid var(--noxa-border)', borderRadius: 14, padding: 24, color: 'var(--noxa-text-muted)', fontSize: 13 }}>{children}</div>;
 }
 
-function SummaryChip({
-  label,
-  value,
-  color,
-}: {
-  label: string;
-  value: string;
-  color: string;
-}) {
-  return (
-    <div
-      style={{
-        display: 'inline-flex',
-        alignItems: 'center',
-        gap: 10,
-        padding: '7px 14px',
-        background: 'var(--noxa-surface-card)',
-        border: '1px solid var(--noxa-border)',
-        borderRadius: 10,
-        minWidth: 110,
-      }}
-    >
-      <span
-        aria-hidden
-        style={{
-          width: 7,
-          height: 7,
-          borderRadius: '50%',
-          background: color,
-          boxShadow: `0 0 8px ${color}`,
-          flex: 'none',
-        }}
-      />
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
-        <span
-          style={{
-            fontFamily: 'var(--noxa-font-mono)',
-            fontSize: 9,
-            letterSpacing: '0.10em',
-            textTransform: 'uppercase',
-            color: 'var(--noxa-text-faint)',
-          }}
-        >
-          {label}
-        </span>
-        <span
-          style={{
-            fontFamily: 'var(--noxa-font-mono)',
-            fontSize: 18,
-            fontWeight: 600,
-            fontVariantNumeric: 'tabular-nums',
-            color,
-            lineHeight: 1.1,
-          }}
-        >
-          {value}
-        </span>
-      </div>
-    </div>
-  );
+const miniLabel: React.CSSProperties = { fontFamily: mono, fontSize: 10, letterSpacing: '0.06em', textTransform: 'uppercase', color: 'var(--noxa-text-faint)' };
+
+function chipStyle(active: boolean): React.CSSProperties {
+  return {
+    appearance: 'none', cursor: 'pointer', whiteSpace: 'nowrap', flex: 'none', minHeight: 34, padding: '6px 14px', borderRadius: 9999,
+    fontFamily: 'var(--noxa-font-sans-jp)', fontSize: 13, fontWeight: active ? 600 : 400,
+    background: active ? 'var(--noxa-accent-primary)' : 'var(--noxa-surface-card)',
+    color: active ? '#fff' : 'var(--noxa-text-muted)',
+    border: `1px solid ${active ? 'var(--noxa-accent-primary)' : 'var(--noxa-border)'}`,
+    boxShadow: active ? 'var(--noxa-glow-soft)' : 'none',
+    transition: 'all var(--noxa-duration-fast) var(--noxa-ease-natural)',
+  };
 }
-
-function CastCard({
-  cast,
-  highlight,
-  tableLabel,
-}: {
-  cast: MockCast;
-  highlight?: boolean;
-  tableLabel?: string;
-}) {
-  const mono = 'var(--noxa-font-mono)';
-  const isWaiting = cast.status === 'waiting';
-
-  return (
-    <div
-      style={{
-        display: 'flex',
-        alignItems: 'center',
-        gap: 10,
-        padding: '9px 12px',
-        borderRadius: 12,
-        background: highlight ? 'rgba(123,232,161,0.07)' : 'var(--noxa-surface-card)',
-        border: highlight
-          ? '1px solid rgba(123,232,161,0.30)'
-          : '1px solid var(--noxa-border)',
-        boxShadow: highlight ? '0 0 10px rgba(123,232,161,0.12)' : 'none',
-        transition: 'all var(--noxa-duration-fast) var(--noxa-ease-natural)',
-      }}
-      aria-label={[
-        cast.name,
-        isWaiting ? `待機${cast.waitMin}分` : `接客中 ${tableLabel ?? ''}`,
-        highlight ? '次の指名候補' : '',
-      ]
-        .filter(Boolean)
-        .join(' ')}
-    >
-      {/* アバター丸 */}
-      <div
-        aria-hidden
-        style={{
-          width: 36,
-          height: 36,
-          borderRadius: '50%',
-          background: 'var(--noxa-surface-muted)',
-          border: highlight
-            ? '1.5px solid var(--noxa-status-success)'
-            : `1.5px solid ${isWaiting ? 'var(--noxa-border-strong)' : 'var(--noxa-accent-primary-ink)'}`,
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          flex: 'none',
-          fontFamily: 'var(--noxa-font-display-jp)',
-          fontSize: 14,
-          fontWeight: 500,
-          color: highlight
-            ? 'var(--noxa-status-success)'
-            : isWaiting
-            ? 'var(--noxa-text-muted)'
-            : 'var(--noxa-accent-primary-ink)',
-        }}
-      >
-        {cast.name.charAt(0)}
-      </div>
-
-      {/* 名前 + ステータス */}
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 2, flex: 1, minWidth: 0 }}>
-        <span
-          style={{
-            fontSize: 13,
-            fontWeight: 500,
-            color: 'var(--noxa-text-primary)',
-            overflow: 'hidden',
-            textOverflow: 'ellipsis',
-            whiteSpace: 'nowrap',
-          }}
-        >
-          {cast.name}
-        </span>
-        <span
-          style={{
-            fontFamily: mono,
-            fontSize: 10,
-            color: isWaiting
-              ? highlight
-                ? 'var(--noxa-status-success)'
-                : 'var(--noxa-text-faint)'
-              : 'var(--noxa-accent-primary-ink)',
-          }}
-        >
-          {isWaiting
-            ? `待機 ${cast.waitMin}分`
-            : `接客中 · ${tableLabel ?? ''}`}
-        </span>
-      </div>
-
-      {/* 次候補バッジ */}
-      {highlight && (
-        <span
-          style={{
-            fontFamily: mono,
-            fontSize: 9,
-            letterSpacing: '0.08em',
-            textTransform: 'uppercase',
-            color: 'var(--noxa-status-success)',
-            border: '1px solid rgba(123,232,161,0.35)',
-            padding: '2px 7px',
-            borderRadius: 9999,
-            flex: 'none',
-            whiteSpace: 'nowrap',
-          }}
-        >
-          NEXT
-        </span>
-      )}
-    </div>
-  );
-}
-
-function DetailItem({
-  label,
-  value,
-  highlight,
-}: {
-  label: string;
-  value: string;
-  highlight?: boolean;
-}) {
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
-      <span
-        style={{
-          fontFamily: 'var(--noxa-font-mono)',
-          fontSize: 9,
-          letterSpacing: '0.10em',
-          textTransform: 'uppercase',
-          color: 'var(--noxa-text-faint)',
-        }}
-      >
-        {label}
-      </span>
-      <span
-        style={{
-          fontFamily: 'var(--noxa-font-mono)',
-          fontSize: 14,
-          fontWeight: 600,
-          fontVariantNumeric: 'tabular-nums',
-          color: highlight ? 'var(--noxa-status-warning)' : 'var(--noxa-text-primary)',
-        }}
-      >
-        {value}
-      </span>
-    </div>
-  );
-}
+const fieldStyle: React.CSSProperties = {
+  width: '100%', minHeight: 40, padding: '8px 12px', borderRadius: 10, background: 'var(--noxa-bg-base)',
+  border: '1px solid var(--noxa-border)', color: 'var(--noxa-text-primary)', fontSize: 16,
+};
+const primaryBtn: React.CSSProperties = {
+  appearance: 'none', cursor: 'pointer', width: '100%', minHeight: 44, borderRadius: 12,
+  border: '1px solid var(--noxa-accent-primary)', background: 'var(--noxa-accent-primary)', color: '#fff',
+  fontFamily: 'var(--noxa-font-sans-jp)', fontSize: 14, fontWeight: 600, boxShadow: 'var(--noxa-glow-soft)',
+};
+const ghostBtn: React.CSSProperties = {
+  appearance: 'none', cursor: 'pointer', minHeight: 40, borderRadius: 12,
+  border: '1px solid var(--noxa-border-strong)', background: 'var(--noxa-surface-muted)', color: 'var(--noxa-text-muted)',
+  fontFamily: 'var(--noxa-font-sans-jp)', fontSize: 13, fontWeight: 500,
+};
 
 export default SeatingClient;
