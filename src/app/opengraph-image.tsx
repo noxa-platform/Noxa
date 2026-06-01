@@ -1,15 +1,15 @@
 import { ImageResponse } from 'next/og';
 
 /**
- * NOXA — 動的 OG 画像
+ * Noxa — 動的 OG 画像
  * Next.js convention: app/opengraph-image.tsx で /opengraph-image にホスト
- * SNS シェア時に NOXA brand の dark + violet で表示。
+ * SNS シェア時に Noxa brand の dark + violet で表示。
  */
 
 export const runtime = 'edge';
 export const size = { width: 1200, height: 630 };
 export const contentType = 'image/png';
-export const alt = 'NOXA — Nightfall, refined.';
+export const alt = 'Noxa — Nightfall, refined.';
 
 export default async function OpenGraphImage() {
   return new ImageResponse(
@@ -133,7 +133,7 @@ export default async function OpenGraphImage() {
               community
             </span>
           </div>
-          <div style={{ display: 'flex', color: '#6E6585', letterSpacing: 4 }}>NOXA-DELTA.VERCEL.APP</div>
+          <div style={{ display: 'flex', color: '#6E6585', letterSpacing: 4 }}>Noxa-DELTA.VERCEL.APP</div>
         </div>
       </div>
     ),

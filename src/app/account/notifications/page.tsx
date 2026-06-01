@@ -51,7 +51,7 @@ function NotificationsEditor({ user }: { user: User }) {
       <div className="noxa-eyebrow" style={{ marginBottom: 10 }}>Account · Notifications</div>
       <h1 className="noxa-h1" style={{ margin: '0 0 8px' }}>通知設定</h1>
       <p style={{ color: 'var(--noxa-text-muted)', fontSize: 14, marginBottom: 32 }}>
-        NOXA 全サービス共通の通知設定です
+        Noxa 全サービス共通の通知設定です
       </p>
 
       {!loaded ? (

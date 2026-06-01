@@ -2,7 +2,7 @@ import { initializeApp, getApps, type FirebaseApp } from 'firebase/app';
 import { getAuth, GoogleAuthProvider, connectAuthEmulator, type Auth } from 'firebase/auth';
 import { getFirestore, connectFirestoreEmulator, type Firestore } from 'firebase/firestore';
 
-// NOXA は yorulog / nomishugy と同じ Firebase プロジェクト (noxa-platform) を共有。
+// Noxa は yorulog / nomishugy と同じ Firebase プロジェクト (noxa-platform) を共有。
 // すべてのプロダクトが同一 Firebase Auth + Firestore を使うため、
 // account_users / account_subscriptions / account_credit_ledger 等の共通ドメインが直接読める。
 const firebaseConfig = {

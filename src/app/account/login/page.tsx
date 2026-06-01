@@ -105,7 +105,7 @@ function LoginForm() {
         />
 
         <Link href="/" className="noxa-logo relative" style={{ fontSize: 30 }}>
-          N<em>O</em>XA
+          N<em>o</em>xa
         </Link>
 
         <div className="relative">
@@ -136,12 +136,12 @@ function LoginForm() {
             </span>
           </h2>
           <p style={{ color: 'var(--noxa-text-muted)', fontSize: 14, marginTop: 18, maxWidth: 360, lineHeight: 1.65 }}>
-            yorulog, nomishugy, NOXA Community. ひとつの NOXA アカウントで、全てのサービスに。
+            yorulog, nomishugy, Noxa Community. ひとつの Noxa アカウントで、全てのサービスに。
           </p>
         </div>
 
         <div className="relative flex gap-4" style={{ color: 'var(--noxa-text-faint)', fontSize: 12 }}>
-          <span>© 2026 NOXA</span>
+          <span>© 2026 Noxa</span>
           <span aria-hidden>·</span>
           <Link href="/terms" style={{ color: 'var(--noxa-text-faint)' }}>利用規約</Link>
           <span aria-hidden>·</span>
@@ -156,7 +156,7 @@ function LoginForm() {
       >
         <div>
           <Link href="/" className="noxa-logo lg:hidden inline-block mb-8" style={{ fontSize: 24 }}>
-            N<em>O</em>XA
+            N<em>o</em>xa
           </Link>
           <div className="noxa-eyebrow" style={{ marginBottom: 14 }}>Sign in</div>
           <h1
@@ -166,7 +166,7 @@ function LoginForm() {
             Welcome back
           </h1>
           <p style={{ color: 'var(--noxa-text-muted)', fontSize: 14, margin: 0 }}>
-            NOXA アカウントでログイン
+            Noxa アカウントでログイン
             {redirect && (
               <>
                 <br />

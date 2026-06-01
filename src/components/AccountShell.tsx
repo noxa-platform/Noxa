@@ -36,7 +36,7 @@ export function AccountShell({ user, children }: { user: User; children: React.R
         }}
       >
         <Link href="/" className="noxa-logo px-2" style={{ fontSize: 22 }}>
-          N<em>O</em>XA
+          N<em>o</em>xa
         </Link>
 
         <div className="flex flex-col" style={{ gap: 2 }}>
@@ -159,7 +159,7 @@ export function AccountShell({ user, children }: { user: User; children: React.R
                 overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
               }}
             >
-              {user.displayName ?? 'NOXA ユーザー'}
+              {user.displayName ?? 'Noxa ユーザー'}
             </div>
             <div
               style={{
@@ -192,7 +192,7 @@ export function AccountShell({ user, children }: { user: User; children: React.R
         }}
       >
         <Link href="/" className="noxa-logo" style={{ fontSize: 18 }}>
-          N<em>O</em>XA
+          N<em>o</em>xa
         </Link>
         <button
           onClick={async () => { await signOut(); window.location.href = '/'; }}

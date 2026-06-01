@@ -42,7 +42,7 @@ function CreditsView({ user }: { user: User }) {
       <div className="noxa-eyebrow" style={{ marginBottom: 10 }}>Account · Credits</div>
       <h1 className="noxa-h1" style={{ margin: '0 0 8px' }}>AI クレジット履歴</h1>
       <p style={{ color: 'var(--noxa-text-muted)', fontSize: 14, marginBottom: 32 }}>
-        NOXA 全サービスでのクレジット消費履歴
+        Noxa 全サービスでのクレジット消費履歴
       </p>
 
       {!loaded && <div className="noxa-caption">読み込み中…</div>}
@@ -80,7 +80,7 @@ function CreditsView({ user }: { user: User }) {
                     className="noxa-mono"
                     style={{ color: 'var(--noxa-text-muted)', fontSize: 11 }}
                   >
-                    <span style={{ color: tint }}>●</span> {e.service ?? 'NOXA'}
+                    <span style={{ color: tint }}>●</span> {e.service ?? 'Noxa'}
                     {e.consumedAt && ` · ${new Date(e.consumedAt.seconds * 1000).toLocaleString('ja-JP')}`}
                   </div>
                 </div>

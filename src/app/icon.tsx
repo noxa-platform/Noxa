@@ -1,7 +1,7 @@
 import { ImageResponse } from 'next/og';
 
 /**
- * NOXA — favicon / アプリアイコン
+ * Noxa — favicon / アプリアイコン
  * Next.js convention: app/icon.tsx で /icon を 512×512 で配信
  */
 

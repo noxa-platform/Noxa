@@ -14,16 +14,16 @@ export const viewport: Viewport = {
 export const metadata: Metadata = {
   metadataBase: new URL('https://noxa-delta.vercel.app'),
   title: {
-    default: 'NOXA — 夜の街のための統合プラットフォーム',
-    template: '%s · NOXA',
+    default: 'Noxa — 夜の街のための統合プラットフォーム',
+    template: '%s · Noxa',
   },
   description:
-    'ナイトワーカー・夜の街オーナー・夜遊びユーザーのための統合プラットフォーム NOXA。アカウント 1 つで yorulog（夜職売上 CRM）、nomishugy（大阪バーポータル）、NOXA コミュニティを利用できます。',
-  applicationName: 'NOXA',
+    'ナイトワーカー・夜の街オーナー・夜遊びユーザーのための統合プラットフォーム Noxa。アカウント 1 つで yorulog（夜職売上 CRM）、nomishugy（大阪バーポータル）、Noxa コミュニティを利用できます。',
+  applicationName: 'Noxa',
   authors: [{ name: 'egshugy' }],
   generator: 'Next.js',
   keywords: [
-    'NOXA',
+    'Noxa',
     'ノクサ',
     'よるしゅぎ',
     'えぐしゅぎ',
@@ -48,21 +48,21 @@ export const metadata: Metadata = {
   openGraph: {
     type: 'website',
     locale: 'ja_JP',
-    siteName: 'NOXA',
-    title: 'NOXA — Nightfall, refined.',
+    siteName: 'Noxa',
+    title: 'Noxa — Nightfall, refined.',
     description: '夜の街のための統合プラットフォーム。アカウント 1 つで、すべてのサービスに。',
     images: [
       {
         url: '/opengraph-image',
         width: 1200,
         height: 630,
-        alt: 'NOXA',
+        alt: 'Noxa',
       },
     ],
   },
   twitter: {
     card: 'summary_large_image',
-    title: 'NOXA — Nightfall, refined.',
+    title: 'Noxa — Nightfall, refined.',
     description: '夜の街のための統合プラットフォーム。',
     images: ['/opengraph-image'],
   },

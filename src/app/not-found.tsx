@@ -1,7 +1,7 @@
 import Link from 'next/link';
 
 /**
- * NOXA — 404
+ * Noxa — 404
  * ui-ux-pro-max: empty-nav-state（理由 + 経路）
  */
 export default function NotFound() {

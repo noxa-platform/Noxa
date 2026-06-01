@@ -54,12 +54,12 @@ function AccountDashboard({ user }: { user: User }) {
   }, [user.uid]);
 
   const planTier = sub?.planTier ?? 'free';
-  const planLabel = planTier === 'free' ? 'NOXA Free' : `NOXA ${planTier.charAt(0).toUpperCase()}${planTier.slice(1)}`;
+  const planLabel = planTier === 'free' ? 'Noxa Free' : `Noxa ${planTier.charAt(0).toUpperCase()}${planTier.slice(1)}`;
   const totalCredits = sub?.aiCreditsTotal ?? 0;
   const usedCredits = sub?.aiCreditsUsed ?? 0;
   const remainingCredits = totalCredits - usedCredits;
   const usagePct = totalCredits > 0 ? Math.min(100, Math.max(0, (remainingCredits / totalCredits) * 100)) : 0;
-  const displayName = user.displayName ?? (user.email?.split('@')[0] ?? 'NOXA ユーザー');
+  const displayName = user.displayName ?? (user.email?.split('@')[0] ?? 'Noxa ユーザー');
 
   return (
     <AccountShell user={user}>

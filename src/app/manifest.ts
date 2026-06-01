@@ -2,8 +2,8 @@ import type { MetadataRoute } from 'next';
 
 export default function manifest(): MetadataRoute.Manifest {
   return {
-    name: 'NOXA',
-    short_name: 'NOXA',
+    name: 'Noxa',
+    short_name: 'Noxa',
     description: '夜の街のための統合プラットフォーム',
     start_url: '/',
     display: 'standalone',

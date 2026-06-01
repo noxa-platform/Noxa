@@ -2,9 +2,9 @@ import Link from 'next/link';
 import type { Metadata } from 'next';
 
 export const metadata: Metadata = {
-  title: 'NOXA — 夜の街の OS',
+  title: 'Noxa — 夜の街の OS',
   description:
-    'NOXA はナイトワーク総合プラットフォーム。POS / 売上管理 / 席回し / 勤怠 / 給与 / 初回案内 / 送迎 / 在庫 / 名刺発注を 1 アカウントで束ねる OS。サブ機能に夜職紹介制コミュニティとバー紹介・求人「のみシュギ」。',
+    'Noxa はナイトワーク総合プラットフォーム。POS / 売上管理 / 席回し / 勤怠 / 給与 / 初回案内 / 送迎 / 在庫 / 名刺発注を 1 アカウントで束ねる OS。サブ機能に夜職紹介制コミュニティとバー紹介・求人「のみシュギ」。',
 };
 
 type ModuleStatus = 'live' | 'beta' | 'soon' | 'planned';
@@ -66,7 +66,7 @@ const MODULES: OsModule[] = [
   },
   {
     letter: 'B', id: 'nomishugy', title: 'のみシュギ',
-    desc: 'バー紹介・求人・コラム。Phase v1.3 で NOXA /bars にも内蔵予定（独立ドメインと並走）。',
+    desc: 'バー紹介・求人・コラム。Phase v1.3 で Noxa /bars にも内蔵予定（独立ドメインと並走）。',
     href: 'https://nomishugy.vercel.app', external: true, status: 'beta', group: 'sub',
   },
 ];
@@ -109,8 +109,8 @@ export default function NoxaOsLandingPage() {
         className="relative flex items-center px-6 md:px-16 py-6"
         style={{ borderBottom: '1px solid var(--noxa-divider)' }}
       >
-        <Link href="/" className="noxa-logo" style={{ fontSize: 26 }} aria-label="NOXA ホーム">
-          N<em>O</em>XA
+        <Link href="/" className="noxa-logo" style={{ fontSize: 26 }} aria-label="Noxa ホーム">
+          N<em>o</em>xa
         </Link>
         <div className="hidden md:flex gap-7 ml-14 flex-1">
           <a href="#main" style={{ color: 'var(--noxa-text-muted)', fontSize: 13 }}>機能</a>
@@ -133,7 +133,7 @@ export default function NoxaOsLandingPage() {
 
       {/* Hero */}
       <section className="relative px-6 md:px-16 pt-20 md:pt-24 pb-12" style={{ maxWidth: 1200 }}>
-        <div className="noxa-eyebrow">NOXA OS · NIGHT WORK PLATFORM · v1.1</div>
+        <div className="noxa-eyebrow">Noxa OS · NIGHT WORK PLATFORM · v1.1</div>
         <h1
           className="noxa-display"
           style={{
@@ -219,7 +219,7 @@ export default function NoxaOsLandingPage() {
       <section id="sub" className="relative px-6 md:px-16 py-12">
         <div style={{ maxWidth: 1280, margin: '0 auto' }}>
           <div className="noxa-eyebrow" style={{ marginBottom: 12 }}>
-            SUB MODULES · NOXA 上のアプリ
+            SUB MODULES · Noxa 上のアプリ
           </div>
           <h2
             style={{
@@ -329,7 +329,7 @@ export default function NoxaOsLandingPage() {
           borderTop: '1px solid var(--noxa-divider)',
         }}
       >
-        <span>© 2026 NOXA</span>
+        <span>© 2026 Noxa</span>
         <span aria-hidden>·</span>
         <Link href="/terms" style={{ color: 'var(--noxa-text-faint)' }}>利用規約</Link>
         <span aria-hidden>·</span>

@@ -80,7 +80,7 @@ function SignupForm() {
           }}
         />
         <Link href="/" className="noxa-logo relative" style={{ fontSize: 30 }}>
-          N<em>O</em>XA
+          N<em>o</em>xa
         </Link>
 
         <div className="relative">
@@ -111,13 +111,13 @@ function SignupForm() {
             </span>
           </h2>
           <p style={{ color: 'var(--noxa-text-muted)', fontSize: 14, marginTop: 18, maxWidth: 360, lineHeight: 1.65 }}>
-            1 つの NOXA アカウントで yorulog / nomishugy / NOXA Community が使えます。
+            1 つの Noxa アカウントで yorulog / nomishugy / Noxa Community が使えます。
             30 秒で作成、クレジットカード不要。
           </p>
         </div>
 
         <div className="relative flex gap-4" style={{ color: 'var(--noxa-text-faint)', fontSize: 12 }}>
-          <span>© 2026 NOXA</span>
+          <span>© 2026 Noxa</span>
           <span aria-hidden>·</span>
           <Link href="/terms" style={{ color: 'var(--noxa-text-faint)' }}>利用規約</Link>
           <span aria-hidden>·</span>
@@ -132,14 +132,14 @@ function SignupForm() {
       >
         <div>
           <Link href="/" className="noxa-logo lg:hidden inline-block mb-8" style={{ fontSize: 24 }}>
-            N<em>O</em>XA
+            N<em>o</em>xa
           </Link>
           <div className="noxa-eyebrow" style={{ marginBottom: 14 }}>Create</div>
           <h1 className="noxa-display" style={{ fontSize: 36, marginBottom: 8 }}>
             Welcome
           </h1>
           <p style={{ color: 'var(--noxa-text-muted)', fontSize: 14, margin: 0 }}>
-            NOXA アカウントを作成
+            Noxa アカウントを作成
           </p>
         </div>
 

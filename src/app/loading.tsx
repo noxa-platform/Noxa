@@ -1,5 +1,5 @@
 /**
- * NOXA — グローバル loading skeleton
+ * Noxa — グローバル loading skeleton
  * ui-ux-pro-max: 300ms 超え operations は skeleton を表示。
  * prefers-reduced-motion は globals.css のガードで自動対応。
  */

@@ -4,7 +4,7 @@ import { useEffect } from 'react';
 import Link from 'next/link';
 
 /**
- * NOXA — グローバル error boundary
+ * Noxa — グローバル error boundary
  * ui-ux-pro-max: error-clarity（原因 + 回復経路）+ escape-routes
  */
 export default function GlobalError({
@@ -18,7 +18,7 @@ export default function GlobalError({
     // 開発時のみ console、本番は監視サービスへ送信する想定
     if (process.env.NODE_ENV !== 'production') {
       // eslint-disable-next-line no-console
-      console.error('[NOXA] error boundary:', error);
+      console.error('[Noxa] error boundary:', error);
     }
   }, [error]);
 

@@ -167,7 +167,7 @@ export function CommunityClient() {
           >
             <li>
               <Link href="/" style={{ color: 'var(--noxa-text-muted)', textDecoration: 'none' }}>
-                NOXA
+                Noxa
               </Link>
             </li>
             <li aria-hidden>·</li>
@@ -190,12 +190,12 @@ export function CommunityClient() {
         >
           <div>
             <div className="noxa-eyebrow" style={{ marginBottom: 8 }}>
-              NOXA · SUB MODULE A · CLOSED SNS
+              Noxa · SUB MODULE A · CLOSED SNS
             </div>
             <div style={{ display: 'flex', alignItems: 'baseline', gap: 14, flexWrap: 'wrap' }}>
-              {/* NOXA ロゴ */}
-              <span className="noxa-logo" style={{ fontSize: 22 }} aria-label="NOXA">
-                N<em>O</em>XA
+              {/* Noxa ロゴ */}
+              <span className="noxa-logo" style={{ fontSize: 22 }} aria-label="Noxa">
+                N<em>o</em>xa
               </span>
               <h1
                 style={{
@@ -518,7 +518,7 @@ export function CommunityClient() {
               color: 'var(--noxa-text-muted)',
             }}
           >
-            招待制コミュニティは現在準備中です。NOXA アカウント作成で開始通知をお届けします。
+            招待制コミュニティは現在準備中です。Noxa アカウント作成で開始通知をお届けします。
           </span>
         </div>
         <Link

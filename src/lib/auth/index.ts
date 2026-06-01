@@ -1,5 +1,5 @@
 /**
- * NOXA 認証フロー
+ * Noxa 認証フロー
  *
  * - Firebase Auth を直接使う（noxa は same Firebase project を共有）
  * - クロスドメイン redirect: redirect=https://yorulog.vercel.app/home 等の URL を query で受けて、
@@ -109,7 +109,7 @@ async function ensureAccountUser(user: User, displayName?: string): Promise<void
 
 /**
  * Custom Token 発行 API を呼び出す。
- * NOXA でログイン済みのユーザーが yorulog/nomishugy に遷移するとき使う。
+ * Noxa でログイン済みのユーザーが yorulog/nomishugy に遷移するとき使う。
  *
  * Cloud Function `exchangeAuthToken` が:
  *   1. Authorization: Bearer <noxa の ID Token> を検証
@@ -132,7 +132,7 @@ export async function fetchCustomToken(): Promise<string> {
 
 /**
  * ログイン成功後に呼び出す。redirect query があれば custom token 付きで遷移。
- * 無ければ NOXA Account のハブ (/account) に飛ばす。
+ * 無ければ Noxa Account のハブ (/account) に飛ばす。
  */
 export async function handlePostLoginRedirect(redirect: string | null, router: { push: (url: string) => void }): Promise<void> {
   if (redirect && isAllowedRedirect(redirect)) {

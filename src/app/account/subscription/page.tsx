@@ -26,7 +26,7 @@ function SubscriptionView({ user }: { user: User }) {
   }, [user.uid]);
 
   const planTier = sub?.planTier ?? 'free';
-  const planLabel = planTier === 'free' ? 'NOXA Free' : `NOXA ${planTier.charAt(0).toUpperCase()}${planTier.slice(1)}`;
+  const planLabel = planTier === 'free' ? 'Noxa Free' : `Noxa ${planTier.charAt(0).toUpperCase()}${planTier.slice(1)}`;
 
   return (
     <AccountShell user={user}>

@@ -48,7 +48,7 @@ function DeleteAccount({ user }: { user: User }) {
         className="noxa-h1"
         style={{ color: 'var(--noxa-accent-destructive)', margin: '0 0 32px' }}
       >
-        NOXA アカウント削除
+        Noxa アカウント削除
       </h1>
 
       <div
@@ -77,7 +77,7 @@ function DeleteAccount({ user }: { user: User }) {
         >
           <li>✗ yorulog の顧客カルテ・売上記録・AI スレッド</li>
           <li>✗ nomishugy のお気に入り・チェックイン・レビュー</li>
-          <li>✗ NOXA コミュニティの投稿・コメント・いいね</li>
+          <li>✗ Noxa コミュニティの投稿・コメント・いいね</li>
           <li>✗ AI クレジット残高・サブスクリプション</li>
           <li>✗ アカウント情報・認証情報</li>
         </ul>
@@ -119,7 +119,7 @@ function DeleteAccount({ user }: { user: User }) {
             className="noxa-btn noxa-btn-destructive"
             style={{ padding: '12px 24px', fontSize: 14 }}
           >
-            {submitting ? '削除中…' : 'NOXA アカウントを完全削除'}
+            {submitting ? '削除中…' : 'Noxa アカウントを完全削除'}
           </button>
         </div>
       </div>

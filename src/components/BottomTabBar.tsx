@@ -4,7 +4,7 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 
 /**
- * NOXA — モバイル Bottom Tab Bar
+ * Noxa — モバイル Bottom Tab Bar
  *
  * 設計指針 (ui-ux-pro-max + Apple HIG + Material):
  *  - 5 個まで（Material bottom-nav-limit）
@@ -19,7 +19,7 @@ import { usePathname } from 'next/navigation';
 type Tab = {
   href: string;
   label: string;
-  glyph: string;             // ◇ ◈ ◆ シンプル形状（NOXA brand 規約）
+  glyph: string;             // ◇ ◈ ◆ シンプル形状（Noxa brand 規約）
   match?: (path: string) => boolean;
 };
 
