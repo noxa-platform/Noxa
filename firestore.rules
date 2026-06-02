@@ -654,15 +654,70 @@ service cloud.firestore {
     }
 
     // ========================================
-    // noxa ドメイン (Phase 1 で別途実装、当面 read/write 不可)
+    // noxa コミュニティ (招待制クローズド × 完全匿名 掲示板 / Phase 1)
+    //   board → post(スレッド) → comment(レス)。投稿者は authorUid（内部）のみ保持し
+    //   表示は完全匿名。読み書きとも認証必須（＝最低限の入口制御）。
     // ========================================
 
+    // 板: 読みは認証ユーザー、書きは admin（運営）のみ
+    match /noxa_boards/{boardId} {
+      allow read: if isAuth();
+      allow write: if isAdmin();
+    }
+
+    // スレッド(post): 作成は本人 uid・カウンタ 0・本文 1000 字以内。
+    // 更新は likeCount/commentCount/lastActivityAt のみ誰でも（認証必須）か、本人による本文編集。
+    match /noxa_posts/{postId} {
+      allow read: if isAuth();
+      allow create: if isAuth()
+        && request.resource.data.authorUid == request.auth.uid
+        && request.resource.data.likeCount == 0
+        && request.resource.data.commentCount == 0
+        && request.resource.data.body is string
+        && request.resource.data.body.size() > 0
+        && request.resource.data.body.size() <= 1000;
+      allow update: if isAuth() && (
+        request.resource.data.diff(resource.data).affectedKeys()
+          .hasOnly(['likeCount', 'commentCount', 'lastActivityAt'])
+        || (resource.data.authorUid == request.auth.uid
+            && request.resource.data.authorUid == request.auth.uid)
+      );
+      allow delete: if isAdmin() || (isAuth() && resource.data.authorUid == request.auth.uid);
+    }
+
+    // レス(comment): 作成は本人 uid・本文 1000 字以内。更新は likeCount のみ or 本人。
+    match /noxa_comments/{commentId} {
+      allow read: if isAuth();
+      allow create: if isAuth()
+        && request.resource.data.authorUid == request.auth.uid
+        && request.resource.data.likeCount == 0
+        && request.resource.data.body is string
+        && request.resource.data.body.size() > 0
+        && request.resource.data.body.size() <= 1000;
+      allow update: if isAuth() && (
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['likeCount'])
+        || resource.data.authorUid == request.auth.uid
+      );
+      allow delete: if isAdmin() || (isAuth() && resource.data.authorUid == request.auth.uid);
+    }
+
+    // いいね: 本人の存在ドキュメントのみ（create/delete でトグル）。更新は不可。
+    match /noxa_likes/{likeId} {
+      allow read: if isAuth() && resource.data.uid == request.auth.uid;
+      allow create: if isAuth() && request.resource.data.uid == request.auth.uid;
+      allow delete: if isAuth() && resource.data.uid == request.auth.uid;
+      allow update: if false;
+    }
+
+    // 通報: 認証ユーザーが本人名義で作成のみ。閲覧・処理は admin。
+    match /noxa_reports/{reportId} {
+      allow read: if isAdmin();
+      allow create: if isAuth() && request.resource.data.reporterUid == request.auth.uid;
+      allow update, delete: if isAdmin();
+    }
+
+    // 以下は当面未使用（招待コード・プロフィール・設定は Phase 1 後）
     match /noxa_users/{uid} { allow read, write: if false; }
-    match /noxa_boards/{boardId} { allow read, write: if false; }
-    match /noxa_posts/{postId} { allow read, write: if false; }
-    match /noxa_comments/{commentId} { allow read, write: if false; }
-    match /noxa_likes/{likeId} { allow read, write: if false; }
-    match /noxa_reports/{reportId} { allow read, write: if false; }
     match /noxa_invites/{inviteId} { allow read, write: if false; }
     match /noxa_user_settings/{uid} { allow read, write: if false; }
 
