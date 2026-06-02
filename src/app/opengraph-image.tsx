@@ -52,20 +52,22 @@ export default async function OpenGraphImage() {
           }}
         />
 
-        {/* top eyebrow */}
+        {/* top eyebrow + brand icon */}
         <div
           style={{
             position: 'relative',
             display: 'flex',
             alignItems: 'center',
-            gap: 18,
+            gap: 22,
             fontSize: 18,
             color: '#B89CFB',
             letterSpacing: 6,
             textTransform: 'uppercase',
           }}
         >
-          <span>Design System · v1.1 · 2026</span>
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src="https://noxa.egshugy.com/icon-192.png" width={96} height={96} alt="" style={{ borderRadius: 22 }} />
+          <span>夜の街のための統合 OS</span>
           <span style={{ flex: 1, height: 1, background: 'rgba(184,156,251,0.32)' }} />
         </div>
 
@@ -133,7 +135,7 @@ export default async function OpenGraphImage() {
               community
             </span>
           </div>
-          <div style={{ display: 'flex', color: '#6E6585', letterSpacing: 4 }}>Noxa-DELTA.VERCEL.APP</div>
+          <div style={{ display: 'flex', color: '#6E6585', letterSpacing: 4 }}>NOXA.EGSHUGY.COM</div>
         </div>
       </div>
     ),
