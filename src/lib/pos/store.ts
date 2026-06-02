@@ -48,6 +48,8 @@ function dayKey(d = new Date()): string {
   return `${base.getFullYear()}-${String(base.getMonth() + 1).padStart(2, '0')}-${String(base.getDate()).padStart(2, '0')}`;
 }
 
+export type ShopCustomer = { id: string; name: string; mainCastId?: string | null; mainCastUid?: string | null };
+
 export type PosShopContext = {
   loading: boolean; shopId: string | null; canConfig: boolean; isDevice: boolean; error: string | null;
 };
@@ -86,9 +88,10 @@ export type UsePosStore = {
   config: StoreConfig;
   tables: FloorTable[];
   casts: Cast[];
+  customers: ShopCustomer[];
   needsSeed: boolean;
   seedTables: () => Promise<void>;
-  addSlip: (tableId: string, init?: { customerType?: CustomerType; initialSetPrice?: number; entryTime?: string; dohan?: boolean; castName?: string; castUid?: string; customerName?: string }) => Promise<void>;
+  addSlip: (tableId: string, init?: { customerType?: CustomerType; initialSetPrice?: number; entryTime?: string; dohan?: boolean; castName?: string; castUid?: string; castId?: string; customerName?: string; customerId?: string }) => Promise<void>;
   dispatchSlip: (tableId: string, slipId: string, action: Action) => Promise<void>;
   renameSlip: (tableId: string, slipId: string, name: string) => Promise<void>;
   removeSlip: (tableId: string, slipId: string) => Promise<void>;
@@ -103,6 +106,7 @@ export function usePosStore(user: User): UsePosStore {
   const [config, setConfig] = useState<StoreConfig>(() => createDefaultStoreConfig());
   const [tables, setTables] = useState<FloorTable[]>([]);
   const [casts, setCasts] = useState<Cast[]>([]);
+  const [customers, setCustomers] = useState<ShopCustomer[]>([]);
   const [loadingData, setLoadingData] = useState(true);
   const configRef = useRef(config);
 
@@ -150,7 +154,15 @@ export function usePosStore(user: User): UsePosStore {
       });
       setCasts(list);
     });
-    return () => { unsubT(); unsubC(); };
+    const unsubCust = onSnapshot(collection(db, `shop_shops/${shopId}/customers`), (snap) => {
+      const list: ShopCustomer[] = [];
+      snap.forEach((d) => {
+        const x = d.data() as Record<string, unknown>;
+        list.push({ id: d.id, name: (x.name as string) ?? '（無名）', mainCastId: (x.mainCastId as string) ?? null, mainCastUid: (x.mainCastUid as string) ?? null });
+      });
+      setCustomers(list);
+    }, () => { /* 権限等で読めない場合は空 */ });
+    return () => { unsubT(); unsubC(); unsubCust(); };
   }, [shopId]);
 
   configRef.current = config;
@@ -190,12 +202,21 @@ export function usePosStore(user: User): UsePosStore {
       state,
       ...(init?.castName ? { castName: init.castName } : {}),
       ...(init?.castUid ? { castUid: init.castUid } : {}),
+      ...(init?.castId ? { castId: init.castId } : {}),
       ...(init?.customerName?.trim() ? { customerName: init.customerName.trim() } : {}),
+      ...(init?.customerId ? { customerId: init.customerId } : {}),
     };
+    const extra: Record<string, unknown> = {};
     // 空卓なら開卓（席回しと同期：status ACTIVE / startTime）
-    const extra = (!t || t.status === 'EMPTY')
-      ? { status: 'ACTIVE', startTime: Date.now(), entryTime: Date.now() }
-      : {};
+    if (!t || t.status === 'EMPTY') { extra.status = 'ACTIVE'; extra.startTime = Date.now(); extra.entryTime = Date.now(); }
+    // 担当（指名）キャストを席回しの卓にも反映（currentHostIds＋mainHostIds＝本指名★）
+    if (init?.castId) {
+      const cur = t?.currentHostIds ?? [];
+      const main = t?.mainHostIds ?? [];
+      extra.currentHostIds = cur.includes(init.castId) ? cur : [...cur, init.castId];
+      extra.mainHostIds = main.includes(init.castId) ? main : [...main, init.castId];
+      extra.castStartTimes = { ...(t?.castStartTimes ?? {}), [init.castId]: Date.now() };
+    }
     await writeSlips(tableId, [...slips, newSlip], extra);
   }, [configRef, getTable, writeSlips]);
 
@@ -249,9 +270,9 @@ export function usePosStore(user: User): UsePosStore {
   return useMemo(() => ({
     loading: shop.loading || loadingData,
     shopId, canConfig: shop.canConfig, isDevice: shop.isDevice, error: shop.error,
-    config, tables, casts, needsSeed,
+    config, tables, casts, customers, needsSeed,
     seedTables, addSlip, dispatchSlip, renameSlip, removeSlip, checkoutSlip, resultFor,
-  }), [shop.loading, loadingData, shopId, shop.canConfig, shop.isDevice, shop.error, config, tables, casts, needsSeed, seedTables, addSlip, dispatchSlip, renameSlip, removeSlip, checkoutSlip, resultFor]);
+  }), [shop.loading, loadingData, shopId, shop.canConfig, shop.isDevice, shop.error, config, tables, casts, customers, needsSeed, seedTables, addSlip, dispatchSlip, renameSlip, removeSlip, checkoutSlip, resultFor]);
 }
 
 let __slipSeq = 0;

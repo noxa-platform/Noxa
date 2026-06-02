@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { useEffect, useMemo, useState } from 'react';
 import type { User } from 'firebase/auth';
-import { usePosStore } from '@/lib/pos/store';
+import { usePosStore, type ShopCustomer } from '@/lib/pos/store';
 import type { CustomerType, OrderItem, BreakdownItem, PosSlip, Action, CalculationResult } from '@/lib/pos/engine';
 import type { FloorTable, Cast } from '@/lib/seating/types';
 
@@ -80,7 +80,7 @@ export function PosClient({ user }: { user: User }) {
     store.dispatchSlip(selectedTableId, selectedSlip.id, { type: 'ADD_ORDER', payload: { name: m.name, price: m.price, canHalfOff: m.canHalfOff, isTaxIncluded: m.isTaxIncluded } });
   };
 
-  const createSlip = async (tableId: string, init: { castName?: string; castUid?: string; customerName?: string; customerType?: CustomerType }) => {
+  const createSlip = async (tableId: string, init: { castName?: string; castUid?: string; castId?: string; customerName?: string; customerId?: string; customerType?: CustomerType }) => {
     setSelectedTableId(tableId);
     setSelectedSlipId(null);
     setNewSlipFor(null);
@@ -223,6 +223,7 @@ export function PosClient({ user }: { user: User }) {
         <NewSlipDialog
           tableName={tables.find((t) => t.id === newSlipFor)?.name ?? ''}
           casts={casts}
+          customers={store.customers}
           tableCastIds={tables.find((t) => t.id === newSlipFor)?.currentHostIds ?? []}
           onClose={() => setNewSlipFor(null)}
           onCreate={(init) => createSlip(newSlipFor, init)}
@@ -273,9 +274,10 @@ function CustomPriceDialog({ name, onClose, onAdd }: { name: string; onClose: ()
 
 // ───────────────────────── 新規伝票ダイアログ（担当キャスト・顧客名）
 
-function NewSlipDialog({ tableName, casts, tableCastIds, onClose, onCreate }: {
-  tableName: string; casts: Cast[]; tableCastIds: string[];
-  onClose: () => void; onCreate: (init: { castName?: string; castUid?: string; customerName?: string; customerType?: CustomerType }) => void;
+function NewSlipDialog({ tableName, casts, customers, tableCastIds, onClose, onCreate }: {
+  tableName: string; casts: Cast[]; customers: ShopCustomer[]; tableCastIds: string[];
+  onClose: () => void;
+  onCreate: (init: { castName?: string; castUid?: string; castId?: string; customerName?: string; customerId?: string; customerType?: CustomerType }) => void;
 }) {
   // 卓に配置済みキャストを先頭に、その他を続ける
   const sortedCasts = useMemo(() => {
@@ -284,39 +286,70 @@ function NewSlipDialog({ tableName, casts, tableCastIds, onClose, onCreate }: {
     return [...onTable, ...others];
   }, [casts, tableCastIds]);
   const [castId, setCastId] = useState<string>(() => casts.find((c) => tableCastIds.includes(c.id))?.id ?? '');
-  const [customerName, setCustomerName] = useState('');
   const [customerType, setCustomerType] = useState<CustomerType>('regular');
+  const [customerName, setCustomerName] = useState('');
+  const [customerId, setCustomerId] = useState<string | undefined>(undefined);
+
+  const selectedCast = casts.find((c) => c.id === castId);
+  // 選択中キャストの担当顧客（mainCastId 一致 or アカウント uid 一致）
+  const castCustomers = useMemo(() => {
+    if (!castId && !selectedCast?.uid) return [];
+    return customers.filter((c) => (castId && c.mainCastId === castId) || (selectedCast?.uid && c.mainCastUid === selectedCast.uid));
+  }, [customers, castId, selectedCast]);
+  const isNew = customerType === 'initial';
+
+  const onTypeCustomer = (v: string) => { setCustomerName(v); setCustomerId(undefined); };
 
   return (
     <div role="dialog" aria-label="新規伝票" style={{ position: 'fixed', inset: 0, zIndex: 50, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,0.5)' }} onClick={onClose}>
-      <div onClick={(e) => e.stopPropagation()} style={{ width: 'min(420px, 94vw)', maxHeight: '90vh', overflowY: 'auto', background: 'var(--noxa-bg-base)', border: '1px solid var(--noxa-border-strong)', borderRadius: 16, padding: 18, display: 'flex', flexDirection: 'column', gap: 14 }}>
+      <div onClick={(e) => e.stopPropagation()} style={{ width: 'min(440px, 94vw)', maxHeight: '90vh', overflowY: 'auto', background: 'var(--noxa-bg-base)', border: '1px solid var(--noxa-border-strong)', borderRadius: 16, padding: 18, display: 'flex', flexDirection: 'column', gap: 14 }}>
         <div className="noxa-eyebrow" style={{ fontSize: 11 }}>{tableName} · 新規伝票</div>
 
+        {/* 客層 */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
           <span style={miniLabel}>客層</span>
           <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-            {CUSTOMER_TYPES.map((c) => <button key={c.id} type="button" onClick={() => setCustomerType(c.id)} style={chipStyle(customerType === c.id)}>{c.label}</button>)}
+            {CUSTOMER_TYPES.map((c) => (
+              <button key={c.id} type="button" onClick={() => { setCustomerType(c.id); if (c.id === 'initial') { setCustomerId(undefined); } }} style={chipStyle(customerType === c.id)}>{c.label}</button>
+            ))}
           </div>
         </div>
 
-        <label style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-          <span style={miniLabel}>顧客名（任意）</span>
-          <input value={customerName} onChange={(e) => setCustomerName(e.target.value)} placeholder="例：田中様" style={fieldStyle} autoFocus />
-        </label>
-
+        {/* 担当キャスト */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-          <span style={miniLabel}>担当キャスト</span>
+          <span style={miniLabel}>担当（指名）キャスト</span>
           {sortedCasts.length === 0 ? (
             <span style={{ fontSize: 12, color: 'var(--noxa-text-faint)' }}>キャスト未登録（席回しで追加 or テストデータ投入）</span>
           ) : (
-            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', maxHeight: 160, overflowY: 'auto' }}>
-              <button type="button" onClick={() => setCastId('')} style={chipStyle(castId === '')}>指定なし</button>
+            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', maxHeight: 140, overflowY: 'auto' }}>
+              <button type="button" onClick={() => { setCastId(''); setCustomerId(undefined); }} style={chipStyle(castId === '')}>指定なし</button>
               {sortedCasts.map((c) => (
-                <button key={c.id} type="button" onClick={() => setCastId(c.id)} style={chipStyle(castId === c.id)}>
+                <button key={c.id} type="button" onClick={() => { setCastId(c.id); setCustomerId(undefined); }} style={chipStyle(castId === c.id)}>
                   {tableCastIds.includes(c.id) ? '★' : ''}{c.name}
                 </button>
               ))}
             </div>
+          )}
+        </div>
+
+        {/* 顧客（新規=入力 / それ以外=担当キャストの顧客から選択） */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+          <span style={miniLabel}>{isNew ? '顧客名（新規・任意）' : '顧客（担当の既存客から選択）'}</span>
+          {isNew ? (
+            <input value={customerName} onChange={(e) => onTypeCustomer(e.target.value)} placeholder="例：田中様" style={fieldStyle} autoFocus />
+          ) : !castId ? (
+            <span style={{ fontSize: 12, color: 'var(--noxa-text-faint)' }}>担当キャストを選ぶと、その顧客から選べます（または下に入力）。</span>
+          ) : castCustomers.length === 0 ? (
+            <span style={{ fontSize: 12, color: 'var(--noxa-text-faint)' }}>この担当の既存顧客はいません。下に入力してください。</span>
+          ) : (
+            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', maxHeight: 140, overflowY: 'auto' }}>
+              {castCustomers.map((c) => (
+                <button key={c.id} type="button" onClick={() => { setCustomerName(c.name); setCustomerId(c.id); }} style={chipStyle(customerId === c.id)}>{c.name}</button>
+              ))}
+            </div>
+          )}
+          {!isNew && (
+            <input value={customerId ? '' : customerName} onChange={(e) => onTypeCustomer(e.target.value)} placeholder="その他（手入力）" style={{ ...fieldStyle, marginTop: 4 }} />
           )}
         </div>
 
@@ -327,7 +360,9 @@ function NewSlipDialog({ tableName, casts, tableCastIds, onClose, onCreate }: {
               onCreate({
                 castName: cast?.name || undefined,
                 castUid: cast?.uid || undefined,
+                castId: castId || undefined,
                 customerName: customerName.trim() || undefined,
+                customerId: customerId || undefined,
                 customerType,
               });
             }}>
