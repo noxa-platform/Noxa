@@ -89,8 +89,9 @@ export function AccountShell({ user, children }: { user: User; children: React.R
           gap: 28,
         }}
       >
-        <Link href="/" className="noxa-logo px-2" style={{ fontSize: 22 }}>
-          N<em>o</em>xa
+        <Link href="/" className="px-2" style={{ display: 'block' }}>
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src="/noxa-logo-horizontal.png" alt="Noxa" style={{ height: 40, width: 'auto', display: 'block' }} />
         </Link>
 
         {device.isDevice && (
@@ -246,8 +247,9 @@ export function AccountShell({ user, children }: { user: User; children: React.R
           borderBottom: '1px solid var(--noxa-border)',
         }}
       >
-        <Link href="/" className="noxa-logo" style={{ fontSize: 18 }}>
-          N<em>o</em>xa
+        <Link href="/" style={{ display: 'block' }}>
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src="/noxa-logo-horizontal.png" alt="Noxa" style={{ height: 28, width: 'auto', display: 'block' }} />
         </Link>
         <button
           onClick={async () => { await signOut(); window.location.href = '/'; }}
