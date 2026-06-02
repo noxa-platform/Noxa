@@ -19,6 +19,7 @@ export interface Cast {
   isLocked: boolean;
   currentTableId?: string | null;
   imageUrl?: string;
+  uid?: string | null; // 紐付くアカウント uid（個人売上の帰属用・未連携なら null）
 }
 
 export type TableType = '初回' | '初回指名' | 'R' | '正規';

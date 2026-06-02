@@ -47,26 +47,6 @@ function mapCust(id: string, d: DocumentData): Cust {
   };
 }
 
-async function loadCustomers(uid: string): Promise<Cust[]> {
-  const out: Cust[] = [];
-  // 個人モード（MyDeck）
-  try {
-    const snap = await getDocs(collection(db, `personal_customers/${uid}/items`));
-    snap.forEach((doc) => out.push(mapCust(doc.id, doc.data())));
-  } catch { /* 権限なし等は無視 */ }
-  // 店舗モード（自分が owner の shop）
-  try {
-    const shops = await getDocs(query(collection(db, 'shop_shops'), where('ownerUid', '==', uid)));
-    for (const shop of shops.docs) {
-      try {
-        const cs = await getDocs(collection(db, `shop_shops/${shop.id}/customers`));
-        cs.forEach((doc) => out.push(mapCust(doc.id, doc.data())));
-      } catch { /* skip */ }
-    }
-  } catch { /* skip */ }
-  return out;
-}
-
 const fmtDate = (ms: number | null) => {
   if (!ms) return '—';
   const d = new Date(ms);
@@ -81,41 +61,67 @@ function todayKey(): string {
 }
 
 type PosSalesSummary = { total: number; today: number; count: number; todayCount: number };
+type Mode = 'owner' | 'cast' | 'personal';
 
-// 自分が owner の shop の sales（POS 会計）を集計する。
-async function loadPosSales(uid: string): Promise<PosSalesSummary> {
-  const sum: PosSalesSummary = { total: 0, today: 0, count: 0, todayCount: 0 };
+/**
+ * ロール対応の読み込み:
+ *  - owner（店舗オーナー）: 店舗全体の顧客・売上を集計
+ *  - cast（所属メンバー）: 自分が担当の顧客（mainCastUid==uid）・自分の売上（castUid==uid）だけ
+ *  - personal: MyDeck のみ
+ */
+async function loadAll(uid: string): Promise<{ mode: Mode; custs: Cust[]; pos: PosSalesSummary }> {
   const tk = todayKey();
-  try {
-    const shops = await getDocs(query(collection(db, 'shop_shops'), where('ownerUid', '==', uid)));
-    for (const shop of shops.docs) {
-      try {
-        const ss = await getDocs(collection(db, `shop_shops/${shop.id}/sales`));
-        ss.forEach((doc) => {
-          const d = doc.data();
-          const amount = typeof d.amount === 'number' ? d.amount : 0;
-          sum.total += amount;
-          sum.count += 1;
-          if (d.dayKey === tk) { sum.today += amount; sum.todayCount += 1; }
-        });
-      } catch { /* skip */ }
+  const pos: PosSalesSummary = { total: 0, today: 0, count: 0, todayCount: 0 };
+  const custs: Cust[] = [];
+  const addSale = (d: DocumentData) => {
+    const a = typeof d.amount === 'number' ? d.amount : 0;
+    pos.total += a; pos.count += 1;
+    if (d.dayKey === tk) { pos.today += a; pos.todayCount += 1; }
+  };
+  const addMyDeck = async () => {
+    try { const snap = await getDocs(collection(db, `personal_customers/${uid}/items`)); snap.forEach((d) => custs.push(mapCust(d.id, d.data()))); } catch { /* skip */ }
+  };
+
+  // owner shops
+  let ownerShops: { id: string }[] = [];
+  try { const s = await getDocs(query(collection(db, 'shop_shops'), where('ownerUid', '==', uid))); ownerShops = s.docs.map((d) => ({ id: d.id })); } catch { /* skip */ }
+  if (ownerShops.length > 0) {
+    for (const shop of ownerShops) {
+      try { const cs = await getDocs(collection(db, `shop_shops/${shop.id}/customers`)); cs.forEach((d) => custs.push(mapCust(d.id, d.data()))); } catch { /* skip */ }
+      try { const ss = await getDocs(collection(db, `shop_shops/${shop.id}/sales`)); ss.forEach((d) => addSale(d.data())); } catch { /* skip */ }
     }
-  } catch { /* skip */ }
-  return sum;
+    await addMyDeck();
+    return { mode: 'owner', custs, pos };
+  }
+
+  // member shops（キャスト）
+  let memberShopIds: string[] = [];
+  try { const ms = await getDocs(collection(db, `account_users/${uid}/memberships`)); memberShopIds = ms.docs.map((d) => d.id); } catch { /* skip */ }
+  if (memberShopIds.length > 0) {
+    for (const shopId of memberShopIds) {
+      try { const cs = await getDocs(query(collection(db, `shop_shops/${shopId}/customers`), where('mainCastUid', '==', uid))); cs.forEach((d) => custs.push(mapCust(d.id, d.data()))); } catch { /* skip */ }
+      try { const ss = await getDocs(query(collection(db, `shop_shops/${shopId}/sales`), where('castUid', '==', uid))); ss.forEach((d) => addSale(d.data())); } catch { /* skip */ }
+    }
+    await addMyDeck();
+    return { mode: 'cast', custs, pos };
+  }
+
+  await addMyDeck();
+  return { mode: 'personal', custs, pos };
 }
 
 export function SalesClient({ user }: { user: User }) {
   const [loading, setLoading] = useState(true);
   const [custs, setCusts] = useState<Cust[]>([]);
   const [pos, setPos] = useState<PosSalesSummary>({ total: 0, today: 0, count: 0, todayCount: 0 });
+  const [mode, setMode] = useState<Mode>('personal');
   const [err, setErr] = useState<string | null>(null);
 
   useEffect(() => {
     let alive = true;
-    loadCustomers(user.uid)
-      .then((c) => { if (alive) { setCusts(c); setLoading(false); } })
+    loadAll(user.uid)
+      .then((r) => { if (alive) { setCusts(r.custs); setPos(r.pos); setMode(r.mode); setLoading(false); } })
       .catch((e) => { if (alive) { setErr(String(e?.message ?? e)); setLoading(false); } });
-    loadPosSales(user.uid).then((p) => { if (alive) setPos(p); }).catch(() => { /* skip */ });
     return () => { alive = false; };
   }, [user.uid]);
 
@@ -154,7 +160,7 @@ export function SalesClient({ user }: { user: User }) {
             <div className="noxa-eyebrow" style={{ marginBottom: 6 }}>Noxa OS · Module 02 · Sales</div>
             <h1 className="noxa-display" style={{ fontSize: 'clamp(26px, 4vw, 38px)', margin: 0, display: 'flex', alignItems: 'baseline', gap: 10, flexWrap: 'wrap' }}>
               <span style={{ fontFamily: 'var(--noxa-font-display-en)', fontStyle: 'italic', color: 'var(--noxa-accent-primary-ink)', fontWeight: 400 }}>№ 02</span>
-              <span style={{ fontFamily: 'var(--noxa-font-display-jp)', fontWeight: 500 }}>売上管理</span>
+              <span style={{ fontFamily: 'var(--noxa-font-display-jp)', fontWeight: 500 }}>{mode === 'cast' ? 'マイ売上' : '売上管理'}</span>
             </h1>
           </div>
           <div style={{ display: 'inline-flex', alignItems: 'center', gap: 8, padding: '6px 12px', background: 'rgba(123,232,161,0.10)', border: '1px solid rgba(123,232,161,0.30)', borderRadius: 9999, fontFamily: mono, fontSize: 10, letterSpacing: '0.12em', color: 'var(--noxa-status-success)', textTransform: 'uppercase' }}>

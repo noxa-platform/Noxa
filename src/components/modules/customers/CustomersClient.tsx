@@ -37,21 +37,31 @@ function mapCust(id: string, d: DocumentData): Cust {
     castName: (d.castName as string) ?? null,
   };
 }
+// ロール対応: owner=店舗全体の顧客 / cast=自分担当（mainCastUid==uid）の顧客 / +MyDeck
 async function loadCustomers(uid: string): Promise<Cust[]> {
   const out: Cust[] = [];
   try {
     const snap = await getDocs(collection(db, `personal_customers/${uid}/items`));
     snap.forEach((doc) => out.push(mapCust(doc.id, doc.data())));
   } catch { /* skip */ }
+  // owner の店舗
+  let ownerShopIds: string[] = [];
   try {
     const shops = await getDocs(query(collection(db, 'shop_shops'), where('ownerUid', '==', uid)));
-    for (const shop of shops.docs) {
-      try {
-        const cs = await getDocs(collection(db, `shop_shops/${shop.id}/customers`));
-        cs.forEach((doc) => out.push(mapCust(doc.id, doc.data())));
-      } catch { /* skip */ }
+    ownerShopIds = shops.docs.map((d) => d.id);
+    for (const id of ownerShopIds) {
+      try { const cs = await getDocs(collection(db, `shop_shops/${id}/customers`)); cs.forEach((doc) => out.push(mapCust(doc.id, doc.data()))); } catch { /* skip */ }
     }
   } catch { /* skip */ }
+  // owner でなければ、所属店舗で自分担当の顧客のみ
+  if (ownerShopIds.length === 0) {
+    try {
+      const ms = await getDocs(collection(db, `account_users/${uid}/memberships`));
+      for (const m of ms.docs) {
+        try { const cs = await getDocs(query(collection(db, `shop_shops/${m.id}/customers`), where('mainCastUid', '==', uid))); cs.forEach((doc) => out.push(mapCust(doc.id, doc.data()))); } catch { /* skip */ }
+      }
+    } catch { /* skip */ }
+  }
   return out;
 }
 const fmtDate = (ms: number | null) => {

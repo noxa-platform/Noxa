@@ -88,7 +88,7 @@ export type UsePosStore = {
   casts: Cast[];
   needsSeed: boolean;
   seedTables: () => Promise<void>;
-  addSlip: (tableId: string, init?: { customerType?: CustomerType; initialSetPrice?: number; entryTime?: string; dohan?: boolean; castName?: string; customerName?: string }) => Promise<void>;
+  addSlip: (tableId: string, init?: { customerType?: CustomerType; initialSetPrice?: number; entryTime?: string; dohan?: boolean; castName?: string; castUid?: string; customerName?: string }) => Promise<void>;
   dispatchSlip: (tableId: string, slipId: string, action: Action) => Promise<void>;
   renameSlip: (tableId: string, slipId: string, name: string) => Promise<void>;
   removeSlip: (tableId: string, slipId: string) => Promise<void>;
@@ -146,7 +146,7 @@ export function usePosStore(user: User): UsePosStore {
       const list: Cast[] = [];
       snap.forEach((d) => {
         const x = d.data() as Record<string, unknown>;
-        list.push({ id: d.id, name: (x.name as string) ?? '?', rank: (x.rank as Cast['rank']) ?? '非役職', hourlyWage: (x.hourlyWage as number) ?? 0, isLocked: !!x.isLocked, status: 'Free', currentTableId: null });
+        list.push({ id: d.id, name: (x.name as string) ?? '?', rank: (x.rank as Cast['rank']) ?? '非役職', hourlyWage: (x.hourlyWage as number) ?? 0, isLocked: !!x.isLocked, status: 'Free', currentTableId: null, uid: (x.uid as string) ?? null });
       });
       setCasts(list);
     });
@@ -189,6 +189,7 @@ export function usePosStore(user: User): UsePosStore {
       name: init?.customerName?.trim() ? init.customerName.trim() : nextSlipName(slips),
       state,
       ...(init?.castName ? { castName: init.castName } : {}),
+      ...(init?.castUid ? { castUid: init.castUid } : {}),
       ...(init?.customerName?.trim() ? { customerName: init.customerName.trim() } : {}),
     };
     // 空卓なら開卓（席回しと同期：status ACTIVE / startTime）
@@ -227,8 +228,12 @@ export function usePosStore(user: User): UsePosStore {
     if (!t || !slip) return;
     await addDoc(collection(db, `shop_shops/${shopId}/sales`), {
       source: 'pos', amount: opts.amount, tableId, tableName: t.name, slipName: slip.name,
-      customerType: slip.state.customerType, customerName: opts.customerName ?? null,
-      castName: opts.castName ?? null, castUid: user.uid, guests: opts.guests ?? null,
+      customerType: slip.state.customerType, customerName: opts.customerName ?? slip.customerName ?? null,
+      castName: opts.castName ?? slip.castName ?? null,
+      // 個人売上の帰属は担当キャストの uid（無ければ操作者）。operatorUid は実際にレジ操作した人。
+      castUid: slip.castUid ?? user.uid,
+      operatorUid: user.uid,
+      guests: opts.guests ?? null,
       entryTime: slip.state.entryTime, checkoutAt: serverTimestamp(), dayKey: dayKey(), createdAt: serverTimestamp(),
     });
     await mutateSlip(tableId, slipId, () => null);

@@ -67,7 +67,8 @@ export interface PosSlip {
   id: string;
   name: string;
   state: CalculatorState;
-  castName?: string;      // 担当キャスト（伝票作成時に選択）
+  castName?: string;      // 担当キャスト名（伝票作成時に選択）
+  castUid?: string;       // 担当キャストのアカウント uid（個人売上の帰属用）
   customerName?: string;  // 顧客名（伝票作成時に入力）
 }
 

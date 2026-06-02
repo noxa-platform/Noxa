@@ -80,7 +80,7 @@ export function PosClient({ user }: { user: User }) {
     store.dispatchSlip(selectedTableId, selectedSlip.id, { type: 'ADD_ORDER', payload: { name: m.name, price: m.price, canHalfOff: m.canHalfOff, isTaxIncluded: m.isTaxIncluded } });
   };
 
-  const createSlip = async (tableId: string, init: { castName?: string; customerName?: string; customerType?: CustomerType }) => {
+  const createSlip = async (tableId: string, init: { castName?: string; castUid?: string; customerName?: string; customerType?: CustomerType }) => {
     setSelectedTableId(tableId);
     setSelectedSlipId(null);
     setNewSlipFor(null);
@@ -275,7 +275,7 @@ function CustomPriceDialog({ name, onClose, onAdd }: { name: string; onClose: ()
 
 function NewSlipDialog({ tableName, casts, tableCastIds, onClose, onCreate }: {
   tableName: string; casts: Cast[]; tableCastIds: string[];
-  onClose: () => void; onCreate: (init: { castName?: string; customerName?: string; customerType?: CustomerType }) => void;
+  onClose: () => void; onCreate: (init: { castName?: string; castUid?: string; customerName?: string; customerType?: CustomerType }) => void;
 }) {
   // 卓に配置済みキャストを先頭に、その他を続ける
   const sortedCasts = useMemo(() => {
@@ -283,10 +283,7 @@ function NewSlipDialog({ tableName, casts, tableCastIds, onClose, onCreate }: {
     const others = casts.filter((c) => !tableCastIds.includes(c.id));
     return [...onTable, ...others];
   }, [casts, tableCastIds]);
-  const [castName, setCastName] = useState<string>(() => {
-    const first = casts.find((c) => tableCastIds.includes(c.id));
-    return first?.name ?? '';
-  });
+  const [castId, setCastId] = useState<string>(() => casts.find((c) => tableCastIds.includes(c.id))?.id ?? '');
   const [customerName, setCustomerName] = useState('');
   const [customerType, setCustomerType] = useState<CustomerType>('regular');
 
@@ -313,9 +310,9 @@ function NewSlipDialog({ tableName, casts, tableCastIds, onClose, onCreate }: {
             <span style={{ fontSize: 12, color: 'var(--noxa-text-faint)' }}>キャスト未登録（席回しで追加 or テストデータ投入）</span>
           ) : (
             <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', maxHeight: 160, overflowY: 'auto' }}>
-              <button type="button" onClick={() => setCastName('')} style={chipStyle(castName === '')}>指定なし</button>
+              <button type="button" onClick={() => setCastId('')} style={chipStyle(castId === '')}>指定なし</button>
               {sortedCasts.map((c) => (
-                <button key={c.id} type="button" onClick={() => setCastName(c.name)} style={chipStyle(castName === c.name)}>
+                <button key={c.id} type="button" onClick={() => setCastId(c.id)} style={chipStyle(castId === c.id)}>
                   {tableCastIds.includes(c.id) ? '★' : ''}{c.name}
                 </button>
               ))}
@@ -325,7 +322,15 @@ function NewSlipDialog({ tableName, casts, tableCastIds, onClose, onCreate }: {
 
         <div style={{ display: 'flex', gap: 8 }}>
           <button type="button" className="noxa-btn noxa-btn-primary" style={{ ...primaryBtn, flex: 1 }}
-            onClick={() => onCreate({ castName: castName || undefined, customerName: customerName.trim() || undefined, customerType })}>
+            onClick={() => {
+              const cast = casts.find((c) => c.id === castId);
+              onCreate({
+                castName: cast?.name || undefined,
+                castUid: cast?.uid || undefined,
+                customerName: customerName.trim() || undefined,
+                customerType,
+              });
+            }}>
             伝票を作成
           </button>
           <button type="button" onClick={onClose} style={{ ...ghostBtn, width: 80 }}>戻る</button>
