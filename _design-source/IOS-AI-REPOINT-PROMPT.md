@@ -91,3 +91,34 @@ static func aiApi(_ path: String) -> URL {
 3. AI ルートが native（Origin 無し）リクエストを拒否しないこと（CORS/Origin チェックを緩める）
 4. `noxa.egshugy.com/api/ai/chat` で SSE が流れることを確認（OpenRouter ストリーミング）
 5. 画像解析（message/reply・analyze・customer-context-extract・profile-extract）は OpenRouter のビジョン対応モデルが必要（`image_url` 形式で送信済み）。FAST/THINK に画像対応モデルを設定すること
+
+---
+
+## 追記: IAP（課金）も NOXA へ向ける
+
+NOXA 側は **IAP ルートも本番稼働済み**（`/api/iap/products`=200, `/grant`=401(認証), `/notifications-v2`=400(空payload)）。
+DB は yorulog と共有・`account_iap_transactions` は transactionId 冪等・`account_subscriptions` は increment なので、
+**yorulog 経由でも NOXA 経由でも同じ結果**＝移行は低リスク＆切り戻し容易。NOXA 側に追加の必須 env は無い
+（`APPLE_IAP_BUNDLE_ID` は未設定なら検証skipの寛容実装。設定したい場合は実バンドルIDを noxa Vercel に入れるとより厳格）。
+
+### iOS でやること
+1. `Constants.swift` のルーティングを、`ai/` に加えて `iap/` も NOXA へ向ける:
+   ```swift
+   // 例: AI と IAP を NOXA、それ以外は当面 yorulog
+   let onNoxa = path.hasPrefix("ai/") || path.hasPrefix("iap/")
+   let base = (useNoxaAI && onNoxa) ? aiBaseURL : webBaseURL
+   ```
+   - 対象: `IapStore`(`POST iap/grant`)・`IapProductService`(`GET iap/products`)
+2. 認証・ペイロード・StoreKit ロジックは不変（ホストだけ変更）。
+3. テスト: サンドボックス購入 → `iap/grant` が NOXA で 200 → `account_subscriptions` のクレジット加算を確認。
+4. ※ AI 以外（auth/line, missions, referral, account, calendar, barapp）も NOXA に移植済みなので、
+   将来は `let base = noxaBaseURL`（全 `webBaseURL` を NOXA へ）に一本化して `aiBaseURL` を畳める。
+   LINE/Calendar/GooglePlay は鍵未設定で元々非稼働（移しても挙動同じ）。
+
+### App Store Connect でやること（あなたのコンソール作業）
+- **App Store Server Notifications V2 の Production URL** を
+  `https://noxa.egshugy.com/api/iap/notifications-v2` に変更。
+- Sandbox URL も同様に（テスト用）。
+- Apple は本番1URLのみ＝単一切替だが、コード同一＋DB共有のため切り戻し可。取りこぼしは
+  App Store Server API の Notification History で再取得可能。
+- 切替後しばらくは Firestore の `account_subscriptions` 更新が継続しているか監視。
