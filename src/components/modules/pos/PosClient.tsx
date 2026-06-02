@@ -93,7 +93,7 @@ export function PosClient({ user }: { user: User }) {
   };
 
   return (
-    <Shell device={store.isDevice}>
+    <Shell device={store.isDevice} configurable={store.canConfig}>
       <div className="grid grid-cols-1 lg:grid-cols-[200px_1fr_340px]" style={{ gap: 'clamp(12px, 1.6vw, 18px)', alignItems: 'start' }}>
         {/* 左：卓（席回しと共有） */}
         <section aria-label="卓選択">
@@ -544,7 +544,7 @@ function CountStepper({ label, value, onChange }: { label: string; value: number
 
 // ───────────────────────── レイアウト・スタイル
 
-function Shell({ children, device }: { children: React.ReactNode; device?: boolean }) {
+function Shell({ children, device, configurable }: { children: React.ReactNode; device?: boolean; configurable?: boolean }) {
   return (
     <div style={{ color: 'var(--noxa-text-primary)', fontFamily: 'var(--noxa-font-sans-jp)', borderRadius: 16, border: '1px solid var(--noxa-border)', padding: 'clamp(16px, 3vw, 28px)', position: 'relative', overflow: 'hidden' }}>
       <div aria-hidden style={{ position: 'absolute', top: '-30%', right: '-10%', width: 700, height: 420, background: 'radial-gradient(ellipse, rgba(139, 92, 246, 0.12) 0%, transparent 65%)', pointerEvents: 'none' }} />
@@ -563,9 +563,14 @@ function Shell({ children, device }: { children: React.ReactNode; device?: boole
               <span style={{ fontFamily: 'var(--noxa-font-display-jp)', fontWeight: 500 }}>POS · オーダー</span>
             </h1>
           </div>
-          <div role="note" style={{ display: 'inline-flex', alignItems: 'center', gap: 8, padding: '6px 12px', background: 'rgba(123,232,161,0.10)', border: '1px solid rgba(123,232,161,0.30)', borderRadius: 9999, fontFamily: mono, fontSize: 10, letterSpacing: '0.12em', color: 'var(--noxa-status-success)', textTransform: 'uppercase' }}>
-            <span aria-hidden style={{ width: 6, height: 6, borderRadius: 3, background: 'var(--noxa-status-success)', boxShadow: '0 0 8px var(--noxa-status-success)' }} />
-            {device ? '店舗端末 · 実データ' : '実データ · 席回し同期'}
+          <div style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+            {configurable && (
+              <Link href="/pos/settings" className="noxa-btn noxa-btn-ghost" style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '6px 12px', borderRadius: 9999, border: '1px solid var(--noxa-border-strong)', background: 'var(--noxa-surface-muted)', color: 'var(--noxa-text-muted)', fontSize: 12, textDecoration: 'none' }}>⚙ POS設定</Link>
+            )}
+            <span role="note" style={{ display: 'inline-flex', alignItems: 'center', gap: 8, padding: '6px 12px', background: 'rgba(123,232,161,0.10)', border: '1px solid rgba(123,232,161,0.30)', borderRadius: 9999, fontFamily: mono, fontSize: 10, letterSpacing: '0.12em', color: 'var(--noxa-status-success)', textTransform: 'uppercase' }}>
+              <span aria-hidden style={{ width: 6, height: 6, borderRadius: 3, background: 'var(--noxa-status-success)', boxShadow: '0 0 8px var(--noxa-status-success)' }} />
+              {device ? '店舗端末 · 実データ' : '実データ · 席回し同期'}
+            </span>
           </div>
         </div>
         {children}
