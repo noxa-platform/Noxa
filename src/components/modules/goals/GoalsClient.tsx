@@ -1,554 +1,254 @@
 'use client';
 
 import Link from 'next/link';
+import { useEffect, useMemo, useState } from 'react';
+import { collection, doc, getDoc, getDocs, query, where, serverTimestamp, setDoc, type DocumentData } from 'firebase/firestore';
+import type { User } from 'firebase/auth';
+import { db } from '@/lib/firebase/config';
 
 /**
- * 目標管理モジュール — Noxa OS（モック）
- *
- * 今月の目標・実績・達成率、バック内訳、過去6ヶ月の達成率チャートを表示。
- * データはすべてモック値。実装フェーズで Firestore 連携に差し替える。
+ * 目標管理 — Noxa OS（実データ）
+ * 目標は personal_goals/{uid}/items/current に保存（本人のみ・編集可）。
+ * 実績は自分の売上（オーナー=店舗全体 / キャスト=自分の castUid）を月別集計。
  */
 
 const mono = 'var(--noxa-font-mono)';
 const display = 'var(--noxa-font-display-en)';
 const yen = (n: number) => `¥${Math.round(n).toLocaleString('ja-JP')}`;
-const pct = (n: number) => `${n}%`;
 
-// ── モックデータ ────────────────────────────────────────────
-const GOAL_SALES = 1_500_000;
-const ACTUAL_SALES = 1_090_000;
-const ACHIEVEMENT_RATE = Math.round((ACTUAL_SALES / GOAL_SALES) * 100);
+function ymOf(d = new Date()): string {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+}
+function last6Months(): { ym: string; label: string }[] {
+  const out: { ym: string; label: string }[] = [];
+  const now = new Date();
+  for (let i = 5; i >= 0; i--) {
+    const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+    out.push({ ym: ymOf(d), label: `${d.getMonth() + 1}月` });
+  }
+  return out;
+}
+function saleYm(d: DocumentData): string | null {
+  if (typeof d.dayKey === 'string' && d.dayKey.length >= 7) return d.dayKey.slice(0, 7);
+  const c = d.checkoutAt ?? d.createdAt;
+  if (c && typeof c.toDate === 'function') return ymOf(c.toDate());
+  return null;
+}
 
-type BackItem = {
-  label: string;
-  goal: number;
-  actual: number;
-  color: string;
-};
+type Perf = { byMonth: Record<string, number>; currentTypes: Record<string, number> };
 
-const BACK_ITEMS: BackItem[] = [
-  { label: '指名',   goal: 600_000,  actual: 460_000, color: 'var(--noxa-accent-primary)' },
-  { label: '同伴',   goal: 400_000,  actual: 280_000, color: 'var(--noxa-accent-violet)' },
-  { label: 'ボトル', goal: 300_000,  actual: 230_000, color: 'var(--noxa-accent-cyan)' },
-  { label: 'アフター', goal: 200_000, actual: 120_000, color: 'var(--noxa-accent-amber)' },
-];
+async function loadPerf(uid: string): Promise<Perf> {
+  const byMonth: Record<string, number> = {};
+  const currentTypes: Record<string, number> = {};
+  const cur = ymOf();
+  const add = (d: DocumentData) => {
+    const ym = saleYm(d);
+    const amt = typeof d.amount === 'number' ? d.amount : 0;
+    if (ym) byMonth[ym] = (byMonth[ym] ?? 0) + amt;
+    if (ym === cur) {
+      const t = (d.customerType as string) ?? 'regular';
+      currentTypes[t] = (currentTypes[t] ?? 0) + amt;
+    }
+  };
+  // owner shops（全 sales）
+  let ownerShops: string[] = [];
+  try {
+    const s = await getDocs(query(collection(db, 'shop_shops'), where('ownerUid', '==', uid)));
+    ownerShops = s.docs.map((x) => x.id);
+    for (const id of ownerShops) {
+      try { const ss = await getDocs(collection(db, `shop_shops/${id}/sales`)); ss.forEach((x) => add(x.data())); } catch { /* skip */ }
+    }
+  } catch { /* skip */ }
+  // owner でなければ所属店舗で自分の売上のみ
+  if (ownerShops.length === 0) {
+    try {
+      const ms = await getDocs(collection(db, `account_users/${uid}/memberships`));
+      for (const m of ms.docs) {
+        try { const ss = await getDocs(query(collection(db, `shop_shops/${m.id}/sales`), where('castUid', '==', uid))); ss.forEach((x) => add(x.data())); } catch { /* skip */ }
+      }
+    } catch { /* skip */ }
+  }
+  return { byMonth, currentTypes };
+}
 
-type MonthStat = { label: string; rate: number };
+const TYPE_LABEL: Record<string, string> = { regular: '通常', initial: '初回', r_within: 'R内', r_after: 'R後' };
+const TYPE_COLOR: Record<string, string> = { regular: 'var(--noxa-accent-primary)', initial: 'var(--noxa-accent-primary-ink)', r_within: '#67E8F9', r_after: '#7BE8A1' };
 
-const MONTHLY_HISTORY: MonthStat[] = [
-  { label: '1月', rate: 81 },
-  { label: '2月', rate: 68 },
-  { label: '3月', rate: 95 },
-  { label: '4月', rate: 72 },
-  { label: '5月', rate: 88 },
-  { label: '6月', rate: 73 },
-];
+export function GoalsClient({ user }: { user: User }) {
+  const [loading, setLoading] = useState(true);
+  const [goalSales, setGoalSales] = useState<number>(0);
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState<number>(0);
+  const [perf, setPerf] = useState<Perf>({ byMonth: {}, currentTypes: {} });
 
-// ── SVG バーチャート ──────────────────────────────────────────
-const CHART_W = 320;
-const CHART_H = 100;
-const BAR_W = 32;
-const GAP = (CHART_W - BAR_W * 6) / 7;
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      try {
+        const g = await getDoc(doc(db, `personal_goals/${user.uid}/items/current`));
+        if (alive && g.exists()) { const v = (g.data().goalSales as number) ?? 0; setGoalSales(v); setDraft(v); }
+      } catch { /* skip */ }
+      const p = await loadPerf(user.uid).catch(() => ({ byMonth: {}, currentTypes: {} }));
+      if (alive) { setPerf(p); setLoading(false); }
+    })();
+    return () => { alive = false; };
+  }, [user.uid]);
 
-function HistoryChart({ data }: { data: MonthStat[] }) {
+  const months = useMemo(() => last6Months(), []);
+  const cur = ymOf();
+  const actual = perf.byMonth[cur] ?? 0;
+  const rate = goalSales > 0 ? Math.round((actual / goalSales) * 100) : 0;
+  const history = months.map((m) => ({ label: m.label, rate: goalSales > 0 ? Math.round(((perf.byMonth[m.ym] ?? 0) / goalSales) * 100) : 0, current: m.ym === cur }));
+  const typeEntries = Object.entries(perf.currentTypes).filter(([, v]) => v > 0).sort((a, b) => b[1] - a[1]);
+
+  const save = async () => {
+    setGoalSales(draft); setEditing(false);
+    try { await setDoc(doc(db, `personal_goals/${user.uid}/items/current`), { goalSales: draft, updatedAt: serverTimestamp() }, { merge: true }); } catch { /* skip */ }
+  };
+
   return (
-    <svg
-      viewBox={`0 0 ${CHART_W} ${CHART_H + 24}`}
-      width="100%"
-      aria-label="過去6ヶ月の達成率チャート"
-      role="img"
-      style={{ display: 'block', overflow: 'visible' }}
-    >
-      {/* グリッドライン 100% / 50% */}
+    <div style={{ color: 'var(--noxa-text-primary)', fontFamily: 'var(--noxa-font-sans-jp)', borderRadius: 16, border: '1px solid var(--noxa-border)', padding: 'clamp(16px, 3vw, 28px)', position: 'relative', overflow: 'hidden' }}>
+      <div aria-hidden style={{ position: 'absolute', top: '-25%', right: '-8%', width: 600, height: 400, background: 'radial-gradient(ellipse, rgba(167,139,250,0.10) 0%, transparent 65%)', pointerEvents: 'none' }} />
+      <div style={{ position: 'relative' }}>
+        <nav aria-label="breadcrumb" style={{ marginBottom: 10 }}>
+          <ol style={{ display: 'flex', gap: 8, fontFamily: mono, fontSize: 11, letterSpacing: '0.06em', color: 'var(--noxa-text-faint)', listStyle: 'none', margin: 0, padding: 0 }}>
+            <li><Link href="/account" style={{ color: 'var(--noxa-text-muted)', textDecoration: 'none' }}>Noxa OS</Link></li><li aria-hidden>·</li><li>goals</li>
+          </ol>
+        </nav>
+        <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', gap: 16, flexWrap: 'wrap', marginBottom: 24 }}>
+          <div>
+            <div className="noxa-eyebrow" style={{ marginBottom: 6 }}>Noxa OS · Goals</div>
+            <h1 className="noxa-display" style={{ fontSize: 'clamp(26px, 4vw, 38px)', margin: 0, display: 'flex', alignItems: 'baseline', gap: 10, flexWrap: 'wrap' }}>
+              <span style={{ fontFamily: display, fontStyle: 'italic', color: 'var(--noxa-accent-primary-ink)', fontWeight: 400 }}>№ 05</span>
+              <span style={{ fontFamily: 'var(--noxa-font-display-jp)', fontWeight: 500 }}>目標</span>
+            </h1>
+          </div>
+          <div style={{ display: 'inline-flex', alignItems: 'center', gap: 8, padding: '6px 12px', background: 'rgba(123,232,161,0.10)', border: '1px solid rgba(123,232,161,0.30)', borderRadius: 9999, fontFamily: mono, fontSize: 10, letterSpacing: '0.12em', color: 'var(--noxa-status-success)', textTransform: 'uppercase' }}>
+            <span aria-hidden style={{ width: 6, height: 6, borderRadius: 3, background: 'var(--noxa-status-success)' }} />実データ
+          </div>
+        </div>
+
+        {loading ? (
+          <div className="noxa-eyebrow" style={{ padding: '40px 0' }}>読み込み中…</div>
+        ) : (
+          <>
+            {/* 今月の目標 */}
+            <section aria-label="今月の目標" style={{ background: 'var(--noxa-surface-card)', border: '1px solid var(--noxa-border)', borderRadius: 16, padding: 'clamp(16px, 3vw, 24px)', marginBottom: 16 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+                <h2 className="noxa-eyebrow" style={{ fontSize: 11 }}>今月の目標</h2>
+                {!editing ? (
+                  <button type="button" onClick={() => { setDraft(goalSales); setEditing(true); }} style={chip}>目標を設定</button>
+                ) : (
+                  <span style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                    <input type="number" value={draft} onChange={(e) => setDraft(Math.max(0, Number(e.target.value)))} inputMode="numeric"
+                      style={{ width: 130, minHeight: 34, padding: '4px 10px', borderRadius: 8, background: 'var(--noxa-bg-base)', border: '1px solid var(--noxa-border)', color: 'var(--noxa-text-primary)', fontSize: 14, fontFamily: mono }} />
+                    <button type="button" onClick={save} style={{ ...chip, background: 'var(--noxa-accent-primary)', color: '#fff', borderColor: 'var(--noxa-accent-primary)' }}>保存</button>
+                    <button type="button" onClick={() => setEditing(false)} style={chip}>取消</button>
+                  </span>
+                )}
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(120px, 1fr))', gap: 12, marginBottom: 20 }}>
+                <Stat label="目標売上" value={goalSales > 0 ? yen(goalSales) : '未設定'} color="var(--noxa-text-muted)" />
+                <Stat label="実績（今月）" value={yen(actual)} color="var(--noxa-accent-primary-ink)" big />
+                <Stat label="達成率" value={goalSales > 0 ? `${rate}%` : '—'} color="var(--noxa-accent-primary-ink)" big />
+              </div>
+
+              <div role="progressbar" aria-valuenow={rate} aria-valuemin={0} aria-valuemax={100} style={{ height: 14, background: 'var(--noxa-surface-muted)', borderRadius: 7, overflow: 'hidden' }}>
+                <div style={{ width: `${Math.min(rate, 100)}%`, height: '100%', background: 'linear-gradient(90deg, var(--noxa-accent-primary) 0%, var(--noxa-accent-primary-neon) 100%)', borderRadius: 7, boxShadow: '0 0 12px rgba(167,139,250,0.5)', transition: 'width 0.5s ease' }} />
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontFamily: mono, fontSize: 10, color: 'var(--noxa-text-faint)', marginTop: 6 }}>
+                <span>¥0</span><span>{goalSales > 0 ? yen(goalSales) : '目標未設定'}</span>
+              </div>
+            </section>
+
+            {/* 今月の内訳（客層別・実データ） */}
+            <section aria-label="今月の内訳" style={{ background: 'var(--noxa-surface-card)', border: '1px solid var(--noxa-border)', borderRadius: 16, padding: 'clamp(16px, 3vw, 24px)', marginBottom: 16 }}>
+              <h2 className="noxa-eyebrow" style={{ fontSize: 11, marginBottom: 16 }}>今月の内訳（客層別）</h2>
+              {typeEntries.length === 0 ? (
+                <p style={{ fontSize: 13, color: 'var(--noxa-text-muted)' }}>今月の会計データはまだありません。</p>
+              ) : (
+                <ul style={{ listStyle: 'none', margin: 0, padding: 0, display: 'flex', flexDirection: 'column', gap: 14 }}>
+                  {typeEntries.map(([t, v]) => {
+                    const w = actual > 0 ? Math.round((v / actual) * 100) : 0;
+                    return (
+                      <li key={t} style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
+                          <span style={{ fontSize: 13 }}>{TYPE_LABEL[t] ?? t}</span>
+                          <span style={{ fontFamily: mono, fontSize: 12, fontVariantNumeric: 'tabular-nums' }}>{yen(v)}<span style={{ color: 'var(--noxa-text-faint)', marginLeft: 8 }}>{w}%</span></span>
+                        </div>
+                        <div style={{ height: 6, background: 'var(--noxa-surface-muted)', borderRadius: 3, overflow: 'hidden' }}>
+                          <div style={{ width: `${w}%`, height: '100%', background: TYPE_COLOR[t] ?? 'var(--noxa-accent-primary)', borderRadius: 3 }} />
+                        </div>
+                      </li>
+                    );
+                  })}
+                </ul>
+              )}
+            </section>
+
+            {/* 過去6ヶ月 */}
+            <section aria-label="過去6ヶ月の達成率" style={{ background: 'var(--noxa-surface-card)', border: '1px solid var(--noxa-border)', borderRadius: 16, padding: 'clamp(16px, 3vw, 24px)' }}>
+              <h2 className="noxa-eyebrow" style={{ fontSize: 11, marginBottom: 20 }}>過去6ヶ月の達成率</h2>
+              {goalSales > 0 ? <HistoryChart data={history} /> : <p style={{ fontSize: 13, color: 'var(--noxa-text-muted)' }}>目標を設定すると達成率が表示されます。</p>}
+            </section>
+
+            <p style={{ margin: '16px 0 0', fontSize: 11, lineHeight: 1.6, color: 'var(--noxa-text-faint)', fontFamily: mono }}>
+              ※ 実績は会計（売上データ）から月別に自動集計。目標は本人のみ編集可（personal_goals）。
+            </p>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function Stat({ label, value, color, big }: { label: string; value: string; color: string; big?: boolean }) {
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+      <span style={{ fontFamily: mono, fontSize: 10, letterSpacing: '0.12em', textTransform: 'uppercase', color: 'var(--noxa-text-faint)' }}>{label}</span>
+      <span style={{ fontFamily: display, fontSize: big ? 'clamp(28px, 5vw, 44px)' : 'clamp(22px, 4vw, 32px)', fontVariantNumeric: 'tabular-nums', fontWeight: 700, color, lineHeight: 1.0 }}>{value}</span>
+    </div>
+  );
+}
+
+const chip: React.CSSProperties = { appearance: 'none', cursor: 'pointer', minHeight: 32, padding: '5px 14px', borderRadius: 9999, fontSize: 12, background: 'var(--noxa-surface-muted)', color: 'var(--noxa-text-muted)', border: '1px solid var(--noxa-border)' };
+
+// ── SVG バーチャート（実データ） ──
+const CHART_W = 320, CHART_H = 100, BAR_W = 32;
+const GAP = (CHART_W - BAR_W * 6) / 7;
+function HistoryChart({ data }: { data: { label: string; rate: number; current: boolean }[] }) {
+  return (
+    <svg viewBox={`0 0 ${CHART_W} ${CHART_H + 24}`} width="100%" role="img" aria-label="過去6ヶ月の達成率" style={{ display: 'block', overflow: 'visible' }}>
       {[100, 50].map((v) => {
         const y = CHART_H - (v / 100) * CHART_H;
         return (
           <g key={v}>
-            <line
-              x1={0} y1={y} x2={CHART_W} y2={y}
-              stroke="var(--noxa-border)"
-              strokeWidth={0.8}
-              strokeDasharray="3 3"
-            />
-            <text
-              x={CHART_W + 4} y={y + 4}
-              fontSize={9}
-              fill="var(--noxa-text-faint)"
-              fontFamily={mono}
-            >
-              {v}%
-            </text>
+            <line x1={0} y1={y} x2={CHART_W} y2={y} stroke="var(--noxa-border)" strokeWidth={0.8} strokeDasharray="3 3" />
+            <text x={CHART_W + 4} y={y + 4} fontSize={9} fill="var(--noxa-text-faint)" fontFamily={mono}>{v}%</text>
           </g>
         );
       })}
-
-      {/* バー */}
       {data.map((m, i) => {
         const x = GAP + i * (BAR_W + GAP);
-        const barH = (m.rate / 100) * CHART_H;
+        const barH = (Math.min(m.rate, 100) / 100) * CHART_H;
         const y = CHART_H - barH;
-        const isCurrent = i === data.length - 1;
         return (
           <g key={m.label}>
-            {/* 背景バー */}
-            <rect
-              x={x} y={0} width={BAR_W} height={CHART_H}
-              rx={4}
-              fill="var(--noxa-surface-muted)"
-            />
-            {/* 実績バー */}
-            <rect
-              x={x} y={y} width={BAR_W} height={barH}
-              rx={4}
-              fill={
-                isCurrent
-                  ? 'url(#goalGradCurrent)'
-                  : 'var(--noxa-surface-raised)'
-              }
-              opacity={isCurrent ? 1 : 0.75}
-            />
-            {/* 達成率ラベル */}
-            <text
-              x={x + BAR_W / 2} y={y - 5}
-              textAnchor="middle"
-              fontSize={9}
-              fontFamily={mono}
-              fill={isCurrent ? 'var(--noxa-accent-violet)' : 'var(--noxa-text-faint)'}
-              style={{ fontVariantNumeric: 'tabular-nums' }}
-            >
-              {m.rate}%
-            </text>
-            {/* 月ラベル */}
-            <text
-              x={x + BAR_W / 2} y={CHART_H + 16}
-              textAnchor="middle"
-              fontSize={10}
-              fontFamily={mono}
-              fill={isCurrent ? 'var(--noxa-text-primary)' : 'var(--noxa-text-faint)'}
-            >
-              {m.label}
-            </text>
+            <rect x={x} y={0} width={BAR_W} height={CHART_H} rx={4} fill="var(--noxa-surface-muted)" />
+            <rect x={x} y={y} width={BAR_W} height={barH} rx={4} fill={m.current ? 'url(#goalGradCurrent)' : 'var(--noxa-surface-raised)'} opacity={m.current ? 1 : 0.75} />
+            <text x={x + BAR_W / 2} y={y - 5} textAnchor="middle" fontSize={9} fontFamily={mono} fill={m.current ? 'var(--noxa-accent-primary-ink)' : 'var(--noxa-text-faint)'} style={{ fontVariantNumeric: 'tabular-nums' }}>{m.rate}%</text>
+            <text x={x + BAR_W / 2} y={CHART_H + 16} textAnchor="middle" fontSize={10} fontFamily={mono} fill={m.current ? 'var(--noxa-text-primary)' : 'var(--noxa-text-faint)'}>{m.label}</text>
           </g>
         );
       })}
-
-      {/* グラデーション定義 */}
       <defs>
         <linearGradient id="goalGradCurrent" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stopColor="var(--noxa-accent-violet)" stopOpacity="0.9" />
+          <stop offset="0%" stopColor="var(--noxa-accent-primary-ink)" stopOpacity="0.9" />
           <stop offset="100%" stopColor="var(--noxa-accent-primary)" stopOpacity="0.7" />
         </linearGradient>
       </defs>
     </svg>
-  );
-}
-
-// ── バック内訳バー ────────────────────────────────────────────
-function BackBar({ item }: { item: BackItem }) {
-  const actualRate = Math.min(Math.round((item.actual / item.goal) * 100), 100);
-  return (
-    <li style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 8 }}>
-        <span style={{ fontSize: 13 }}>{item.label}</span>
-        <span style={{ display: 'flex', gap: 12, alignItems: 'baseline' }}>
-          <span style={{ fontFamily: mono, fontSize: 11, color: 'var(--noxa-text-muted)' }}>
-            目標 {yen(item.goal)}
-          </span>
-          <span style={{ fontFamily: mono, fontSize: 12, fontVariantNumeric: 'tabular-nums', color: 'var(--noxa-text-primary)' }}>
-            {yen(item.actual)}
-          </span>
-        </span>
-      </div>
-      {/* 2段バー：目標背景 + 実績 */}
-      <div
-        role="progressbar"
-        aria-valuenow={actualRate}
-        aria-valuemin={0}
-        aria-valuemax={100}
-        aria-label={`${item.label} 達成率 ${actualRate}%`}
-        style={{ height: 6, background: 'var(--noxa-surface-muted)', borderRadius: 3, overflow: 'hidden' }}
-      >
-        <div
-          style={{
-            width: `${actualRate}%`,
-            height: '100%',
-            background: `linear-gradient(90deg, ${item.color}, color-mix(in srgb, ${item.color} 60%, var(--noxa-accent-primary-neon)))`,
-            borderRadius: 3,
-            transition: 'width 0.4s ease',
-          }}
-        />
-      </div>
-      <div style={{ fontFamily: mono, fontSize: 10, color: 'var(--noxa-text-faint)', textAlign: 'right' }}>
-        {actualRate}%
-      </div>
-    </li>
-  );
-}
-
-// ── メインコンポーネント ────────────────────────────────────────
-export function GoalsClient() {
-  return (
-    <div
-      style={{
-        color: 'var(--noxa-text-primary)',
-        fontFamily: 'var(--noxa-font-sans-jp)',
-        borderRadius: 16,
-        border: '1px solid var(--noxa-border)',
-        padding: 'clamp(16px, 3vw, 28px)',
-        position: 'relative',
-        overflow: 'hidden',
-      }}
-    >
-      {/* 装飾グロー */}
-      <div
-        aria-hidden
-        style={{
-          position: 'absolute',
-          top: '-25%',
-          right: '-8%',
-          width: 600,
-          height: 400,
-          background: 'radial-gradient(ellipse, rgba(167,139,250,0.10) 0%, transparent 65%)',
-          pointerEvents: 'none',
-        }}
-      />
-
-      <div style={{ position: 'relative' }}>
-        {/* breadcrumb */}
-        <nav aria-label="breadcrumb" style={{ marginBottom: 10 }}>
-          <ol
-            style={{
-              display: 'flex',
-              gap: 8,
-              fontFamily: mono,
-              fontSize: 11,
-              letterSpacing: '0.06em',
-              color: 'var(--noxa-text-faint)',
-              listStyle: 'none',
-              margin: 0,
-              padding: 0,
-            }}
-          >
-            <li>
-              <Link href="/account" style={{ color: 'var(--noxa-text-muted)', textDecoration: 'none' }}>
-                Noxa OS
-              </Link>
-            </li>
-            <li aria-hidden>·</li>
-            <li>goals</li>
-          </ol>
-        </nav>
-
-        {/* ヘッダー */}
-        <div
-          style={{
-            display: 'flex',
-            alignItems: 'flex-end',
-            justifyContent: 'space-between',
-            gap: 16,
-            flexWrap: 'wrap',
-            marginBottom: 24,
-          }}
-        >
-          <div>
-            <div className="noxa-eyebrow" style={{ marginBottom: 6 }}>Noxa OS · Goals</div>
-            <h1
-              className="noxa-display"
-              style={{
-                fontSize: 'clamp(26px, 4vw, 38px)',
-                margin: 0,
-                display: 'flex',
-                alignItems: 'baseline',
-                gap: 10,
-                flexWrap: 'wrap',
-              }}
-            >
-              <span
-                style={{
-                  fontFamily: display,
-                  fontStyle: 'italic',
-                  color: 'var(--noxa-accent-violet)',
-                  fontWeight: 400,
-                }}
-              >
-                № 05
-              </span>
-              <span style={{ fontFamily: 'var(--noxa-font-display-jp)', fontWeight: 500 }}>目標</span>
-            </h1>
-          </div>
-          {/* モックバッジ */}
-          <div
-            style={{
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: 8,
-              padding: '6px 12px',
-              background: 'rgba(167,139,250,0.10)',
-              border: '1px solid rgba(167,139,250,0.30)',
-              borderRadius: 9999,
-              fontFamily: mono,
-              fontSize: 10,
-              letterSpacing: '0.12em',
-              color: 'var(--noxa-accent-violet)',
-              textTransform: 'uppercase',
-            }}
-          >
-            <span
-              aria-hidden
-              style={{
-                width: 6,
-                height: 6,
-                borderRadius: 3,
-                background: 'var(--noxa-accent-violet)',
-                boxShadow: '0 0 8px var(--noxa-accent-violet)',
-              }}
-            />
-            モック
-          </div>
-        </div>
-
-        {/* ── 今月の目標カード ─────────────────────────────────── */}
-        <section
-          aria-label="今月の目標"
-          style={{
-            background: 'var(--noxa-surface-card)',
-            border: '1px solid var(--noxa-border)',
-            borderRadius: 16,
-            padding: 'clamp(16px, 3vw, 24px)',
-            marginBottom: 16,
-          }}
-        >
-          <h2
-            className="noxa-eyebrow"
-            style={{ fontSize: 11, marginBottom: 16 }}
-          >
-            今月の目標
-          </h2>
-
-          {/* 大型数字 */}
-          <div
-            style={{
-              display: 'grid',
-              gridTemplateColumns: 'repeat(auto-fit, minmax(120px, 1fr))',
-              gap: 12,
-              marginBottom: 20,
-            }}
-          >
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-              <span
-                style={{
-                  fontFamily: mono,
-                  fontSize: 10,
-                  letterSpacing: '0.12em',
-                  textTransform: 'uppercase',
-                  color: 'var(--noxa-text-faint)',
-                }}
-              >
-                目標売上
-              </span>
-              <span
-                style={{
-                  fontFamily: display,
-                  fontSize: 'clamp(22px, 4vw, 32px)',
-                  fontVariantNumeric: 'tabular-nums',
-                  fontWeight: 600,
-                  color: 'var(--noxa-text-muted)',
-                  lineHeight: 1.1,
-                }}
-              >
-                {yen(GOAL_SALES)}
-              </span>
-            </div>
-
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-              <span
-                style={{
-                  fontFamily: mono,
-                  fontSize: 10,
-                  letterSpacing: '0.12em',
-                  textTransform: 'uppercase',
-                  color: 'var(--noxa-text-faint)',
-                }}
-              >
-                実績
-              </span>
-              <span
-                style={{
-                  fontFamily: display,
-                  fontSize: 'clamp(22px, 4vw, 32px)',
-                  fontVariantNumeric: 'tabular-nums',
-                  fontWeight: 700,
-                  color: 'var(--noxa-accent-primary-ink)',
-                  lineHeight: 1.1,
-                }}
-              >
-                {yen(ACTUAL_SALES)}
-              </span>
-            </div>
-
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-              <span
-                style={{
-                  fontFamily: mono,
-                  fontSize: 10,
-                  letterSpacing: '0.12em',
-                  textTransform: 'uppercase',
-                  color: 'var(--noxa-text-faint)',
-                }}
-              >
-                達成率
-              </span>
-              <span
-                style={{
-                  fontFamily: display,
-                  fontSize: 'clamp(28px, 5vw, 44px)',
-                  fontVariantNumeric: 'tabular-nums',
-                  fontWeight: 700,
-                  color: 'var(--noxa-accent-violet)',
-                  lineHeight: 1.0,
-                }}
-              >
-                {pct(ACHIEVEMENT_RATE)}
-              </span>
-            </div>
-          </div>
-
-          {/* 大型進捗バー */}
-          <div>
-            <div
-              role="progressbar"
-              aria-valuenow={ACHIEVEMENT_RATE}
-              aria-valuemin={0}
-              aria-valuemax={100}
-              aria-label={`今月達成率 ${ACHIEVEMENT_RATE}%`}
-              style={{
-                height: 14,
-                background: 'var(--noxa-surface-muted)',
-                borderRadius: 7,
-                overflow: 'hidden',
-              }}
-            >
-              <div
-                style={{
-                  width: `${ACHIEVEMENT_RATE}%`,
-                  height: '100%',
-                  background:
-                    'linear-gradient(90deg, var(--noxa-accent-violet) 0%, var(--noxa-accent-primary-neon) 100%)',
-                  borderRadius: 7,
-                  boxShadow: '0 0 12px rgba(167,139,250,0.5)',
-                  transition: 'width 0.5s ease',
-                }}
-              />
-            </div>
-            <div
-              style={{
-                display: 'flex',
-                justifyContent: 'space-between',
-                fontFamily: mono,
-                fontSize: 10,
-                color: 'var(--noxa-text-faint)',
-                marginTop: 6,
-              }}
-            >
-              <span>¥0</span>
-              <span>{yen(GOAL_SALES)}</span>
-            </div>
-          </div>
-        </section>
-
-        {/* ── バック内訳 ───────────────────────────────────────── */}
-        <section
-          aria-label="バック内訳"
-          style={{
-            background: 'var(--noxa-surface-card)',
-            border: '1px solid var(--noxa-border)',
-            borderRadius: 16,
-            padding: 'clamp(16px, 3vw, 24px)',
-            marginBottom: 16,
-          }}
-        >
-          <h2 className="noxa-eyebrow" style={{ fontSize: 11, marginBottom: 16 }}>
-            バック内訳
-          </h2>
-          <ul
-            style={{
-              listStyle: 'none',
-              margin: 0,
-              padding: 0,
-              display: 'flex',
-              flexDirection: 'column',
-              gap: 16,
-            }}
-          >
-            {BACK_ITEMS.map((item) => (
-              <BackBar key={item.label} item={item} />
-            ))}
-          </ul>
-        </section>
-
-        {/* ── 過去6ヶ月の達成率 ──────────────────────────────────── */}
-        <section
-          aria-label="過去6ヶ月の達成率"
-          style={{
-            background: 'var(--noxa-surface-card)',
-            border: '1px solid var(--noxa-border)',
-            borderRadius: 16,
-            padding: 'clamp(16px, 3vw, 24px)',
-          }}
-        >
-          <h2 className="noxa-eyebrow" style={{ fontSize: 11, marginBottom: 20 }}>
-            過去6ヶ月の達成率
-          </h2>
-          <HistoryChart data={MONTHLY_HISTORY} />
-          {/* 平均ライン補足 */}
-          <div
-            style={{
-              marginTop: 12,
-              fontFamily: mono,
-              fontSize: 11,
-              color: 'var(--noxa-text-faint)',
-              display: 'flex',
-              gap: 16,
-              flexWrap: 'wrap',
-            }}
-          >
-            <span>
-              平均達成率{' '}
-              <span
-                style={{
-                  fontVariantNumeric: 'tabular-nums',
-                  color: 'var(--noxa-text-muted)',
-                }}
-              >
-                {Math.round(
-                  MONTHLY_HISTORY.reduce((s, m) => s + m.rate, 0) /
-                    MONTHLY_HISTORY.length
-                )}%
-              </span>
-            </span>
-            <span style={{ color: 'var(--noxa-accent-violet)' }}>
-              ■ 今月
-            </span>
-            <span style={{ color: 'var(--noxa-surface-raised)' }}>
-              ■ 過去月
-            </span>
-          </div>
-        </section>
-
-        {/* フッター注記 */}
-        <p
-          style={{
-            margin: '16px 0 0',
-            fontSize: 11,
-            lineHeight: 1.6,
-            color: 'var(--noxa-text-faint)',
-            fontFamily: mono,
-          }}
-        >
-          ※ 現在はモックデータを表示。実装フェーズで Firestore（noxa-platform）の目標コレクションに接続予定。
-        </p>
-      </div>
-    </div>
   );
 }
 
