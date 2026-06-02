@@ -3,16 +3,15 @@
 import Link from 'next/link';
 import { useEffect, useMemo, useState } from 'react';
 import type { User } from 'firebase/auth';
-import { usePosStore, type PosSlip } from '@/lib/pos/store';
-import type { CustomerType, OrderItem, BreakdownItem } from '@/lib/pos/engine';
+import { usePosStore } from '@/lib/pos/store';
+import type { CustomerType, OrderItem, BreakdownItem, PosSlip, Action, CalculationResult } from '@/lib/pos/engine';
+import type { FloorTable, Cast } from '@/lib/seating/types';
 
 /**
- * ① POS — オーダーエントリー / 伝票計算（実エンジン・実データ）
+ * ① POS — オーダーエントリー / 伝票計算（実エンジン・実データ・席回しと卓統合）
  *
- * host-club-calculator の伝票計算エンジンを移植し、複数卓 × 複数伝票で運用。
- * 会計（checkout）すると shop_shops/{shopId}/sales に転記され、売上データに加わる。
- * 状態は Firestore（sessions）にリアルタイム保存され、共有タブレット間で同期する。
- * 決済機能は持たない（現金/既存レジ）。POS は伝票計算と売上転記まで。
+ * 卓は seating_tables（席回しと同一ドキュメント）。伝票(slips)を同じ卓に持たせるため
+ * 席回しのキャスト配置・開卓/退店と完全同期する。会計で sales に転記。
  */
 
 const mono = 'var(--noxa-font-mono)';
@@ -25,108 +24,103 @@ const CUSTOMER_TYPES: { id: CustomerType; label: string }[] = [
   { id: 'r_after', label: 'R後' },
 ];
 
-// ─────────────────────────────────────────────
-
 export function PosClient({ user }: { user: User }) {
   const store = usePosStore(user);
-  const { config, sessions } = store;
+  const { config, tables, casts } = store;
 
   const [selectedTableId, setSelectedTableId] = useState<string | null>(null);
   const [selectedSlipId, setSelectedSlipId] = useState<string | null>(null);
   const [activeCategory, setActiveCategory] = useState<string>(config.menuCategories[0]?.id ?? '');
+  const [customItem, setCustomItem] = useState<{ name: string } | null>(null);
   const [, setTick] = useState(0);
 
-  // 時間ベース料金を反映するため定期再描画
-  useEffect(() => {
-    const t = setInterval(() => setTick((n) => n + 1), 30000);
-    return () => clearInterval(t);
-  }, []);
+  useEffect(() => { const t = setInterval(() => setTick((n) => n + 1), 30000); return () => clearInterval(t); }, []);
+  useEffect(() => { if (!activeCategory && config.menuCategories[0]) setActiveCategory(config.menuCategories[0].id); }, [config.menuCategories, activeCategory]);
+
+  const castById = useMemo(() => new Map(casts.map((c) => [c.id, c.name])), [casts]);
+  const selectedTable = tables.find((t) => t.id === selectedTableId) ?? null;
+  const slips = selectedTable?.slips ?? [];
+  const selectedSlip = slips.find((s) => s.id === selectedSlipId) ?? null;
 
   useEffect(() => {
-    if (!activeCategory && config.menuCategories[0]) setActiveCategory(config.menuCategories[0].id);
-  }, [config.menuCategories, activeCategory]);
-
-  const selectedSession = useMemo(
-    () => sessions.find((s) => s.tableId === selectedTableId) ?? null,
-    [sessions, selectedTableId],
-  );
-  const selectedSlip = useMemo(
-    () => selectedSession?.slips.find((s) => s.id === selectedSlipId) ?? null,
-    [selectedSession, selectedSlipId],
-  );
-
-  // 卓を選ぶと最初の伝票を自動選択
-  useEffect(() => {
-    if (selectedSession && !selectedSlip) {
-      setSelectedSlipId(selectedSession.slips[0]?.id ?? null);
-    }
-  }, [selectedSession, selectedSlip]);
+    if (selectedTable && !selectedSlip) setSelectedSlipId(slips[0]?.id ?? null);
+  }, [selectedTable, selectedSlip, slips]);
 
   const result = selectedSlip ? store.resultFor(selectedSlip) : null;
 
-  // ── ローディング / 店舗なし ──
-  if (store.loading) {
-    return <Shell><div className="noxa-eyebrow" style={{ padding: '40px 0' }}>読み込み中…</div></Shell>;
-  }
+  if (store.loading) return <Shell><div className="noxa-eyebrow" style={{ padding: '40px 0' }}>読み込み中…</div></Shell>;
   if (!store.shopId) {
     return (
       <Shell>
-        <div style={{ padding: 24, border: '1px solid var(--noxa-border)', borderRadius: 14, background: 'var(--noxa-surface-card)' }}>
-          <p style={{ margin: '0 0 8px', fontSize: 15 }}>POS は店舗運営機能です。</p>
-          <p style={{ margin: 0, fontSize: 13, color: 'var(--noxa-text-muted)' }}>
-            <Link href="/store/new" style={{ color: 'var(--noxa-accent-primary-ink)' }}>店舗を登録</Link> すると POS が解放されます。
-          </p>
-        </div>
+        <Empty>POS は店舗運営機能です。<Link href="/store/new" style={{ color: 'var(--noxa-accent-primary-ink)' }}>店舗を登録</Link> すると解放されます。</Empty>
+      </Shell>
+    );
+  }
+  if (store.needsSeed) {
+    return (
+      <Shell device={store.isDevice}>
+        <Empty>
+          <p style={{ margin: '0 0 12px' }}>フロアの卓が未設定です（POS と席回しで共有）。</p>
+          {store.canConfig
+            ? <button type="button" className="noxa-btn noxa-btn-primary" style={primaryBtn} onClick={() => store.seedTables()}>卓を初期作成する</button>
+            : <span style={{ fontSize: 12, color: 'var(--noxa-text-faint)' }}>オーナーが卓を作成すると表示されます。</span>}
+        </Empty>
       </Shell>
     );
   }
 
   const menuItemsByName = new Map(config.menuItems.map((m) => [m.name, m]));
   const categoryItems = (config.menuCategories.find((c) => c.id === activeCategory)?.items ?? [])
-    .map((name) => menuItemsByName.get(name))
-    .filter((m): m is NonNullable<typeof m> => !!m);
+    .map((name) => menuItemsByName.get(name)).filter((m): m is NonNullable<typeof m> => !!m);
 
-  const openSlip = async (tableId: string, tableName: string) => {
+  const addItem = (m: { name: string; price: number; canHalfOff?: boolean; isTaxIncluded?: boolean; isCustom?: boolean }) => {
+    if (!selectedTableId || !selectedSlip) return;
+    if (m.isCustom) { setCustomItem({ name: m.name }); return; }
+    store.dispatchSlip(selectedTableId, selectedSlip.id, { type: 'ADD_ORDER', payload: { name: m.name, price: m.price, canHalfOff: m.canHalfOff, isTaxIncluded: m.isTaxIncluded } });
+  };
+
+  const openSlip = async (tableId: string) => {
     setSelectedTableId(tableId);
-    setSelectedSlipId(null); // 追加後、auto-select 効果が新しい伝票（先頭/最新）を選ぶ
-    await store.addSlip(tableId, tableName);
+    setSelectedSlipId(null);
+    await store.addSlip(tableId);
   };
 
   return (
     <Shell device={store.isDevice}>
       <div className="grid grid-cols-1 lg:grid-cols-[200px_1fr_340px]" style={{ gap: 'clamp(12px, 1.6vw, 18px)', alignItems: 'start' }}>
-        {/* 左：卓 */}
+        {/* 左：卓（席回しと共有） */}
         <section aria-label="卓選択">
-          <PaneTitle>卓</PaneTitle>
+          <PaneTitle>卓 <span style={{ color: 'var(--noxa-text-faint)', fontWeight: 400 }}>（席回しと同期）</span></PaneTitle>
           <div className="grid grid-cols-4 lg:grid-cols-2" style={{ gap: 8 }}>
-            {config.tableNames.map((name) => {
-              const tableId = name;
-              const sess = sessions.find((s) => s.tableId === tableId);
-              const slipCount = sess?.slips.length ?? 0;
-              const occupied = slipCount > 0;
-              const total = sess ? sess.slips.reduce((sum, sl) => sum + store.resultFor(sl).currentTotal, 0) : 0;
-              const active = tableId === selectedTableId;
+            {tables.map((t) => {
+              const tslips = t.slips ?? [];
+              const occupied = tslips.length > 0 || t.status !== 'EMPTY' || (t.currentHostIds?.length ?? 0) > 0;
+              const total = tslips.reduce((sum, sl) => sum + store.resultFor(sl).currentTotal, 0);
+              const active = t.id === selectedTableId;
               return (
-                <button
-                  key={tableId}
-                  type="button"
-                  onClick={() => { setSelectedTableId(tableId); setSelectedSlipId(sess?.slips[0]?.id ?? null); }}
+                <button key={t.id} type="button"
+                  onClick={() => { setSelectedTableId(t.id); setSelectedSlipId(t.slips?.[0]?.id ?? null); }}
                   aria-pressed={active}
                   style={{
-                    appearance: 'none', cursor: 'pointer', textAlign: 'left', minHeight: 62, padding: '9px 10px', borderRadius: 12,
+                    appearance: 'none', cursor: 'pointer', textAlign: 'left', minHeight: 64, padding: '9px 10px', borderRadius: 12,
                     background: occupied ? 'var(--noxa-surface-card)' : 'transparent',
                     border: active ? '1px solid var(--noxa-accent-primary)' : `1px solid ${occupied ? 'var(--noxa-border-strong)' : 'var(--noxa-border)'}`,
-                    boxShadow: active ? 'var(--noxa-glow-ring)' : 'none',
-                    color: 'var(--noxa-text-primary)', display: 'flex', flexDirection: 'column', gap: 4,
-                    transition: 'border-color var(--noxa-duration-fast) var(--noxa-ease-natural)',
-                  }}
-                >
+                    boxShadow: active ? 'var(--noxa-glow-ring)' : 'none', color: 'var(--noxa-text-primary)',
+                    display: 'flex', flexDirection: 'column', gap: 4, transition: 'border-color var(--noxa-duration-fast) var(--noxa-ease-natural)',
+                  }}>
                   <span style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                    <span style={{ fontFamily: mono, fontSize: 13, fontWeight: 600 }}>{name}</span>
-                    <span aria-hidden style={{ width: 7, height: 7, borderRadius: 4, background: occupied ? 'var(--noxa-accent-primary-ink)' : 'var(--noxa-text-faint)', boxShadow: occupied ? '0 0 8px var(--noxa-accent-primary-ink)' : 'none', flex: 'none' }} />
+                    <span style={{ fontFamily: mono, fontSize: 13, fontWeight: 600 }}>{t.name}</span>
+                    <span aria-hidden style={{ width: 7, height: 7, borderRadius: 4, background: occupied ? 'var(--noxa-accent-primary-ink)' : 'var(--noxa-text-faint)', boxShadow: occupied ? '0 0 8px var(--noxa-accent-primary-ink)' : 'none' }} />
                   </span>
                   {occupied ? (
-                    <span style={{ fontSize: 10, color: 'var(--noxa-text-muted)', fontFamily: mono }}>{slipCount}伝票 · {yen(total)}</span>
+                    <>
+                      <span style={{ fontSize: 10, color: 'var(--noxa-text-muted)', fontFamily: mono }}>{tslips.length}伝票 · {yen(total)}</span>
+                      {(t.currentHostIds?.length ?? 0) > 0 && (
+                        <span style={{ fontSize: 9, color: 'var(--noxa-text-faint)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          {t.currentHostIds.map((cid) => castById.get(cid) ?? '?').join(' ')}
+                        </span>
+                      )}
+                    </>
                   ) : (
                     <span style={{ fontSize: 10, color: 'var(--noxa-text-faint)', fontFamily: mono }}>空席</span>
                   )}
@@ -142,61 +136,50 @@ export function PosClient({ user }: { user: User }) {
             <Empty>左の卓を選択してください。</Empty>
           ) : (
             <>
-              {/* 伝票タブ */}
-              <PaneTitle>
-                {selectedTableId} の伝票
-              </PaneTitle>
+              <PaneTitle>{selectedTable?.name} の伝票</PaneTitle>
               <div style={{ display: 'flex', gap: 6, overflowX: 'auto', paddingBottom: 6, marginBottom: 12 }}>
-                {(selectedSession?.slips ?? []).map((sl) => {
-                  const active = sl.id === selectedSlipId;
-                  return (
-                    <button key={sl.id} type="button" onClick={() => setSelectedSlipId(sl.id)}
-                      style={chipStyle(active)}>
-                      {sl.name}
-                    </button>
-                  );
-                })}
-                <button type="button" onClick={() => openSlip(selectedTableId, selectedTableId)}
-                  style={{ ...chipStyle(false), borderStyle: 'dashed', color: 'var(--noxa-accent-primary-ink)', borderColor: 'var(--noxa-border-strong)' }}>
-                  ＋ 伝票
-                </button>
+                {slips.map((sl) => (
+                  <button key={sl.id} type="button" onClick={() => setSelectedSlipId(sl.id)} style={chipStyle(sl.id === selectedSlipId)}>{sl.name}</button>
+                ))}
+                <button type="button" onClick={() => openSlip(selectedTableId)} style={{ ...chipStyle(false), borderStyle: 'dashed', color: 'var(--noxa-accent-primary-ink)', borderColor: 'var(--noxa-border-strong)' }}>＋ 伝票</button>
               </div>
 
               {!selectedSlip ? (
                 <Empty>「＋ 伝票」で新しい伝票を開いてください。</Empty>
               ) : (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-                  <SlipControls
-                    slip={selectedSlip}
-                    initialSetPriceOptions={config.initialSetPriceOptions}
-                    onDispatch={(a) => store.dispatchSlip(selectedTableId, selectedSlip.id, a)}
-                  />
+                  <SlipControls slip={selectedSlip} initialSetPriceOptions={config.initialSetPriceOptions} onDispatch={(a) => store.dispatchSlip(selectedTableId, selectedSlip.id, a)} />
+
+                  {/* クイック（缶モノ等のピン留め） */}
+                  {config.pinnedOrders.length > 0 && (
+                    <div>
+                      <div style={{ ...miniLabel, marginBottom: 6 }}>クイック</div>
+                      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                        {config.pinnedOrders.map((p) => (
+                          <button key={p.name} type="button"
+                            onClick={() => store.dispatchSlip(selectedTableId, selectedSlip.id, { type: 'ADD_ORDER', payload: { name: p.name, price: p.price, canHalfOff: p.canHalfOff } })}
+                            style={{ ...chipStyle(false), borderColor: 'var(--noxa-border-strong)' }}>
+                            {p.name}{p.canHalfOff ? <span style={{ color: 'var(--noxa-text-faint)', fontSize: 9, marginLeft: 3 }}>半</span> : null}
+                            <span style={{ fontFamily: mono, fontSize: 10, color: 'var(--noxa-accent-primary-ink)', marginLeft: 6 }}>{yen(p.price)}</span>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
 
                   {/* メニュー */}
                   <div>
                     <div role="tablist" aria-label="メニューカテゴリ" style={{ display: 'flex', gap: 6, overflowX: 'auto', paddingBottom: 4, marginBottom: 10 }}>
-                      {config.menuCategories.map((c) => {
-                        const active = c.id === activeCategory;
-                        return (
-                          <button key={c.id} type="button" role="tab" aria-selected={active} onClick={() => setActiveCategory(c.id)}
-                            style={chipStyle(active)}>
-                            {c.label}
-                          </button>
-                        );
-                      })}
+                      {config.menuCategories.map((c) => (
+                        <button key={c.id} type="button" role="tab" aria-selected={c.id === activeCategory} onClick={() => setActiveCategory(c.id)} style={chipStyle(c.id === activeCategory)}>{c.label}</button>
+                      ))}
                     </div>
                     <div className="grid grid-cols-2 sm:grid-cols-3" style={{ gap: 10 }}>
                       {categoryItems.map((m) => (
-                        <button key={m.name} type="button"
-                          onClick={() => store.dispatchSlip(selectedTableId, selectedSlip.id, { type: 'ADD_ORDER', payload: { name: m.name, price: m.price, canHalfOff: m.canHalfOff, isTaxIncluded: m.isTaxIncluded } })}
-                          aria-label={`${m.name} ${yen(m.price)} を追加`}
-                          style={{
-                            appearance: 'none', cursor: 'pointer', textAlign: 'left', minHeight: 70, padding: '11px 13px', borderRadius: 14,
-                            background: 'var(--noxa-surface-card)', border: '1px solid var(--noxa-border)', color: 'var(--noxa-text-primary)',
-                            display: 'flex', flexDirection: 'column', justifyContent: 'space-between', gap: 6,
-                          }}>
+                        <button key={m.name} type="button" onClick={() => addItem(m)} aria-label={`${m.name} を追加`}
+                          style={{ appearance: 'none', cursor: 'pointer', textAlign: 'left', minHeight: 70, padding: '11px 13px', borderRadius: 14, background: 'var(--noxa-surface-card)', border: '1px solid var(--noxa-border)', color: 'var(--noxa-text-primary)', display: 'flex', flexDirection: 'column', justifyContent: 'space-between', gap: 6 }}>
                           <span style={{ fontSize: 13, fontWeight: 500, lineHeight: 1.3 }}>{m.name}{m.canHalfOff ? <span style={{ color: 'var(--noxa-text-faint)', fontSize: 10, marginLeft: 4 }}>半</span> : null}</span>
-                          <span style={{ fontFamily: mono, fontSize: 13, fontWeight: 600, fontVariantNumeric: 'tabular-nums', color: 'var(--noxa-accent-primary-ink)' }}>{m.isCustom ? '価格入力' : yen(m.price)}</span>
+                          <span style={{ fontFamily: mono, fontSize: 13, fontWeight: 600, fontVariantNumeric: 'tabular-nums', color: 'var(--noxa-accent-primary-ink)' }}>{m.isCustom ? '金額入力' : yen(m.price)}</span>
                         </button>
                       ))}
                     </div>
@@ -207,77 +190,97 @@ export function PosClient({ user }: { user: User }) {
           )}
         </section>
 
-        {/* 右：伝票明細 + 会計 */}
+        {/* 右：会計 */}
         <section aria-label="会計">
           <PaneTitle>会計</PaneTitle>
-          {selectedSlip && result ? (
+          {selectedSlip && result && selectedTableId ? (
             <BillPanel
-              tableName={selectedTableId ?? ''}
+              tableName={selectedTable?.name ?? ''}
+              casts={(selectedTable?.currentHostIds ?? []).map((cid) => castById.get(cid) ?? '?')}
               slip={selectedSlip}
               result={result}
-              onDispatch={(a) => selectedTableId && store.dispatchSlip(selectedTableId, selectedSlip.id, a)}
-              onRename={(name) => selectedTableId && store.renameSlip(selectedTableId, selectedSlip.id, name)}
-              onRemove={() => { if (selectedTableId && window.confirm('この伝票を破棄しますか？（売上に計上されません）')) { store.removeSlip(selectedTableId, selectedSlip.id); setSelectedSlipId(null); } }}
-              onCheckout={async (opts) => { if (selectedTableId) { await store.checkoutSlip(selectedTableId, selectedSlip.id, opts); setSelectedSlipId(null); } }}
+              onDispatch={(a) => store.dispatchSlip(selectedTableId, selectedSlip.id, a)}
+              onRename={(name) => store.renameSlip(selectedTableId, selectedSlip.id, name)}
+              onRemove={() => { if (window.confirm('この伝票を破棄しますか？（売上に計上されません）')) { store.removeSlip(selectedTableId, selectedSlip.id); setSelectedSlipId(null); } }}
+              onCheckout={async (opts) => { await store.checkoutSlip(selectedTableId, selectedSlip.id, opts); setSelectedSlipId(null); }}
             />
           ) : (
-            <div style={{ background: 'var(--noxa-surface-card)', border: '1px solid var(--noxa-border)', borderRadius: 16, padding: 20, color: 'var(--noxa-text-muted)', fontSize: 13 }}>
-              伝票を選択すると会計伝票が表示されます。
-            </div>
+            <div style={{ background: 'var(--noxa-surface-card)', border: '1px solid var(--noxa-border)', borderRadius: 16, padding: 20, color: 'var(--noxa-text-muted)', fontSize: 13 }}>伝票を選択すると会計伝票が表示されます。</div>
           )}
         </section>
       </div>
+
+      {/* オリシャン等の金額入力 */}
+      {customItem && selectedTableId && selectedSlip && (
+        <CustomPriceDialog
+          name={customItem.name}
+          onClose={() => setCustomItem(null)}
+          onAdd={(name, price) => {
+            store.dispatchSlip(selectedTableId, selectedSlip.id, { type: 'ADD_ORDER', payload: { name, price } });
+            setCustomItem(null);
+          }}
+        />
+      )}
     </Shell>
   );
 }
 
-// ───────────────────────── 伝票コントロール（客層・時間・イベント）
+// ───────────────────────── オリシャン等の金額入力ダイアログ
 
-function SlipControls({ slip, initialSetPriceOptions, onDispatch }: {
-  slip: PosSlip;
-  initialSetPriceOptions: number[];
-  onDispatch: (a: import('@/lib/pos/engine').Action) => void;
-}) {
+function CustomPriceDialog({ name, onClose, onAdd }: { name: string; onClose: () => void; onAdd: (name: string, price: number) => void }) {
+  const [label, setLabel] = useState(name === 'オリシャン / その他' ? '' : name);
+  const [price, setPrice] = useState<number>(0);
+  return (
+    <div role="dialog" aria-label="金額入力" style={{ position: 'fixed', inset: 0, zIndex: 50, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,0.5)' }} onClick={onClose}>
+      <div onClick={(e) => e.stopPropagation()} style={{ width: 'min(360px, 92vw)', background: 'var(--noxa-bg-base)', border: '1px solid var(--noxa-border-strong)', borderRadius: 16, padding: 18, display: 'flex', flexDirection: 'column', gap: 12 }}>
+        <div className="noxa-eyebrow" style={{ fontSize: 11 }}>{name} · 金額入力</div>
+        <label style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+          <span style={miniLabel}>品名</span>
+          <input value={label} onChange={(e) => setLabel(e.target.value)} placeholder="例：オリジナルシャンパン" style={fieldStyle} autoFocus />
+        </label>
+        <label style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+          <span style={miniLabel}>金額（税抜）</span>
+          <input type="number" value={price} onChange={(e) => setPrice(Math.max(0, Number(e.target.value)))} inputMode="numeric" style={fieldStyle} />
+        </label>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <button type="button" className="noxa-btn noxa-btn-primary" style={{ ...primaryBtn, flex: 1 }} disabled={price <= 0 || !label.trim()}
+            onClick={() => onAdd(label.trim(), price)}>追加</button>
+          <button type="button" onClick={onClose} style={{ ...ghostBtn, width: 80 }}>戻る</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ───────────────────────── 伝票コントロール
+
+function SlipControls({ slip, initialSetPriceOptions, onDispatch }: { slip: PosSlip; initialSetPriceOptions: number[]; onDispatch: (a: Action) => void }) {
   const s = slip.state;
   const [showEvents, setShowEvents] = useState(false);
   return (
     <div style={{ background: 'var(--noxa-surface-card)', border: '1px solid var(--noxa-border)', borderRadius: 14, padding: 12, display: 'flex', flexDirection: 'column', gap: 10 }}>
-      {/* 客層 */}
       <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
         {CUSTOMER_TYPES.map((c) => (
-          <button key={c.id} type="button" onClick={() => onDispatch({ type: 'SET_CUSTOMER_TYPE', payload: c.id })} style={chipStyle(s.customerType === c.id)}>
-            {c.label}
-          </button>
+          <button key={c.id} type="button" onClick={() => onDispatch({ type: 'SET_CUSTOMER_TYPE', payload: c.id })} style={chipStyle(s.customerType === c.id)}>{c.label}</button>
         ))}
       </div>
-
-      {/* 初回セット価格 */}
       {s.customerType === 'initial' && (
         <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
           <span style={miniLabel}>初回セット</span>
           {initialSetPriceOptions.map((p) => (
-            <button key={p} type="button" onClick={() => onDispatch({ type: 'SET_INITIAL_SET_PRICE', payload: p })} style={chipStyle(s.initialSetPrice === p)}>
-              {yen(p)}
-            </button>
+            <button key={p} type="button" onClick={() => onDispatch({ type: 'SET_INITIAL_SET_PRICE', payload: p })} style={chipStyle(s.initialSetPrice === p)}>{yen(p)}</button>
           ))}
         </div>
       )}
-
-      {/* 入店時刻 + 同伴 */}
       <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
         <label style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
           <span style={miniLabel}>入店</span>
-          <input type="time" value={s.entryTime} onChange={(e) => onDispatch({ type: 'SET_ENTRY_TIME', payload: e.target.value })}
-            style={{ minHeight: 36, padding: '4px 8px', borderRadius: 8, background: 'var(--noxa-bg-base)', border: '1px solid var(--noxa-border)', color: 'var(--noxa-text-primary)', fontFamily: mono, fontSize: 14 }} />
+          <input type="time" value={s.entryTime} onChange={(e) => onDispatch({ type: 'SET_ENTRY_TIME', payload: e.target.value })} style={{ minHeight: 36, padding: '4px 8px', borderRadius: 8, background: 'var(--noxa-bg-base)', border: '1px solid var(--noxa-border)', color: 'var(--noxa-text-primary)', fontFamily: mono, fontSize: 14 }} />
         </label>
         <button type="button" onClick={() => onDispatch({ type: 'TOGGLE_DOHAN' })} style={chipStyle(s.dohan)}>同伴</button>
         <CountStepper label="複数指名" value={s.additionalNominationCount} onChange={(v) => onDispatch({ type: 'SET_ADDITIONAL_NOMINATION_COUNT', payload: v })} />
-        <button type="button" onClick={() => setShowEvents((v) => !v)} style={{ ...chipStyle(false), marginLeft: 'auto' }}>
-          イベント {showEvents ? '▲' : '▼'}
-        </button>
+        <button type="button" onClick={() => setShowEvents((v) => !v)} style={{ ...chipStyle(false), marginLeft: 'auto' }}>イベント {showEvents ? '▲' : '▼'}</button>
       </div>
-
-      {/* イベント割引 */}
       {showEvents && (
         <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', borderTop: '1px solid var(--noxa-divider)', paddingTop: 10 }}>
           <button type="button" onClick={() => onDispatch({ type: 'TOGGLE_SET_HALF_OFF' })} style={chipStyle(s.isSetHalfOff)}>セット半額</button>
@@ -293,74 +296,55 @@ function SlipControls({ slip, initialSetPriceOptions, onDispatch }: {
 
 // ───────────────────────── 会計パネル
 
-function BillPanel({ tableName, slip, result, onDispatch, onRename, onRemove, onCheckout }: {
-  tableName: string;
-  slip: PosSlip;
-  result: import('@/lib/pos/engine').CalculationResult;
-  onDispatch: (a: import('@/lib/pos/engine').Action) => void;
-  onRename: (name: string) => void;
-  onRemove: () => void;
+function BillPanel({ tableName, casts, slip, result, onDispatch, onRename, onRemove, onCheckout }: {
+  tableName: string; casts: string[]; slip: PosSlip; result: CalculationResult;
+  onDispatch: (a: Action) => void; onRename: (name: string) => void; onRemove: () => void;
   onCheckout: (opts: { amount: number; castName?: string; customerName?: string; guests?: number }) => Promise<void>;
 }) {
   const activeOrders = slip.state.orders.filter((o) => o.count > 0);
   const [checkingOut, setCheckingOut] = useState(false);
   const [amount, setAmount] = useState<number>(result.currentTotal);
-  const [castName, setCastName] = useState('');
+  const [castName, setCastName] = useState(casts[0] ?? '');
   const [customerName, setCustomerName] = useState('');
   const [guests, setGuests] = useState<number>(1);
   const [busy, setBusy] = useState(false);
-
   useEffect(() => { setAmount(result.currentTotal); }, [result.currentTotal]);
 
   return (
     <div style={{ background: 'var(--noxa-surface-card)', border: '1px solid var(--noxa-border)', borderRadius: 16, padding: 16, display: 'flex', flexDirection: 'column', gap: 12 }}>
-      {/* ヘッダー */}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, paddingBottom: 10, borderBottom: '1px solid var(--noxa-divider)' }}>
         <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, minWidth: 0 }}>
           <span style={{ fontFamily: 'var(--noxa-font-display-jp)', fontSize: 17, fontWeight: 500 }}>{tableName}</span>
-          <input value={slip.name} onChange={(e) => onRename(e.target.value)} aria-label="伝票名"
-            style={{ width: 64, minHeight: 30, padding: '2px 6px', borderRadius: 8, background: 'var(--noxa-bg-base)', border: '1px solid var(--noxa-border)', color: 'var(--noxa-text-primary)', fontSize: 13 }} />
+          <input value={slip.name} onChange={(e) => onRename(e.target.value)} aria-label="伝票名" style={{ width: 64, minHeight: 30, padding: '2px 6px', borderRadius: 8, background: 'var(--noxa-bg-base)', border: '1px solid var(--noxa-border)', color: 'var(--noxa-text-primary)', fontSize: 13 }} />
         </div>
         {result.isOutOfHours && <span style={{ fontFamily: mono, fontSize: 10, color: 'var(--noxa-status-warning)' }}>営業時間外</span>}
       </div>
+      {casts.length > 0 && <div style={{ fontSize: 11, color: 'var(--noxa-text-muted)' }}>キャスト：{casts.join(' / ')}</div>}
 
-      {/* 明細（数量操作） */}
       <ul style={{ listStyle: 'none', margin: 0, padding: 0, display: 'flex', flexDirection: 'column', gap: 8, maxHeight: 220, overflowY: 'auto' }}>
         {activeOrders.length === 0 && <li style={{ fontSize: 12, color: 'var(--noxa-text-faint)' }}>オーダー未入力</li>}
-        {activeOrders.map((o) => (
-          <OrderRow key={o.id} order={o} onDispatch={onDispatch} />
-        ))}
+        {activeOrders.map((o) => <OrderRow key={o.id} order={o} onDispatch={onDispatch} />)}
       </ul>
 
-      {/* 内訳 */}
       <div style={{ borderTop: '1px solid var(--noxa-divider)', paddingTop: 10, display: 'flex', flexDirection: 'column', gap: 4 }}>
-        {result.breakdown.filter((b) => b.amount !== 0 || b.isTotal).map((b, i) => (
-          <BreakdownRow key={i} item={b} />
-        ))}
+        {result.breakdown.filter((b) => b.amount !== 0 || b.isTotal).map((b, i) => <BreakdownRow key={i} item={b} />)}
       </div>
 
-      {/* 合計 */}
       <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', paddingTop: 8, borderTop: '1px solid var(--noxa-border-strong)' }}>
         <span style={{ fontFamily: mono, fontSize: 11, letterSpacing: '0.12em', textTransform: 'uppercase', color: 'var(--noxa-text-muted)' }}>現在合計</span>
         <span className="noxa-display" style={{ fontFamily: 'var(--noxa-font-display-en)', fontSize: 30, fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>{yen(result.currentTotal)}</span>
       </div>
 
-      {/* 会計フォーム */}
       {!checkingOut ? (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-          <button type="button" onClick={() => setCheckingOut(true)} className="noxa-btn noxa-btn-primary"
-            style={primaryBtn} disabled={activeOrders.length === 0 && result.currentTotal === 0}>
-            会計する → 売上へ計上
-          </button>
-          <button type="button" onClick={onRemove} className="noxa-btn noxa-btn-ghost"
-            style={ghostBtn}>伝票を破棄</button>
+          <button type="button" onClick={() => setCheckingOut(true)} className="noxa-btn noxa-btn-primary" style={primaryBtn} disabled={activeOrders.length === 0 && result.currentTotal === 0}>会計する → 売上へ計上</button>
+          <button type="button" onClick={onRemove} className="noxa-btn noxa-btn-ghost" style={{ ...ghostBtn, width: '100%' }}>伝票を破棄</button>
         </div>
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8, borderTop: '1px solid var(--noxa-divider)', paddingTop: 10 }}>
           <label style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
             <span style={miniLabel}>確定金額</span>
-            <input type="number" value={amount} onChange={(e) => setAmount(Number(e.target.value))}
-              style={fieldStyle} inputMode="numeric" />
+            <input type="number" value={amount} onChange={(e) => setAmount(Number(e.target.value))} style={fieldStyle} inputMode="numeric" />
           </label>
           <div style={{ display: 'flex', gap: 8 }}>
             <label style={{ display: 'flex', flexDirection: 'column', gap: 4, flex: 1 }}>
@@ -378,11 +362,7 @@ function BillPanel({ tableName, slip, result, onDispatch, onRename, onRemove, on
           </label>
           <div style={{ display: 'flex', gap: 8 }}>
             <button type="button" disabled={busy} className="noxa-btn noxa-btn-primary" style={{ ...primaryBtn, flex: 1, opacity: busy ? 0.7 : 1 }}
-              onClick={async () => {
-                setBusy(true);
-                try { await onCheckout({ amount, castName: castName || undefined, customerName: customerName || undefined, guests }); }
-                finally { setBusy(false); setCheckingOut(false); }
-              }}>
+              onClick={async () => { setBusy(true); try { await onCheckout({ amount, castName: castName || undefined, customerName: customerName || undefined, guests }); } finally { setBusy(false); setCheckingOut(false); } }}>
               {busy ? '計上中…' : `${yen(amount)} で確定`}
             </button>
             <button type="button" onClick={() => setCheckingOut(false)} className="noxa-btn noxa-btn-ghost" style={{ ...ghostBtn, width: 80 }}>戻る</button>
@@ -390,14 +370,12 @@ function BillPanel({ tableName, slip, result, onDispatch, onRename, onRemove, on
         </div>
       )}
 
-      <p style={{ margin: 0, fontSize: 10, lineHeight: 1.6, color: 'var(--noxa-text-faint)', fontFamily: mono }}>
-        ※ 決済は既存レジ運用。会計確定で売上データ（②）へ転記されます。
-      </p>
+      <p style={{ margin: 0, fontSize: 10, lineHeight: 1.6, color: 'var(--noxa-text-faint)', fontFamily: mono }}>※ 決済は既存レジ運用。会計確定で売上データ（②）へ転記されます。</p>
     </div>
   );
 }
 
-function OrderRow({ order, onDispatch }: { order: OrderItem; onDispatch: (a: import('@/lib/pos/engine').Action) => void }) {
+function OrderRow({ order, onDispatch }: { order: OrderItem; onDispatch: (a: Action) => void }) {
   return (
     <li style={{ display: 'grid', gridTemplateColumns: '1fr auto', gap: 8, alignItems: 'center', fontSize: 13 }}>
       <span style={{ minWidth: 0, display: 'flex', flexDirection: 'column' }}>
@@ -406,8 +384,7 @@ function OrderRow({ order, onDispatch }: { order: OrderItem; onDispatch: (a: imp
       </span>
       <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
         {order.canHalfOff && (
-          <button type="button" onClick={() => onDispatch({ type: 'TOGGLE_ORDER_HALF_OFF', payload: order.id })} title="半額切替"
-            style={{ ...stepBtn, width: 26, color: order.isHalfOff ? 'var(--noxa-accent-primary-ink)' : 'var(--noxa-text-muted)', borderColor: order.isHalfOff ? 'var(--noxa-accent-primary)' : 'var(--noxa-border)' }}>半</button>
+          <button type="button" onClick={() => onDispatch({ type: 'TOGGLE_ORDER_HALF_OFF', payload: order.id })} title="半額切替" style={{ ...stepBtn, width: 26, color: order.isHalfOff ? 'var(--noxa-accent-primary-ink)' : 'var(--noxa-text-muted)', borderColor: order.isHalfOff ? 'var(--noxa-accent-primary)' : 'var(--noxa-border)' }}>半</button>
         )}
         <button type="button" onClick={() => onDispatch({ type: 'UPDATE_ORDER_COUNT', payload: { id: order.id, delta: -1 } })} style={stepBtn}>−</button>
         <span style={{ fontFamily: mono, minWidth: 22, textAlign: 'center', fontVariantNumeric: 'tabular-nums' }}>{order.count}</span>
@@ -437,7 +414,7 @@ function CountStepper({ label, value, onChange }: { label: string; value: number
   );
 }
 
-// ───────────────────────── レイアウト・共通スタイル
+// ───────────────────────── レイアウト・スタイル
 
 function Shell({ children, device }: { children: React.ReactNode; device?: boolean }) {
   return (
@@ -447,8 +424,7 @@ function Shell({ children, device }: { children: React.ReactNode; device?: boole
         <nav aria-label="breadcrumb" style={{ marginBottom: 10 }}>
           <ol style={{ display: 'flex', gap: 8, fontFamily: mono, fontSize: 11, letterSpacing: '0.06em', color: 'var(--noxa-text-faint)', listStyle: 'none', margin: 0, padding: 0 }}>
             <li><Link href="/account" style={{ color: 'var(--noxa-text-muted)', textDecoration: 'none' }}>Noxa OS</Link></li>
-            <li aria-hidden>·</li>
-            <li>pos</li>
+            <li aria-hidden>·</li><li>pos</li>
           </ol>
         </nav>
         <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', gap: 16, flexWrap: 'wrap', marginBottom: 20 }}>
@@ -461,7 +437,7 @@ function Shell({ children, device }: { children: React.ReactNode; device?: boole
           </div>
           <div role="note" style={{ display: 'inline-flex', alignItems: 'center', gap: 8, padding: '6px 12px', background: 'rgba(123,232,161,0.10)', border: '1px solid rgba(123,232,161,0.30)', borderRadius: 9999, fontFamily: mono, fontSize: 10, letterSpacing: '0.12em', color: 'var(--noxa-status-success)', textTransform: 'uppercase' }}>
             <span aria-hidden style={{ width: 6, height: 6, borderRadius: 3, background: 'var(--noxa-status-success)', boxShadow: '0 0 8px var(--noxa-status-success)' }} />
-            {device ? '店舗端末 · 実データ' : '実データ · 伝票→売上'}
+            {device ? '店舗端末 · 実データ' : '実データ · 席回し同期'}
           </div>
         </div>
         {children}
@@ -473,7 +449,6 @@ function Shell({ children, device }: { children: React.ReactNode; device?: boole
 function PaneTitle({ children }: { children: React.ReactNode }) {
   return <h2 className="noxa-eyebrow" style={{ fontSize: 11, marginBottom: 12, display: 'block' }}>{children}</h2>;
 }
-
 function Empty({ children }: { children: React.ReactNode }) {
   return <div style={{ background: 'var(--noxa-surface-card)', border: '1px solid var(--noxa-border)', borderRadius: 14, padding: 20, color: 'var(--noxa-text-muted)', fontSize: 13 }}>{children}</div>;
 }
@@ -487,32 +462,12 @@ function chipStyle(active: boolean): React.CSSProperties {
     background: active ? 'var(--noxa-accent-primary)' : 'var(--noxa-surface-card)',
     color: active ? '#fff' : 'var(--noxa-text-muted)',
     border: `1px solid ${active ? 'var(--noxa-accent-primary)' : 'var(--noxa-border)'}`,
-    boxShadow: active ? 'var(--noxa-glow-soft)' : 'none',
-    transition: 'all var(--noxa-duration-fast) var(--noxa-ease-natural)',
+    boxShadow: active ? 'var(--noxa-glow-soft)' : 'none', transition: 'all var(--noxa-duration-fast) var(--noxa-ease-natural)',
   };
 }
-
-const stepBtn: React.CSSProperties = {
-  appearance: 'none', cursor: 'pointer', width: 28, height: 28, borderRadius: 8, flex: 'none',
-  background: 'var(--noxa-bg-base)', border: '1px solid var(--noxa-border)', color: 'var(--noxa-text-primary)',
-  fontSize: 15, lineHeight: 1, display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-};
-
-const fieldStyle: React.CSSProperties = {
-  width: '100%', minHeight: 40, padding: '8px 12px', borderRadius: 10, background: 'var(--noxa-bg-base)',
-  border: '1px solid var(--noxa-border)', color: 'var(--noxa-text-primary)', fontSize: 16,
-};
-
-const primaryBtn: React.CSSProperties = {
-  appearance: 'none', cursor: 'pointer', width: '100%', minHeight: 46, borderRadius: 12,
-  border: '1px solid var(--noxa-accent-primary)', background: 'var(--noxa-accent-primary)', color: '#fff',
-  fontFamily: 'var(--noxa-font-sans-jp)', fontSize: 15, fontWeight: 600, boxShadow: 'var(--noxa-glow-soft)',
-};
-
-const ghostBtn: React.CSSProperties = {
-  appearance: 'none', cursor: 'pointer', width: '100%', minHeight: 40, borderRadius: 12,
-  border: '1px solid var(--noxa-border-strong)', background: 'var(--noxa-surface-muted)', color: 'var(--noxa-text-muted)',
-  fontFamily: 'var(--noxa-font-sans-jp)', fontSize: 13, fontWeight: 500,
-};
+const stepBtn: React.CSSProperties = { appearance: 'none', cursor: 'pointer', width: 28, height: 28, borderRadius: 8, flex: 'none', background: 'var(--noxa-bg-base)', border: '1px solid var(--noxa-border)', color: 'var(--noxa-text-primary)', fontSize: 15, lineHeight: 1, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' };
+const fieldStyle: React.CSSProperties = { width: '100%', minHeight: 40, padding: '8px 12px', borderRadius: 10, background: 'var(--noxa-bg-base)', border: '1px solid var(--noxa-border)', color: 'var(--noxa-text-primary)', fontSize: 16 };
+const primaryBtn: React.CSSProperties = { appearance: 'none', cursor: 'pointer', width: '100%', minHeight: 46, borderRadius: 12, border: '1px solid var(--noxa-accent-primary)', background: 'var(--noxa-accent-primary)', color: '#fff', fontFamily: 'var(--noxa-font-sans-jp)', fontSize: 15, fontWeight: 600, boxShadow: 'var(--noxa-glow-soft)' };
+const ghostBtn: React.CSSProperties = { appearance: 'none', cursor: 'pointer', minHeight: 40, borderRadius: 12, border: '1px solid var(--noxa-border-strong)', background: 'var(--noxa-surface-muted)', color: 'var(--noxa-text-muted)', fontFamily: 'var(--noxa-font-sans-jp)', fontSize: 13, fontWeight: 500 };
 
 export default PosClient;

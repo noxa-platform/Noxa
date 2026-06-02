@@ -4,6 +4,8 @@
  * Firestore（shop_shops/{shopId}/seating_*）へ保存する。
  */
 
+import type { PosSlip } from '@/lib/pos/engine';
+
 export type Rank = 'BOSS' | '役職' | '非役職' | '新人';
 
 export type CastStatus = 'Free' | 'Work' | 'Break' | 'Absent';
@@ -55,6 +57,9 @@ export interface FloorTable {
   rotationTimeLength: number;  // 席内ローテ間隔（分）
   innerRotationEnabled: boolean;
   memo?: string;
+
+  // POS 伝票（席回しと同一卓ドキュメントを共有＝完全同期）
+  slips?: PosSlip[];
 }
 
 export interface QueueItem {

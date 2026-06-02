@@ -17,7 +17,7 @@ const yen = (n: number) => `¥${Math.round(n).toLocaleString('ja-JP')}`;
 
 type Cust = {
   id: string; name: string; totalSales: number; visitCount: number;
-  lastContactAt: number | null; rank: string | null; tags: string[];
+  lastContactAt: number | null; rank: string | null; tags: string[]; castName: string | null;
 };
 
 function toMs(v: unknown): number | null {
@@ -34,6 +34,7 @@ function mapCust(id: string, d: DocumentData): Cust {
     lastContactAt: toMs(d.lastContactAt),
     rank: (d.rank as string) ?? null,
     tags: Array.isArray(d.tags) ? (d.tags as string[]).slice(0, 4) : [],
+    castName: (d.castName as string) ?? null,
   };
 }
 async function loadCustomers(uid: string): Promise<Cust[]> {
@@ -66,6 +67,7 @@ export function CustomersClient({ user }: { user: User }) {
   const [custs, setCusts] = useState<Cust[]>([]);
   const [sort, setSort] = useState<Sort>('sales');
   const [q, setQ] = useState('');
+  const [castFilter, setCastFilter] = useState<string | null>(null);
 
   useEffect(() => {
     let alive = true;
@@ -73,15 +75,22 @@ export function CustomersClient({ user }: { user: User }) {
     return () => { alive = false; };
   }, [user.uid]);
 
+  // 担当キャスト一覧（顧客に紐づくキャスト名）
+  const castNames = useMemo(() => {
+    const s = new Set<string>();
+    custs.forEach((c) => { if (c.castName) s.add(c.castName); });
+    return Array.from(s).sort((a, b) => a.localeCompare(b, 'ja'));
+  }, [custs]);
+
   const list = useMemo(() => {
-    let l = custs.filter((c) => !q || c.name.includes(q));
+    let l = custs.filter((c) => (!q || c.name.includes(q)) && (!castFilter || c.castName === castFilter));
     l = [...l].sort((a, b) =>
       sort === 'sales' ? b.totalSales - a.totalSales :
       sort === 'visits' ? (b.visitCount || 0) - (a.visitCount || 0) :
       (b.lastContactAt ?? 0) - (a.lastContactAt ?? 0)
     );
     return l;
-  }, [custs, sort, q]);
+  }, [custs, sort, q, castFilter]);
 
   return (
     <div style={{ color: 'var(--noxa-text-primary)', fontFamily: 'var(--noxa-font-sans-jp)', borderRadius: 16, border: '1px solid var(--noxa-border)', padding: 'clamp(16px, 3vw, 28px)', position: 'relative', overflow: 'hidden' }}>
@@ -124,6 +133,22 @@ export function CustomersClient({ user }: { user: User }) {
           </div>
         </div>
 
+        {/* 担当キャストで絞り込み */}
+        {castNames.length > 0 && (
+          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 16, alignItems: 'center' }}>
+            <span style={{ fontFamily: mono, fontSize: 10, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--noxa-text-faint)', marginRight: 2 }}>担当</span>
+            {([null, ...castNames]).map((cn) => {
+              const active = castFilter === cn;
+              return (
+                <button key={cn ?? '__all'} type="button" onClick={() => setCastFilter(cn)}
+                  style={{ appearance: 'none', cursor: 'pointer', minHeight: 32, padding: '4px 12px', borderRadius: 9999, fontSize: 12, fontWeight: active ? 600 : 400, background: active ? 'var(--noxa-accent-primary)' : 'var(--noxa-surface-card)', color: active ? '#fff' : 'var(--noxa-text-muted)', border: `1px solid ${active ? 'var(--noxa-accent-primary)' : 'var(--noxa-border)'}` }}>
+                  {cn ?? '全員'}
+                </button>
+              );
+            })}
+          </div>
+        )}
+
         {loading ? (
           <div className="noxa-eyebrow" style={{ padding: '40px 0' }}>読み込み中…</div>
         ) : custs.length === 0 ? (
@@ -139,7 +164,10 @@ export function CustomersClient({ user }: { user: User }) {
                   <span style={{ width: 36, height: 36, borderRadius: 18, background: 'linear-gradient(135deg,#8B5CF6,#C4384A)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', fontFamily: 'var(--noxa-font-display-en)', fontSize: 15, flex: 'none' }}>{c.name[0]}</span>
                   <div style={{ minWidth: 0, flex: 1 }}>
                     <div style={{ fontSize: 15, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c.name}</div>
-                    {c.rank && <div style={{ fontSize: 11, color: 'var(--noxa-accent-primary-ink)', fontFamily: mono }}>{c.rank}</div>}
+                    <div style={{ display: 'flex', gap: 8, alignItems: 'baseline' }}>
+                      {c.rank && <span style={{ fontSize: 11, color: 'var(--noxa-accent-primary-ink)', fontFamily: mono }}>{c.rank}</span>}
+                      {c.castName && <span style={{ fontSize: 10, color: 'var(--noxa-text-faint)' }}>担当 {c.castName}</span>}
+                    </div>
                   </div>
                 </div>
                 <div style={{ display: 'flex', justifyContent: 'space-between', borderTop: '1px solid var(--noxa-divider)', paddingTop: 10 }}>

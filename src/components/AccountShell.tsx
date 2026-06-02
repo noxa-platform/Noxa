@@ -18,6 +18,7 @@ const NAV_ACCOUNT: { label: string; href: string; icon: string }[] = [
 const NAV_PERSONAL: { label: string; href: string }[] = [
   { label: '売上管理',  href: '/sales' },
   { label: '顧客台帳',  href: '/customers' },
+  { label: '伝票計算',  href: '/calc' },
   { label: '名刺発注',  href: '/business-card' },
   { label: 'スケジュール', href: '/schedule' },
   { label: '目標',      href: '/goals' },

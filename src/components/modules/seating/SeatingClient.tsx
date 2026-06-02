@@ -320,7 +320,14 @@ function CastRoster({ casts, store }: { casts: Cast[]; store: ReturnType<typeof 
           </div>
         </div>
       ) : (
-        <button type="button" onClick={() => setAdding(true)} style={{ ...chipStyle(false), borderStyle: 'dashed', alignSelf: 'flex-start' }}>＋ キャスト追加</button>
+        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+          <button type="button" onClick={() => setAdding(true)} style={{ ...chipStyle(false), borderStyle: 'dashed' }}>＋ キャスト追加</button>
+          {store.canManage && (
+            <button type="button"
+              onClick={() => { if (window.confirm('テスト用のキャスト15名＋顧客24名（キャスト別売上付き）を投入しますか？')) store.seedTestData(); }}
+              style={{ ...chipStyle(false), borderStyle: 'dashed', color: 'var(--noxa-text-faint)' }}>テストデータ投入</button>
+          )}
+        </div>
       )}
     </section>
   );

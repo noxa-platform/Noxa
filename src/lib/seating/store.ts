@@ -88,6 +88,8 @@ export type UseSeatingStore = {
   setCastBaseStatus: (id: string, status: StoredCast['baseStatus']) => Promise<void>;
   // table
   seedTables: () => Promise<void>;
+  // テスト用：キャスト＋キャスト別顧客データを投入（owner のみ想定）
+  seedTestData: () => Promise<void>;
   assignCast: (tableId: string, castId: string) => Promise<void>;
   removeCastFromTable: (tableId: string, castId: string) => Promise<void>;
   toggleMainHost: (tableId: string, castId: string) => Promise<void>;
@@ -193,6 +195,47 @@ export function useSeatingStore(user: User): UseSeatingStore {
     await batch.commit();
   }, [shopId]);
 
+  const seedTestData = useCallback<UseSeatingStore['seedTestData']>(async () => {
+    if (!shopId) return;
+    const SEED_CASTS: { name: string; rank: Rank; hourlyWage: number }[] = [
+      { name: 'TO-YA', rank: 'BOSS', hourlyWage: 10000 },
+      { name: '祐也', rank: '役職', hourlyWage: 8000 }, { name: '迅', rank: '役職', hourlyWage: 8000 },
+      { name: 'ちんすこう', rank: '役職', hourlyWage: 8000 }, { name: '夢麗', rank: '役職', hourlyWage: 7000 },
+      { name: '宗', rank: '役職', hourlyWage: 7000 }, { name: 'クロム', rank: '役職', hourlyWage: 7000 },
+      { name: '大和', rank: '非役職', hourlyWage: 5000 }, { name: 'スバル', rank: '非役職', hourlyWage: 5000 },
+      { name: '琥', rank: '非役職', hourlyWage: 5000 }, { name: 'じゅり', rank: '非役職', hourlyWage: 5000 },
+      { name: '聡', rank: '非役職', hourlyWage: 5000 }, { name: '夏目', rank: '非役職', hourlyWage: 5000 },
+      { name: 'カヲル', rank: '新人', hourlyWage: 3000 }, { name: 'J', rank: '新人', hourlyWage: 3000 },
+    ];
+    const RANKS_C = ['VIP', 'ゴールド', 'レギュラー', '新規'];
+    const CUST_NAMES = ['田中', '山本', '佐藤', '鈴木', '伊藤', '中村', '小林', '加藤', '吉田', '山田', '松本', '井上', '木村', '林', '清水', '森', '池田', '橋本', '阿部', '石川', '山口', '中島', '前田', '藤田'];
+    const now = Date.now();
+    const castIds: string[] = [];
+    const b1 = writeBatch(db);
+    SEED_CASTS.forEach((c, i) => {
+      const id = `seedcast_${i + 1}`; castIds.push(id);
+      b1.set(doc(db, `shop_shops/${shopId}/seating_casts/${id}`), { name: c.name, rank: c.rank, hourlyWage: c.hourlyWage, isLocked: false, baseStatus: 'Free', seed: true, createdAt: serverTimestamp() });
+    });
+    await b1.commit();
+    const b2 = writeBatch(db);
+    CUST_NAMES.forEach((n, i) => {
+      const ci = i % SEED_CASTS.length;
+      const total = ((i * 37) % 20 + 1) * 25000; // 25,000〜500,000 で分散
+      const visits = (i % 8) + 1;
+      const daysAgo = (i % 30) + 1;
+      b2.set(doc(db, `shop_shops/${shopId}/customers/seedcust_${i + 1}`), {
+        name: `${n}様`,
+        mainCastId: castIds[ci], castName: SEED_CASTS[ci].name,
+        totalSales: total, visitCount: visits,
+        rank: RANKS_C[i % RANKS_C.length],
+        tags: i % 3 === 0 ? ['常連'] : [],
+        lastContactAt: new Date(now - daysAgo * 86400000),
+        seed: true, createdAt: serverTimestamp(),
+      });
+    });
+    await b2.commit();
+  }, [shopId]);
+
   const assignCast = useCallback<UseSeatingStore['assignCast']>(async (tableId, castId) => {
     if (!shopId) return;
     const batch = writeBatch(db);
@@ -285,7 +328,8 @@ export function useSeatingStore(user: User): UseSeatingStore {
 
   const resetTable = useCallback<UseSeatingStore['resetTable']>(async (tableId) => {
     const t = getTable(tableId); if (!t) return;
-    await writeTable({ ...createEmptyTable(t.id, t.name), setTimeLength: t.setTimeLength, innerRotationEnabled: t.innerRotationEnabled });
+    // 退店：席回し状態に加え POS 伝票（slips）も明示的に空へ（統合卓ドキュメント）
+    await writeTable({ ...createEmptyTable(t.id, t.name), setTimeLength: t.setTimeLength, innerRotationEnabled: t.innerRotationEnabled, slips: [] });
   }, [getTable, writeTable]);
 
   // ── queue ops
@@ -311,13 +355,13 @@ export function useSeatingStore(user: User): UseSeatingStore {
     shopId, canManage: shop.canManage, isDevice: shop.isDevice, error: shop.error,
     casts, tables, queue,
     addCast, updateCast, removeCast, toggleLock, setCastBaseStatus,
-    seedTables, assignCast, removeCastFromTable, toggleMainHost, toggleRequested, rotateHosts,
+    seedTables, seedTestData, assignCast, removeCastFromTable, toggleMainHost, toggleRequested, rotateHosts,
     startSet, setTableType, checkTable, extendTime, toggleInnerRotation, resetTable,
     addToQueue, removeFromQueue, seatQueueGroup,
   }), [
     shop.loading, loadingData, shopId, shop.canManage, shop.isDevice, shop.error, casts, tables, queue,
     addCast, updateCast, removeCast, toggleLock, setCastBaseStatus,
-    seedTables, assignCast, removeCastFromTable, toggleMainHost, toggleRequested, rotateHosts,
+    seedTables, seedTestData, assignCast, removeCastFromTable, toggleMainHost, toggleRequested, rotateHosts,
     startSet, setTableType, checkTable, extendTime, toggleInnerRotation, resetTable,
     addToQueue, removeFromQueue, seatQueueGroup,
   ]);

@@ -61,6 +61,14 @@ export interface CalculationResult {
   isOutOfHours: boolean;
 }
 
+// POS の伝票（1卓に複数枚）。卓ドキュメント（seating_tables）に inline 保存し
+// 席回しと同一の卓データを共有する（完全同期）。
+export interface PosSlip {
+  id: string;
+  name: string;
+  state: CalculatorState;
+}
+
 // config からピン留めオーダーを生成
 export function createPinnedOrders(config: StoreConfig, customerType: CustomerType = 'regular'): OrderItem[] {
   // ショット半額は新規のみ（イベントフラグは作成時には考慮しない）
