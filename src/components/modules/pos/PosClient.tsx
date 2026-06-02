@@ -84,7 +84,12 @@ export function PosClient({ user }: { user: User }) {
     setSelectedTableId(tableId);
     setSelectedSlipId(null);
     setNewSlipFor(null);
-    await store.addSlip(tableId, init);
+    try {
+      await store.addSlip(tableId, init);
+    } catch (e) {
+      console.error('[POS] addSlip failed', e);
+      window.alert('伝票の作成に失敗しました: ' + ((e as Error)?.message ?? String(e)));
+    }
   };
 
   return (
