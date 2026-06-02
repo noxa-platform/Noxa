@@ -673,6 +673,7 @@ service cloud.firestore {
         && request.resource.data.authorUid == request.auth.uid
         && request.resource.data.likeCount == 0
         && request.resource.data.commentCount == 0
+        && (isAdmin() || request.resource.data.official == false)
         && request.resource.data.body is string
         && request.resource.data.body.size() > 0
         && request.resource.data.body.size() <= 1000;

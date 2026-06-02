@@ -10,20 +10,21 @@
  *   noxa_likes/{uid_kind_id}   … いいね（存在＝いいね済み）
  *   noxa_reports/{reportId}    … 通報
  *
- * 投稿者は完全匿名: UI には authorUid を出さず、anonId(uid, postId) で表示用 ID を導出する。
- * クエリは boardId + lastActivityAt のみで引き、ピン留め優先とタグ絞り込みはクライアント側で行う
- * （複合インデックスの増殖を避けるため）。
+ * 投稿者は完全匿名: UI には authorUid を出さず、anonId(uid, boardId, 日付) で表示用 ID を導出する
+ * （日替わり・板単位 / 5ch 風）。isMine / isThreadAuthor / official はサーバ側で内部 uid を
+ * 比較して算出し、他人の uid は一切返さない。
+ * クエリは boardId + lastActivityAt のみで引き、ピン留め優先とタグ絞り込みはクライアント側で行う。
  */
 
 import {
-  addDoc, collection, deleteDoc, doc, getDoc, getDocs,
+  addDoc, collection, doc, getDoc, getDocs,
   increment, limit, orderBy, query, runTransaction, serverTimestamp,
   Timestamp, where,
   type DocumentData, type QueryDocumentSnapshot,
 } from 'firebase/firestore';
 import { db } from '@/lib/firebase/config';
-import { anonId } from './anon-id';
-import type { AreaTag, Board, JobTag, Reply, Thread, ThreadFilter } from './types';
+import { anonId, dayKeyFromMillis } from './anon-id';
+import type { Board, Reply, Thread, ThreadFilter } from './types';
 import type {
   AddReplyInput, CommunityRepository, CreateThreadInput, LikeTarget, ReportTarget,
 } from './repository';
@@ -36,6 +37,8 @@ const C = {
   reports: 'noxa_reports',
 } as const;
 
+type DocLike = { id: string; data: () => DocumentData };
+
 /** Timestamp を相対表記に。null（serverTimestamp 反映前）は「たった今」 */
 function relTime(ts: unknown): string {
   if (!(ts instanceof Timestamp)) return 'たった今';
@@ -47,6 +50,11 @@ function relTime(ts: unknown): string {
   if (hour < 24) return `${hour}時間前`;
   const day = Math.floor(hour / 24);
   return day < 2 ? '昨日' : `${day}日前`;
+}
+
+/** 投稿日の日付キー（ID 導出用）。pending（null）は今日 */
+function dayKeyOf(ts: unknown): string {
+  return dayKeyFromMillis(ts instanceof Timestamp ? ts.toMillis() : Date.now());
 }
 
 function mapBoard(d: QueryDocumentSnapshot<DocumentData>): Board {
@@ -63,42 +71,49 @@ function mapBoard(d: QueryDocumentSnapshot<DocumentData>): Board {
   };
 }
 
-function mapThreadDoc(d: QueryDocumentSnapshot<DocumentData> | { id: string; data: () => DocumentData }): Thread {
-  const x = d.data();
-  return {
-    id: d.id,
-    boardId: x.boardId,
-    title: x.title ?? '',
-    anonId: anonId(x.authorUid ?? '', d.id),
-    postedAt: relTime(x.createdAt),
-    lastActivity: relTime(x.lastActivityAt ?? x.createdAt),
-    body: x.body ?? '',
-    replies: [],
-    replyCount: x.commentCount ?? 0,
-    areaTag: x.areaTag ?? undefined,
-    jobTag: x.jobTag ?? undefined,
-    pinned: x.pinned ?? false,
-    likeCount: x.likeCount ?? 0,
-  };
-}
-
-function mapComment(d: QueryDocumentSnapshot<DocumentData>, postId: string): Reply {
-  const x = d.data();
-  return {
-    id: d.id,
-    resNo: x.resNo ?? 2,
-    anonId: anonId(x.authorUid ?? '', postId),
-    postedAt: relTime(x.createdAt),
-    body: x.body ?? '',
-    likeCount: x.likeCount ?? 0,
-    areaTag: x.areaTag ?? undefined,
-    jobTag: x.jobTag ?? undefined,
-  };
-}
-
 export class FirestoreCommunityRepository implements CommunityRepository {
   /** 書き込み主体の uid（認証必須ページからの利用を前提）。表には出さない。 */
   constructor(private readonly uid: string) {}
+
+  private mapThread(d: DocLike): Thread {
+    const x = d.data();
+    const authorUid = x.authorUid ?? '';
+    return {
+      id: d.id,
+      boardId: x.boardId,
+      title: x.title ?? '',
+      anonId: anonId(authorUid, x.boardId, dayKeyOf(x.createdAt)),
+      postedAt: relTime(x.createdAt),
+      lastActivity: relTime(x.lastActivityAt ?? x.createdAt),
+      body: x.body ?? '',
+      replies: [],
+      replyCount: x.commentCount ?? 0,
+      areaTag: x.areaTag ?? undefined,
+      jobTag: x.jobTag ?? undefined,
+      pinned: x.pinned ?? false,
+      likeCount: x.likeCount ?? 0,
+      isMine: authorUid === this.uid,
+      official: x.official ?? false,
+    };
+  }
+
+  private mapComment(d: QueryDocumentSnapshot<DocumentData>, boardId: string, postAuthorUid: string): Reply {
+    const x = d.data();
+    const authorUid = x.authorUid ?? '';
+    return {
+      id: d.id,
+      resNo: x.resNo ?? 2,
+      anonId: anonId(authorUid, boardId, dayKeyOf(x.createdAt)),
+      postedAt: relTime(x.createdAt),
+      body: x.body ?? '',
+      likeCount: x.likeCount ?? 0,
+      areaTag: x.areaTag ?? undefined,
+      jobTag: x.jobTag ?? undefined,
+      isThreadAuthor: authorUid === postAuthorUid,
+      isMine: authorUid === this.uid,
+      official: x.official ?? false,
+    };
+  }
 
   async listBoards(): Promise<Board[]> {
     const snap = await getDocs(query(collection(db, C.boards), orderBy('order', 'asc')));
@@ -112,23 +127,24 @@ export class FirestoreCommunityRepository implements CommunityRepository {
       orderBy('lastActivityAt', 'desc'),
       limit(100),
     ));
-    let list = snap.docs.map((d) => mapThreadDoc(d));
+    let list = snap.docs.map((d) => this.mapThread(d));
     if (filter?.areaTag) list = list.filter((t) => t.areaTag === filter.areaTag);
     if (filter?.jobTag) list = list.filter((t) => t.jobTag === filter.jobTag);
-    // ピン留め優先（安定ソート）
     return list.sort((a, b) => Number(Boolean(b.pinned)) - Number(Boolean(a.pinned)));
   }
 
   async getThread(threadId: string): Promise<Thread | null> {
     const postSnap = await getDoc(doc(db, C.posts, threadId));
     if (!postSnap.exists()) return null;
-    const thread = mapThreadDoc({ id: postSnap.id, data: () => postSnap.data() as DocumentData });
+    const data = postSnap.data() as DocumentData;
+    const thread = this.mapThread({ id: postSnap.id, data: () => data });
+    const postAuthorUid = data.authorUid ?? '';
     const cSnap = await getDocs(query(
       collection(db, C.comments),
       where('postId', '==', threadId),
       orderBy('resNo', 'asc'),
     ));
-    thread.replies = cSnap.docs.map((d) => mapComment(d, threadId));
+    thread.replies = cSnap.docs.map((d) => this.mapComment(d, thread.boardId, postAuthorUid));
     thread.replyCount = thread.replies.length;
     return thread;
   }
@@ -142,6 +158,7 @@ export class FirestoreCommunityRepository implements CommunityRepository {
       areaTag: input.areaTag ?? null,
       jobTag: input.jobTag ?? null,
       pinned: false,
+      official: false,
       likeCount: 0,
       commentCount: 0,
       createdAt: serverTimestamp(),

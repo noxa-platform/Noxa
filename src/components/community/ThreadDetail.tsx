@@ -46,6 +46,8 @@ export function ThreadDetail({
         jobTag={thread.jobTag}
         likeCount={thread.likeCount}
         liked={likedIds.has(likeKey({ kind: 'thread', threadId: thread.id }))}
+        isMine={thread.isMine}
+        official={thread.official}
         onLike={() => onToggleLike({ kind: 'thread', threadId: thread.id })}
         onReport={() => onReport({ kind: 'thread', threadId: thread.id })}
         isOp
@@ -66,6 +68,9 @@ export function ThreadDetail({
               jobTag={r.jobTag}
               likeCount={r.likeCount}
               liked={likedIds.has(likeKey(target))}
+              isThreadAuthor={r.isThreadAuthor}
+              isMine={r.isMine}
+              official={r.official}
               onLike={() => onToggleLike(target)}
               onReport={() => onReport(target)}
             />

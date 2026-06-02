@@ -27,13 +27,16 @@ export interface Board {
 /** レス（1 段フラット） */
 export interface Reply {
   id: string;
-  resNo: number;       // レス番号（>>2 以降）
-  anonId: string;      // スレ内匿名 ID（表示専用）。自分の投稿は 'あなた'
-  postedAt: string;    // 相対表記（モック）。Firestore 移行時は createdAt から算出
+  resNo: number;          // レス番号（>>2 以降）
+  anonId: string;         // 表示用匿名 ID（日替わり・板単位）。内部 uid は出さない
+  postedAt: string;       // 相対表記（モック）。Firestore 移行時は createdAt から算出
   body: string;
   likeCount: number;
   areaTag?: AreaTag;
   jobTag?: JobTag;
+  isThreadAuthor?: boolean; // スレ主（>>1 と同一投稿者）か。サーバ側で内部 uid 比較し算出
+  isMine?: boolean;         // 閲覧者本人の投稿か（本人にのみ true。他人の uid は漏らさない）
+  official?: boolean;       // 運営投稿か
 }
 
 /** スレッド（>>1 = スレ主の本文を内包） */
@@ -51,6 +54,8 @@ export interface Thread {
   jobTag?: JobTag;
   pinned?: boolean;
   likeCount: number;
+  isMine?: boolean;    // 閲覧者本人のスレッドか
+  official?: boolean;  // 運営スレッドか
 }
 
 /** スレッド一覧の絞り込み条件 */

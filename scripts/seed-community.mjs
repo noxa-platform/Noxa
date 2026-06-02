@@ -42,7 +42,7 @@ const BOARDS = [
 // シードスレッド（authorUid は seed 用。表示は anonId(uid,postId) で完全匿名）
 const THREADS = [
   {
-    boardId: 'dekasegi', authorUid: 'seed-official', pinned: true, areaTag: '関西',
+    boardId: 'dekasegi', authorUid: 'seed-official', pinned: true, official: true, areaTag: '関西',
     title: '【ピン留め】出稼ぎ予定を書き込むスレ（行き先・期間・業態）', minAgo: 4320,
     body: 'これから出稼ぎに行く予定の人が、行き先エリア・滞在期間・業態をゆるく共有するスレです。同時期・同エリアの人と情報を合わせる用にどうぞ。店名・連絡先・個人情報は書かないでください。',
     replies: [
@@ -100,6 +100,7 @@ async function seedThreads() {
       areaTag: t.areaTag ?? null,
       jobTag: t.jobTag ?? null,
       pinned: t.pinned ?? false,
+      official: t.official ?? false,
       likeCount: 0,
       commentCount: t.replies.length,
       createdAt: minutesAgo(t.minAgo),

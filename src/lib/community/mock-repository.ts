@@ -4,17 +4,23 @@
  * 永続化なし。プロセス内（＝ブラウザのタブ寿命）で状態を保持する。リロードで初期化。
  * 1 ウェッジ MVP（大阪ミナミ × ホスト）に合わせ、関西・ホスト寄りのシードで
  * 「人がいる感」を作る。Firestore 実装に差し替えるときは本ファイルを置換するだけ。
+ *
+ * 内部では authorUid を保持し、読み出し時に表示用フラグ（isMine / isThreadAuthor / official）と
+ * 匿名 ID を計算して、ドメイン型（authorUid を含まない）に変換して返す。
  */
 
 import type { Board, Reply, Thread } from './types';
 import type {
-  AddReplyInput,
-  CommunityRepository,
-  CreateThreadInput,
-  LikeTarget,
-  ReportTarget,
+  AddReplyInput, CommunityRepository, CreateThreadInput, LikeTarget, ReportTarget, ThreadFilter,
 } from './repository';
-import type { ThreadFilter } from './types';
+import { anonId, todayKey } from './anon-id';
+
+// 内部表現（authorUid を持つ。表には出さない）
+type SeedReply = Reply & { authorUid: string };
+type SeedThread = Omit<Thread, 'replies'> & { authorUid: string; replies: SeedReply[] };
+
+// モックの閲覧者 uid（自分マーク判定用）
+const ME = 'me';
 
 // 6 板（出稼ぎ＝差別化の一等地、雑談＝ウェッジの volume ドライバ）
 const BOARDS: Board[] = [
@@ -26,72 +32,66 @@ const BOARDS: Board[] = [
   { id: 'news', name: '業界ニュース', desc: '法改正・業界の動き・運営からのお知らせ。', threadCount: 47, postsToday: 4, lastActivity: '1時間前' },
 ];
 
-function seedThreads(): Thread[] {
+function r(id: string, resNo: number, anon: string, authorUid: string, postedAt: string, body: string, likeCount: number, areaTag?: Reply['areaTag'], jobTag?: Reply['jobTag']): SeedReply {
+  return { id, resNo, anonId: anon, authorUid, postedAt, body, likeCount, areaTag, jobTag };
+}
+
+function seedThreads(): SeedThread[] {
   return [
     {
       id: 't-deka-1', boardId: 'dekasegi',
       title: '【ピン留め】出稼ぎ予定を書き込むスレ（行き先・期間・業態）',
-      anonId: '運営', postedAt: '3日前', lastActivity: '4分前',
+      anonId: '0000', authorUid: 'u-official', official: true, postedAt: '3日前', lastActivity: '4分前',
       body: 'これから出稼ぎに行く予定の人が、行き先エリア・滞在期間・業態をゆるく共有するスレです。同時期・同エリアの人と情報を合わせる用にどうぞ。店名・連絡先・個人情報は書かないでください。',
       pinned: true, likeCount: 64, areaTag: '関西',
       replies: [
-        { id: 'r1', resNo: 2, anonId: 'a91f', postedAt: '2時間前', body: '来月あたまから2週間、関西いきます。はじめての土地なので雰囲気だけでも知りたいです。', likeCount: 8, areaTag: '関西', jobTag: 'キャバ・ガルバ' },
-        { id: 'r2', resNo: 3, anonId: 'c7b2', postedAt: '1時間前', body: '同じく関西組です。短期だと寮の有無で全然違うので、そこは事前に確認したほうがいいですよ。', likeCount: 12, areaTag: '関西' },
-        { id: 'r3', resNo: 4, anonId: 'd0e8', postedAt: '4分前', body: '九州から関西に移動予定。気候差で体調崩しがちなので無理しないようにしてます。', likeCount: 3, areaTag: '九州', jobTag: '風俗' },
+        r('r1', 2, 'a91f', 'u-a91f', '2時間前', '来月あたまから2週間、関西いきます。はじめての土地なので雰囲気だけでも知りたいです。', 8, '関西', 'キャバ・ガルバ'),
+        r('r2', 3, 'c7b2', 'u-c7b2', '1時間前', '同じく関西組です。短期だと寮の有無で全然違うので、そこは事前に確認したほうがいいですよ。', 12, '関西'),
+        r('r3', 4, 'd0e8', 'u-d0e8', '4分前', '九州から関西に移動予定。気候差で体調崩しがちなので無理しないようにしてます。', 3, '九州', '風俗'),
       ],
     },
     {
       id: 't-deka-2', boardId: 'dekasegi',
       title: '出稼ぎ体験レポを淡々と書くスレ',
-      anonId: 'b3a1', postedAt: '1日前', lastActivity: '20分前',
+      anonId: 'b3a1', authorUid: 'u-b3a1', postedAt: '1日前', lastActivity: '20分前',
       body: '行ってよかった・しんどかったを、店名出さずに体験ベースで残すスレ。次に行く人の参考になれば。',
       pinned: true, likeCount: 41,
       replies: [
-        { id: 'r4', resNo: 2, anonId: 'f22a', postedAt: '40分前', body: '初出稼ぎ、移動費と滞在費の計算が甘くて思ったより残らなかった。次は事前にちゃんと見積もる。', likeCount: 19 },
-        { id: 'r5', resNo: 3, anonId: '9c1d', postedAt: '20分前', body: '体感ですが、土地勘ないうちは無理に営業時間伸ばさないほうが結果よかったです。', likeCount: 7 },
+        r('r4', 2, 'f22a', 'u-f22a', '40分前', '初出稼ぎ、移動費と滞在費の計算が甘くて思ったより残らなかった。次は事前にちゃんと見積もる。', 19),
+        r('r5', 3, 'b3a1', 'u-b3a1', '20分前', '※スレ主です。補足すると、初週は無理せず様子見が結局いちばん効率よかったです。', 7),
       ],
     },
     {
       id: 't-zatsu-1', boardId: 'zatsudan',
       title: '退勤後ごはん、結局なに食べてる？',
-      anonId: '4d7e', postedAt: '5時間前', lastActivity: 'たった今',
+      anonId: '4d7e', authorUid: 'u-4d7e', postedAt: '5時間前', lastActivity: 'たった今',
       body: '深夜に帰ってから食べると太るのはわかってるけど、空腹で寝れない。みんな何で乗り切ってる？',
       likeCount: 28, areaTag: '関西',
       replies: [
-        { id: 'r6', resNo: 2, anonId: 'aa01', postedAt: '3時間前', body: 'スープ系にしてからマシになった。固形より罪悪感少ない気がする。', likeCount: 14, areaTag: '関西', jobTag: 'ホスト' },
-        { id: 'r7', resNo: 3, anonId: 'bb12', postedAt: '1時間前', body: '結局食べちゃうけど、その分翌日の昼を抜いて帳尻合わせてる。', likeCount: 5 },
-        { id: 'r8', resNo: 4, anonId: 'cc23', postedAt: 'たった今', body: 'わかる。寝る前の空腹がいちばん敵。', likeCount: 1, areaTag: '関西', jobTag: 'ホスト' },
+        r('r6', 2, 'aa01', 'u-aa01', '3時間前', 'スープ系にしてからマシになった。固形より罪悪感少ない気がする。', 14, '関西', 'ホスト'),
+        r('r7', 3, 'bb12', 'u-bb12', '1時間前', '結局食べちゃうけど、その分翌日の昼を抜いて帳尻合わせてる。', 5),
+        r('r8', 4, '4d7e', 'u-4d7e', 'たった今', '※スレ主です。やっぱりスープ派多いんですね。試してみます。', 1),
       ],
     },
     {
       id: 't-settai-1', boardId: 'settai',
       title: '太客の誕生日フォロー、どこまでやってる？',
-      anonId: '7f3c', postedAt: '8時間前', lastActivity: '12分前',
+      anonId: '7f3c', authorUid: 'u-7f3c', postedAt: '8時間前', lastActivity: '12分前',
       body: '手書きメッセージは続けてるけど、最近みんなレベル高くて差をつけられてる気がする。やりすぎない範囲でできること知りたい。',
       likeCount: 33, areaTag: '関西', jobTag: 'ホスト',
       replies: [
-        { id: 'r9', resNo: 2, anonId: 'e5f6', postedAt: '5時間前', body: '前日の夜に一言だけ連絡、当日は重くしすぎない。これくらいがちょうどいい距離感かなと。', likeCount: 22, areaTag: '関西', jobTag: 'ホスト' },
-        { id: 'r10', resNo: 3, anonId: 'a7b8', postedAt: '12分前', body: 'ギフトより「覚えててくれた」が効くタイプの客もいるので、相手で変えてます。', likeCount: 9 },
-      ],
-    },
-    {
-      id: 't-settai-2', boardId: 'settai',
-      title: '指名がしばらく続いた客の引き際、どう見てる？',
-      anonId: '2e9a', postedAt: '6時間前', lastActivity: '1時間前',
-      body: '熱量が落ちてきたかな、という客への接し方。粘るのか、引くのか、みんなの判断基準が知りたい。',
-      likeCount: 24, areaTag: '関西', jobTag: 'ホスト',
-      replies: [
-        { id: 'r11', resNo: 2, anonId: 'b8c4', postedAt: '2時間前', body: '無理に引き止めない。離れてもまた戻ってくる関係のほうが結局長い。', likeCount: 15, areaTag: '関西', jobTag: 'ホスト' },
+        r('r9', 2, 'e5f6', 'u-e5f6', '5時間前', '前日の夜に一言だけ連絡、当日は重くしすぎない。これくらいがちょうどいい距離感かなと。', 22, '関西', 'ホスト'),
+        r('r10', 3, 'a7b8', 'u-a7b8', '12分前', 'ギフトより「覚えててくれた」が効くタイプの客もいるので、相手で変えてます。', 9),
       ],
     },
     {
       id: 't-okane-1', boardId: 'okane',
       title: '確定申告、毎年ギリギリになる人集合',
-      anonId: '1a2b', postedAt: '昨日', lastActivity: '38分前',
+      anonId: '1a2b', authorUid: 'u-1a2b', postedAt: '昨日', lastActivity: '38分前',
       body: '領収書ためがち。みんな経費どこまで入れてる？（具体的な店名・金額は伏せて一般論で）',
       likeCount: 17,
       replies: [
-        { id: 'r12', resNo: 2, anonId: 'd4c5', postedAt: '50分前', body: '衣装・美容まわりは入れてる。判断つかないのは結局税理士に投げた。', likeCount: 11 },
+        r('r11', 2, 'd4c5', 'u-d4c5', '50分前', '衣装・美容まわりは入れてる。判断つかないのは結局税理士に投げた。', 11),
       ],
     },
   ];
@@ -99,10 +99,10 @@ function seedThreads(): Thread[] {
 
 export class MockCommunityRepository implements CommunityRepository {
   private boards: Board[];
-  private threads: Thread[];
+  private threads: SeedThread[];
   private seq = 1000;
 
-  constructor() {
+  constructor(private readonly uid: string = ME) {
     this.boards = BOARDS.map((b) => ({ ...b }));
     this.threads = seedThreads();
   }
@@ -115,23 +115,23 @@ export class MockCommunityRepository implements CommunityRepository {
     let list = this.threads.filter((t) => t.boardId === boardId);
     if (filter?.areaTag) list = list.filter((t) => t.areaTag === filter.areaTag);
     if (filter?.jobTag) list = list.filter((t) => t.jobTag === filter.jobTag);
-    // ピン留め優先（安定ソート）
     const sorted = [...list].sort((a, b) => Number(Boolean(b.pinned)) - Number(Boolean(a.pinned)));
-    return sorted.map((t) => this.clone(t));
+    return sorted.map((t) => this.toDomain(t));
   }
 
   async getThread(threadId: string): Promise<Thread | null> {
     const t = this.threads.find((x) => x.id === threadId);
-    return t ? this.clone(t) : null;
+    return t ? this.toDomain(t) : null;
   }
 
   async createThread(input: CreateThreadInput): Promise<Thread> {
     this.seq += 1;
-    const thread: Thread = {
+    const thread: SeedThread = {
       id: `t-new-${this.seq}`,
       boardId: input.boardId,
       title: input.title,
-      anonId: 'あなた',
+      anonId: anonId(this.uid, input.boardId, todayKey()),
+      authorUid: this.uid,
       postedAt: 'たった今',
       lastActivity: 'たった今',
       body: input.body,
@@ -141,26 +141,26 @@ export class MockCommunityRepository implements CommunityRepository {
       likeCount: 0,
     };
     this.threads = [thread, ...this.threads];
-    return this.clone(thread);
+    return this.toDomain(thread);
   }
 
   async addReply(threadId: string, input: AddReplyInput): Promise<Thread> {
     const t = this.threads.find((x) => x.id === threadId);
     if (!t) throw new Error(`thread not found: ${threadId}`);
     this.seq += 1;
-    const reply: Reply = {
+    t.replies.push({
       id: `r-new-${this.seq}`,
       resNo: t.replies.length + 2,
-      anonId: 'あなた',
+      anonId: anonId(this.uid, t.boardId, todayKey()),
+      authorUid: this.uid,
       postedAt: 'たった今',
       body: input.body,
       likeCount: 0,
       areaTag: input.areaTag,
       jobTag: input.jobTag,
-    };
-    t.replies.push(reply);
+    });
     t.lastActivity = 'たった今';
-    return this.clone(t);
+    return this.toDomain(t);
   }
 
   async toggleLike(target: LikeTarget, liked: boolean): Promise<Thread> {
@@ -170,19 +170,42 @@ export class MockCommunityRepository implements CommunityRepository {
     if (target.kind === 'thread') {
       t.likeCount = Math.max(0, t.likeCount + delta);
     } else {
-      const r = t.replies.find((x) => x.id === target.replyId);
-      if (r) r.likeCount = Math.max(0, r.likeCount + delta);
+      const reply = t.replies.find((x) => x.id === target.replyId);
+      if (reply) reply.likeCount = Math.max(0, reply.likeCount + delta);
     }
-    return this.clone(t);
+    return this.toDomain(t);
   }
 
   async report(_target: ReportTarget): Promise<void> {
-    // モックでは記録のみ（no-op）。実装時は noxa_reports に作成し通報3回で自動非表示。
+    // 通報受付のみ（記録の no-op）。自動非表示は今回スコープ外。
     void _target;
   }
 
-  // 外部に内部参照を漏らさないためのディープコピー
-  private clone(t: Thread): Thread {
-    return { ...t, replies: t.replies.map((r) => ({ ...r })) };
+  // 内部 SeedThread → ドメイン Thread（authorUid を落とし、表示用フラグを計算）
+  private toDomain(t: SeedThread): Thread {
+    return {
+      id: t.id,
+      boardId: t.boardId,
+      title: t.title,
+      anonId: t.anonId,
+      postedAt: t.postedAt,
+      lastActivity: t.lastActivity,
+      body: t.body,
+      areaTag: t.areaTag,
+      jobTag: t.jobTag,
+      pinned: t.pinned,
+      likeCount: t.likeCount,
+      replyCount: t.replies.length,
+      isMine: t.authorUid === this.uid,
+      official: t.official ?? false,
+      replies: t.replies.map((rep) => {
+        const { authorUid, ...rest } = rep;
+        return {
+          ...rest,
+          isThreadAuthor: authorUid === t.authorUid,
+          isMine: authorUid === this.uid,
+        };
+      }),
+    };
   }
 }
