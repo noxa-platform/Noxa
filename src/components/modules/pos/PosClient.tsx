@@ -32,6 +32,7 @@ export function PosClient({ user }: { user: User }) {
   const [selectedSlipId, setSelectedSlipId] = useState<string | null>(null);
   const [activeCategory, setActiveCategory] = useState<string>(config.menuCategories[0]?.id ?? '');
   const [customItem, setCustomItem] = useState<{ name: string } | null>(null);
+  const [newSlipFor, setNewSlipFor] = useState<string | null>(null);
   const [, setTick] = useState(0);
 
   useEffect(() => { const t = setInterval(() => setTick((n) => n + 1), 30000); return () => clearInterval(t); }, []);
@@ -79,10 +80,11 @@ export function PosClient({ user }: { user: User }) {
     store.dispatchSlip(selectedTableId, selectedSlip.id, { type: 'ADD_ORDER', payload: { name: m.name, price: m.price, canHalfOff: m.canHalfOff, isTaxIncluded: m.isTaxIncluded } });
   };
 
-  const openSlip = async (tableId: string) => {
+  const createSlip = async (tableId: string, init: { castName?: string; customerName?: string; customerType?: CustomerType }) => {
     setSelectedTableId(tableId);
     setSelectedSlipId(null);
-    await store.addSlip(tableId);
+    setNewSlipFor(null);
+    await store.addSlip(tableId, init);
   };
 
   return (
@@ -141,7 +143,7 @@ export function PosClient({ user }: { user: User }) {
                 {slips.map((sl) => (
                   <button key={sl.id} type="button" onClick={() => setSelectedSlipId(sl.id)} style={chipStyle(sl.id === selectedSlipId)}>{sl.name}</button>
                 ))}
-                <button type="button" onClick={() => openSlip(selectedTableId)} style={{ ...chipStyle(false), borderStyle: 'dashed', color: 'var(--noxa-accent-primary-ink)', borderColor: 'var(--noxa-border-strong)' }}>＋ 伝票</button>
+                <button type="button" onClick={() => setNewSlipFor(selectedTableId)} style={{ ...chipStyle(false), borderStyle: 'dashed', color: 'var(--noxa-accent-primary-ink)', borderColor: 'var(--noxa-border-strong)' }}>＋ 伝票</button>
               </div>
 
               {!selectedSlip ? (
@@ -195,6 +197,7 @@ export function PosClient({ user }: { user: User }) {
           <PaneTitle>会計</PaneTitle>
           {selectedSlip && result && selectedTableId ? (
             <BillPanel
+              key={selectedSlip.id}
               tableName={selectedTable?.name ?? ''}
               casts={(selectedTable?.currentHostIds ?? []).map((cid) => castById.get(cid) ?? '?')}
               slip={selectedSlip}
@@ -209,6 +212,17 @@ export function PosClient({ user }: { user: User }) {
           )}
         </section>
       </div>
+
+      {/* 新規伝票（担当キャスト・顧客名を選択） */}
+      {newSlipFor && (
+        <NewSlipDialog
+          tableName={tables.find((t) => t.id === newSlipFor)?.name ?? ''}
+          casts={casts}
+          tableCastIds={tables.find((t) => t.id === newSlipFor)?.currentHostIds ?? []}
+          onClose={() => setNewSlipFor(null)}
+          onCreate={(init) => createSlip(newSlipFor, init)}
+        />
+      )}
 
       {/* オリシャン等の金額入力 */}
       {customItem && selectedTableId && selectedSlip && (
@@ -245,6 +259,70 @@ function CustomPriceDialog({ name, onClose, onAdd }: { name: string; onClose: ()
         <div style={{ display: 'flex', gap: 8 }}>
           <button type="button" className="noxa-btn noxa-btn-primary" style={{ ...primaryBtn, flex: 1 }} disabled={price <= 0 || !label.trim()}
             onClick={() => onAdd(label.trim(), price)}>追加</button>
+          <button type="button" onClick={onClose} style={{ ...ghostBtn, width: 80 }}>戻る</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ───────────────────────── 新規伝票ダイアログ（担当キャスト・顧客名）
+
+function NewSlipDialog({ tableName, casts, tableCastIds, onClose, onCreate }: {
+  tableName: string; casts: Cast[]; tableCastIds: string[];
+  onClose: () => void; onCreate: (init: { castName?: string; customerName?: string; customerType?: CustomerType }) => void;
+}) {
+  // 卓に配置済みキャストを先頭に、その他を続ける
+  const sortedCasts = useMemo(() => {
+    const onTable = casts.filter((c) => tableCastIds.includes(c.id));
+    const others = casts.filter((c) => !tableCastIds.includes(c.id));
+    return [...onTable, ...others];
+  }, [casts, tableCastIds]);
+  const [castName, setCastName] = useState<string>(() => {
+    const first = casts.find((c) => tableCastIds.includes(c.id));
+    return first?.name ?? '';
+  });
+  const [customerName, setCustomerName] = useState('');
+  const [customerType, setCustomerType] = useState<CustomerType>('regular');
+
+  return (
+    <div role="dialog" aria-label="新規伝票" style={{ position: 'fixed', inset: 0, zIndex: 50, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,0.5)' }} onClick={onClose}>
+      <div onClick={(e) => e.stopPropagation()} style={{ width: 'min(420px, 94vw)', maxHeight: '90vh', overflowY: 'auto', background: 'var(--noxa-bg-base)', border: '1px solid var(--noxa-border-strong)', borderRadius: 16, padding: 18, display: 'flex', flexDirection: 'column', gap: 14 }}>
+        <div className="noxa-eyebrow" style={{ fontSize: 11 }}>{tableName} · 新規伝票</div>
+
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+          <span style={miniLabel}>客層</span>
+          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+            {CUSTOMER_TYPES.map((c) => <button key={c.id} type="button" onClick={() => setCustomerType(c.id)} style={chipStyle(customerType === c.id)}>{c.label}</button>)}
+          </div>
+        </div>
+
+        <label style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+          <span style={miniLabel}>顧客名（任意）</span>
+          <input value={customerName} onChange={(e) => setCustomerName(e.target.value)} placeholder="例：田中様" style={fieldStyle} autoFocus />
+        </label>
+
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+          <span style={miniLabel}>担当キャスト</span>
+          {sortedCasts.length === 0 ? (
+            <span style={{ fontSize: 12, color: 'var(--noxa-text-faint)' }}>キャスト未登録（席回しで追加 or テストデータ投入）</span>
+          ) : (
+            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', maxHeight: 160, overflowY: 'auto' }}>
+              <button type="button" onClick={() => setCastName('')} style={chipStyle(castName === '')}>指定なし</button>
+              {sortedCasts.map((c) => (
+                <button key={c.id} type="button" onClick={() => setCastName(c.name)} style={chipStyle(castName === c.name)}>
+                  {tableCastIds.includes(c.id) ? '★' : ''}{c.name}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+
+        <div style={{ display: 'flex', gap: 8 }}>
+          <button type="button" className="noxa-btn noxa-btn-primary" style={{ ...primaryBtn, flex: 1 }}
+            onClick={() => onCreate({ castName: castName || undefined, customerName: customerName.trim() || undefined, customerType })}>
+            伝票を作成
+          </button>
           <button type="button" onClick={onClose} style={{ ...ghostBtn, width: 80 }}>戻る</button>
         </div>
       </div>
@@ -304,8 +382,8 @@ function BillPanel({ tableName, casts, slip, result, onDispatch, onRename, onRem
   const activeOrders = slip.state.orders.filter((o) => o.count > 0);
   const [checkingOut, setCheckingOut] = useState(false);
   const [amount, setAmount] = useState<number>(result.currentTotal);
-  const [castName, setCastName] = useState(casts[0] ?? '');
-  const [customerName, setCustomerName] = useState('');
+  const [castName, setCastName] = useState(slip.castName ?? casts[0] ?? '');
+  const [customerName, setCustomerName] = useState(slip.customerName ?? '');
   const [guests, setGuests] = useState<number>(1);
   const [busy, setBusy] = useState(false);
   useEffect(() => { setAmount(result.currentTotal); }, [result.currentTotal]);
@@ -319,7 +397,12 @@ function BillPanel({ tableName, casts, slip, result, onDispatch, onRename, onRem
         </div>
         {result.isOutOfHours && <span style={{ fontFamily: mono, fontSize: 10, color: 'var(--noxa-status-warning)' }}>営業時間外</span>}
       </div>
-      {casts.length > 0 && <div style={{ fontSize: 11, color: 'var(--noxa-text-muted)' }}>キャスト：{casts.join(' / ')}</div>}
+      {(slip.customerName || slip.castName || casts.length > 0) && (
+        <div style={{ fontSize: 11, color: 'var(--noxa-text-muted)', display: 'flex', gap: 12, flexWrap: 'wrap' }}>
+          {slip.customerName && <span>顧客：{slip.customerName}</span>}
+          {slip.castName ? <span>担当：{slip.castName}</span> : (casts.length > 0 && <span>卓キャスト：{casts.join(' / ')}</span>)}
+        </div>
+      )}
 
       <ul style={{ listStyle: 'none', margin: 0, padding: 0, display: 'flex', flexDirection: 'column', gap: 8, maxHeight: 220, overflowY: 'auto' }}>
         {activeOrders.length === 0 && <li style={{ fontSize: 12, color: 'var(--noxa-text-faint)' }}>オーダー未入力</li>}

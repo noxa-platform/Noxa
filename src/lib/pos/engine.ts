@@ -67,6 +67,8 @@ export interface PosSlip {
   id: string;
   name: string;
   state: CalculatorState;
+  castName?: string;      // 担当キャスト（伝票作成時に選択）
+  customerName?: string;  // 顧客名（伝票作成時に入力）
 }
 
 // config からピン留めオーダーを生成

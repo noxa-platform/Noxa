@@ -88,7 +88,7 @@ export type UsePosStore = {
   casts: Cast[];
   needsSeed: boolean;
   seedTables: () => Promise<void>;
-  addSlip: (tableId: string, init?: Partial<Pick<CalculatorState, 'customerType' | 'initialSetPrice' | 'entryTime' | 'dohan'>>) => Promise<void>;
+  addSlip: (tableId: string, init?: { customerType?: CustomerType; initialSetPrice?: number; entryTime?: string; dohan?: boolean; castName?: string; customerName?: string }) => Promise<void>;
   dispatchSlip: (tableId: string, slipId: string, action: Action) => Promise<void>;
   renameSlip: (tableId: string, slipId: string, name: string) => Promise<void>;
   removeSlip: (tableId: string, slipId: string) => Promise<void>;
@@ -169,9 +169,11 @@ export function usePosStore(user: User): UsePosStore {
       setDoc(doc(db, `shop_shops/${shopId}/seating_tables/tbl_${i + 1}`), { ...createEmptyTable(`tbl_${i + 1}`, name), updatedAt: serverTimestamp() })));
   }, [shopId, configRef]);
 
+  // Firestore は undefined を拒否するため、書込前に undefined を除去（JSON 往復）
   const writeSlips = useCallback(async (tableId: string, slips: PosSlip[], extra?: Record<string, unknown>) => {
     if (!shopId) return;
-    await setDoc(tableRef(tableId), { slips, updatedAt: serverTimestamp(), ...(extra ?? {}) }, { merge: true });
+    const clean = JSON.parse(JSON.stringify(slips));
+    await setDoc(tableRef(tableId), { slips: clean, updatedAt: serverTimestamp(), ...(extra ?? {}) }, { merge: true });
   }, [shopId, tableRef]);
 
   const addSlip = useCallback<UsePosStore['addSlip']>(async (tableId, init) => {
@@ -182,7 +184,13 @@ export function usePosStore(user: User): UsePosStore {
       ? { ...base, customerType: init.customerType ?? base.customerType, initialSetPrice: init.initialSetPrice ?? base.initialSetPrice, entryTime: init.entryTime ?? base.entryTime, dohan: init.dohan ?? base.dohan, orders: createPinnedOrders(cfg, init.customerType ?? base.customerType) }
       : base;
     const slips = t?.slips ?? [];
-    const newSlip: PosSlip = { id: genSlipId(), name: nextSlipName(slips), state };
+    const newSlip: PosSlip = {
+      id: genSlipId(),
+      name: init?.customerName?.trim() ? init.customerName.trim() : nextSlipName(slips),
+      state,
+      ...(init?.castName ? { castName: init.castName } : {}),
+      ...(init?.customerName?.trim() ? { customerName: init.customerName.trim() } : {}),
+    };
     // 空卓なら開卓（席回しと同期：status ACTIVE / startTime）
     const extra = (!t || t.status === 'EMPTY')
       ? { status: 'ACTIVE', startTime: Date.now(), entryTime: Date.now() }
