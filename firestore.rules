@@ -271,11 +271,25 @@ service cloud.firestore {
         allow read: if isShopMember(shopId);
         allow write: if isShopMember(shopId);
       }
+
+      // 店舗運営モジュール（メンバー read/write）
+      match /inventory/{itemId}    { allow read, write: if isShopMember(shopId); }
+      match /first_visits/{id}     { allow read, write: if isShopMember(shopId); }
+      match /transport/{id}        { allow read, write: if isShopMember(shopId); }
+      match /trials/{id}           { allow read, write: if isShopMember(shopId); }
+      match /reservations/{id}     { allow read, write: if isShopMember(shopId); }
+      // 機微（売掛・リスク客）= 売上編集権限（owner/manager/accounting）のみ
+      match /unpaid/{id}           { allow read, write: if isShopMemberWithSalesEdit(shopId); }
+      match /risk_customers/{id}   { allow read, write: if isShopMemberWithSalesEdit(shopId); }
     }
 
     // ========================================
     // personal ドメイン (MyDeck)
     // ========================================
+
+    match /personal_business_cards/{uid}/items/{id} {
+      allow read, write: if isSelf(uid);
+    }
 
     match /personal_customers/{uid}/items/{cid} {
       allow read, write: if isSelf(uid);
