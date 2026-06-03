@@ -272,6 +272,18 @@ service cloud.firestore {
         allow write: if isShopMember(shopId);
       }
 
+      // 初回案内（GENTLY 由来：メニュー/指名タブレット）。パネル本体は seating_casts を流用、
+      // 画像/情報カード/指名オーダー/表示設定をここに保存。
+      match /menu_images/{castId}     { allow read, write: if isShopMember(shopId); }
+      match /menu_info_cards/{id}     { allow read, write: if isShopMember(shopId); }
+      match /menu_orders/{id}         { allow read, write: if isShopMember(shopId); }
+      match /menu_config/{docId} {
+        allow read: if isShopMember(shopId);
+        allow write: if isShopOwnerLike(shopId);
+      }
+      // 端末プロファイル（PIN）: オーナーのみ管理。端末ログインは Cloud Function(Admin SDK) 経由のため client 直読み不要
+      match /device_profiles/{profileId} { allow read, write: if isShopOwnerLike(shopId); }
+
       // 店舗運営モジュール（メンバー read/write）
       match /inventory/{itemId}    { allow read, write: if isShopMember(shopId); }
       match /first_visits/{id}     { allow read, write: if isShopMember(shopId); }
