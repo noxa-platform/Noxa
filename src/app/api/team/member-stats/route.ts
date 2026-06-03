@@ -11,6 +11,9 @@ import { NextRequest, NextResponse } from 'next/server';
 import { Timestamp } from 'firebase-admin/firestore';
 import { verifyRequest, getAdminDb, AuthError } from '../../lib/firebase-admin';
 
+// キャスト×顧客の集計は読み取り回数が多いので関数タイムアウトを延長。
+export const maxDuration = 60;
+
 export async function POST(request: NextRequest) {
   try {
     const uid = await verifyRequest(request);
@@ -45,42 +48,47 @@ export async function POST(request: NextRequest) {
     const monthStart = Timestamp.fromDate(new Date(year, month - 1, 1));
     const monthEnd = Timestamp.fromDate(new Date(year, month, 1));
 
-    // メンバー一覧
+    // メンバー一覧（owner が members サブコレクションに無い運用でも集計対象に含める）
     const memSnap = await db.collection(`shop_shops/${shopId}/members`).get();
+    const targets = new Map<string, { role: string; name: string }>();
+    for (const m of memSnap.docs) {
+      const md = m.data() as { role?: string; castDisplayName?: string; castName?: string };
+      targets.set(m.id, { role: md.role || 'cast', name: md.castDisplayName || md.castName || '' });
+    }
+    if (ownerUid && !targets.has(ownerUid)) {
+      targets.set(ownerUid, { role: 'owner', name: '' });
+    }
 
-    const members = await Promise.all(memSnap.docs.map(async (m) => {
-      const castUid = m.id;
-      const mdata = m.data() as { role?: string; castDisplayName?: string; castName?: string };
+    const members = await Promise.all([...targets.entries()].map(async ([castUid, info]) => {
       // 表示名: members の castDisplayName → account_users.displayName → uid 先頭
-      let name = mdata.castDisplayName || mdata.castName || '';
+      let name = info.name;
       if (!name) {
         const acc = await db.doc(`account_users/${castUid}`).get().catch(() => null);
         name = (acc?.data() as { displayName?: string } | undefined)?.displayName || castUid.slice(0, 8);
       }
 
-      let monthSales = 0;
-      let monthGroupCount = 0;
-
-      // 各キャストの個人顧客 → 当月ログ集計
       const custSnap = await db.collection(`personal_customers/${castUid}/items`).get().catch(() => null);
       const customerCount = custSnap?.size ?? 0;
-      if (custSnap) {
-        for (const c of custSnap.docs) {
-          const logsSnap = await db
-            .collection(`personal_customers/${castUid}/items/${c.id}/logs`)
-            .where('datetime', '>=', monthStart)
-            .where('datetime', '<', monthEnd)
-            .get()
-            .catch(() => null);
-          if (!logsSnap) continue;
-          for (const l of logsSnap.docs) {
-            const d = l.data() as { salesAmount?: number; countAsGroup?: boolean; type?: string };
-            monthSales += d.salesAmount || 0;
-            const counted = typeof d.countAsGroup === 'boolean' ? d.countAsGroup : d.type === 'visit';
-            if (counted) monthGroupCount += 1;
-          }
+
+      // 顧客ごとの当月ログを並列取得（N+1 の直列待ちでタイムアウトするのを回避）
+      const perCustomer = await Promise.all((custSnap?.docs ?? []).map(async (c) => {
+        const logsSnap = await db
+          .collection(`personal_customers/${castUid}/items/${c.id}/logs`)
+          .where('datetime', '>=', monthStart)
+          .where('datetime', '<', monthEnd)
+          .get()
+          .catch(() => null);
+        let s = 0, g = 0;
+        for (const l of logsSnap?.docs ?? []) {
+          const d = l.data() as { salesAmount?: number; countAsGroup?: boolean; type?: string };
+          s += d.salesAmount || 0;
+          const counted = typeof d.countAsGroup === 'boolean' ? d.countAsGroup : d.type === 'visit';
+          if (counted) g += 1;
         }
-      }
+        return { s, g };
+      }));
+      let monthSales = perCustomer.reduce((acc, x) => acc + x.s, 0);
+      let monthGroupCount = perCustomer.reduce((acc, x) => acc + x.g, 0);
 
       // 顧客なし日売
       const ssSnap = await db.collection(`personal_sales/${castUid}/items`)
@@ -88,22 +96,13 @@ export async function POST(request: NextRequest) {
         .where('datetime', '<', monthEnd)
         .get()
         .catch(() => null);
-      if (ssSnap) {
-        for (const s of ssSnap.docs) {
-          const d = s.data() as { salesAmount?: number; groupCount?: number };
-          monthSales += d.salesAmount || 0;
-          monthGroupCount += (d.groupCount && d.groupCount > 0) ? d.groupCount : 1;
-        }
+      for (const s of ssSnap?.docs ?? []) {
+        const d = s.data() as { salesAmount?: number; groupCount?: number };
+        monthSales += d.salesAmount || 0;
+        monthGroupCount += (d.groupCount && d.groupCount > 0) ? d.groupCount : 1;
       }
 
-      return {
-        uid: castUid,
-        name,
-        role: mdata.role || 'cast',
-        customerCount,
-        monthSales,
-        monthGroupCount,
-      };
+      return { uid: castUid, name, role: info.role, customerCount, monthSales, monthGroupCount };
     }));
 
     members.sort((a, b) => b.monthSales - a.monthSales);
