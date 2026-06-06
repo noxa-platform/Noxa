@@ -51,7 +51,7 @@ function applyCors(res: { setHeader: (k: string, v: string) => void }, origin: s
 const form = (params: Record<string, string>) =>
   Object.entries(params).map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`).join('&');
 
-export const lineLogin = onRequest({ cors: false, region: 'asia-northeast1', invoker: 'public' }, async (req, res) => {
+export const lineLogin = onRequest({ cors: false, region: 'asia-northeast1', invoker: 'public', secrets: ['LINE_CHANNEL_ID', 'LINE_CHANNEL_SECRET'] }, async (req, res) => {
   applyCors(res, req.headers.origin as string | undefined);
   if (req.method === 'OPTIONS') { res.status(204).send(''); return; }
   if (req.method !== 'POST') { res.status(405).json({ error: 'METHOD_NOT_ALLOWED' }); return; }

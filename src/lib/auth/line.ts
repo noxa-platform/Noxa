@@ -9,7 +9,8 @@ import { signInWithCustomToken } from 'firebase/auth';
 import { auth } from '@/lib/firebase/config';
 import { ensureAccountUser } from '@/lib/auth';
 
-const CHANNEL_ID = process.env.NEXT_PUBLIC_LINE_CHANNEL_ID ?? '';
+// Channel ID は公開値（authorize URL に載る）。env 未設定でも動くよう既定値を持つ。
+const CHANNEL_ID = process.env.NEXT_PUBLIC_LINE_CHANNEL_ID ?? '2010310730';
 const FUNCTIONS_BASE = process.env.NEXT_PUBLIC_NOXA_FUNCTIONS_URL ?? 'https://asia-northeast1-noxa-platform.cloudfunctions.net';
 const LINE_AUTHORIZE_URL = 'https://access.line.me/oauth2/v2.1/authorize';
 
@@ -34,7 +35,8 @@ export function startLineLogin(redirect?: string | null): void {
   u.searchParams.set('client_id', CHANNEL_ID);
   u.searchParams.set('redirect_uri', lineCallbackUri());
   u.searchParams.set('state', state);
-  u.searchParams.set('scope', 'profile openid email');
+  // email は LINE の審査(メールアドレス取得権限)が必要。承認後に 'profile openid email' へ。
+  u.searchParams.set('scope', 'profile openid');
   window.location.href = u.toString();
 }
 
