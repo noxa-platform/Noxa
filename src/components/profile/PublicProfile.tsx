@@ -57,11 +57,6 @@ export function PublicProfile({ handle, expectType }: { handle: string; expectTy
           })}
         </div>
 
-        {/* 所属店舗 */}
-        {page.shopHandle && (
-          <Link href={`/s/${page.shopHandle}`} style={{ marginTop: 16, fontSize: 13, color: 'var(--noxa-accent-primary-ink)' }}>所属店舗を見る →</Link>
-        )}
-
         <Link href="/" style={{ marginTop: 36, fontSize: 11, color: 'var(--noxa-text-faint)', textDecoration: 'none' }}>
           Powered by <span className="noxa-logo" style={{ fontSize: 13 }}>N<em>o</em>xa</span>
         </Link>

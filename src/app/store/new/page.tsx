@@ -4,7 +4,6 @@ import { useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { addDoc, collection, doc, serverTimestamp, setDoc } from 'firebase/firestore';
-import { claimHandle, validateHandle, isHandleAvailable } from '@/lib/handle';
 import type { User } from 'firebase/auth';
 import { db } from '@/lib/firebase/config';
 import { AuthGuard } from '@/components/AuthGuard';
@@ -34,18 +33,14 @@ const DEFAULT_DEVICE_PROFILES = [
   { id: 'cashier', label: 'レジ / 締め端末', allowedModules: ['pos', 'inventory'] },
 ];
 
-async function createShop(uid: string, name: string, biz: string, area: string, pin: string, handle: string): Promise<void> {
-  // 先に shop ID を採番し、ハンドルを claim（profile_pages 作成＋shop_shops.handle 設定）
-  const ref = doc(collection(db, 'shop_shops'));
-  await claimHandle(handle, { type: 'shop', ownerUid: uid, refId: ref.id, displayName: name });
+async function createShop(uid: string, name: string, biz: string, area: string, pin: string): Promise<void> {
   // yorulog createWorkspace（type='business'）と同等スキーマで shop_shops を作成。
-  await setDoc(ref, {
+  const ref = await addDoc(collection(db, 'shop_shops'), {
     name,
     ownerUid: uid,
     type: 'business',
     storeTypeName: biz,
     ...(area ? { area } : {}),
-    handle,
     anonymousTitleMode: false,
     reminderSettings: { birthdayDaysBefore: 3, inactiveDays: 14 },
     customTags: [] as string[],
@@ -55,7 +50,7 @@ async function createShop(uid: string, name: string, biz: string, area: string, 
     aiContribution: true,
     createdAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
-  }, { merge: true });
+  });
   // オーナーをメンバーに
   await setDoc(doc(db, `shop_shops/${ref.id}/members/${uid}`), { role: 'owner', joinedAt: serverTimestamp() });
 
@@ -76,7 +71,6 @@ async function createShop(uid: string, name: string, biz: string, area: string, 
 function StoreNewForm({ user }: { user: User }) {
   const router = useRouter();
   const [name, setName] = useState('');
-  const [storeHandle, setStoreHandle] = useState('');
   const [biz, setBiz] = useState(BIZ[0]);
   const [area, setArea] = useState('');
   const [pin, setPin] = useState('');
@@ -86,12 +80,9 @@ function StoreNewForm({ user }: { user: User }) {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    const h = validateHandle(storeHandle);
-    if (!h) { setErr('店舗IDは半角英数字と「_」で3〜20文字にしてください。'); return; }
     setSaving(true); setErr(null);
     try {
-      if (!(await isHandleAvailable(h))) { setErr('この店舗IDは既に使われています。'); setSaving(false); return; }
-      await createShop(user.uid, name.trim(), biz, area.trim(), pin, h);
+      await createShop(user.uid, name.trim(), biz, area.trim(), pin);
       setDone(true);
       // 店舗運営モジュールが解放された状態でダッシュボードへ
       setTimeout(() => router.push('/account'), 1400);
@@ -128,10 +119,6 @@ function StoreNewForm({ user }: { user: User }) {
             <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
               <label htmlFor="name" style={labelStyle}>店名</label>
               <input id="name" value={name} onChange={(e) => setName(e.target.value)} required placeholder="例：Club Noxa" style={inputStyle} />
-            </div>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
-              <label htmlFor="shandle" style={labelStyle}>店舗ID（公開ページ URL：/s/◯◯）</label>
-              <input id="shandle" value={storeHandle} onChange={(e) => setStoreHandle(e.target.value.toLowerCase().replace(/[^a-z0-9_]/g, '').slice(0, 20))} required placeholder="例：club_noxa" style={inputStyle} />
             </div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
               <label htmlFor="biz" style={labelStyle}>業態</label>
