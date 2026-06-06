@@ -9,7 +9,7 @@ import { Shell, Section, Empty, Eyebrow, chip } from '@/components/modules/sched
 
 /**
  * 勤怠 — Noxa OS（実データ）
- * shop_shops/{shopId}/shifts に出勤/退勤を記録（本人＝castUserId）。
+ * shop_shops/{shopId}/shifts に出勤/退勤を記録（本人＝castUid）。
  */
 const mono = 'var(--noxa-font-mono)';
 
@@ -38,7 +38,7 @@ export function AttendanceClient({ user }: { user: User }) {
 
   const reload = async (sid: string) => {
     try {
-      const snap = await getDocs(query(collection(db, `shop_shops/${sid}/shifts`), where('castUserId', '==', user.uid)));
+      const snap = await getDocs(query(collection(db, `shop_shops/${sid}/shifts`), where('castUid', '==', user.uid)));
       const list: Shift[] = []; snap.forEach((d) => list.push(mapShift(d.id, d.data())));
       list.sort((a, b) => (b.startMs ?? 0) - (a.startMs ?? 0));
       setShifts(list);
@@ -68,7 +68,7 @@ export function AttendanceClient({ user }: { user: User }) {
 
   const clockIn = async () => {
     if (!shopId || busy) return; setBusy(true);
-    try { await addDoc(collection(db, `shop_shops/${shopId}/shifts`), { castUserId: user.uid, date: today, startAt: serverTimestamp(), createdAt: serverTimestamp() }); await reload(shopId); }
+    try { await addDoc(collection(db, `shop_shops/${shopId}/shifts`), { castUid: user.uid, date: today, startAt: serverTimestamp(), createdAt: serverTimestamp() }); await reload(shopId); }
     finally { setBusy(false); }
   };
   const clockOut = async () => {
@@ -136,7 +136,7 @@ function ShiftCalendar({ shopId, uid, shifts }: { shopId: string; uid: string; s
 
   const reloadPlans = async () => {
     try {
-      const snap = await getDocs(query(collection(db, `shop_shops/${shopId}/shift_plans`), where('castUserId', '==', uid)));
+      const snap = await getDocs(query(collection(db, `shop_shops/${shopId}/shift_plans`), where('castUid', '==', uid)));
       const m: Record<string, Plan> = {};
       snap.forEach((d) => { const v = d.data() as DocumentData; if (v.date) m[v.date as string] = { date: v.date as string, start: (v.start as string) ?? '', end: (v.end as string) ?? '', off: v.off === true }; });
       setPlans(m);
@@ -163,7 +163,7 @@ function ShiftCalendar({ shopId, uid, shifts }: { shopId: string; uid: string; s
   const save = async () => {
     if (!editor || busy) return; setBusy(true);
     try {
-      await setDoc(doc(db, `shop_shops/${shopId}/shift_plans/${uid}_${editor.date}`), { castUserId: uid, date: editor.date, start: editor.start, end: editor.end, off: editor.off, updatedAt: serverTimestamp() }, { merge: true });
+      await setDoc(doc(db, `shop_shops/${shopId}/shift_plans/${uid}_${editor.date}`), { castUid: uid, date: editor.date, start: editor.start, end: editor.end, off: editor.off, updatedAt: serverTimestamp() }, { merge: true });
       await reloadPlans(); setEditor(null);
     } finally { setBusy(false); }
   };

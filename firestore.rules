@@ -182,19 +182,23 @@ service cloud.firestore {
         }
       }
 
+      // キャスト本人 UID は castUid に統一（旧 castUserId は移行期のみ許容）
       match /shifts/{sid} {
         allow read: if isShopMember(shopId);
         allow write: if isShopOwnerLike(shopId)
-          || (isShopMember(shopId) && request.resource.data.castUserId == request.auth.uid);
+          || (isShopMember(shopId) && (request.resource.data.castUid == request.auth.uid
+              || request.resource.data.castUserId == request.auth.uid));
       }
 
       // 出勤予定（シフトカレンダー）。本人 or オーナーが編集。実績(shifts)とは分離。
       match /shift_plans/{id} {
         allow read: if isShopMember(shopId);
         allow create, update: if isShopOwnerLike(shopId)
-          || (isShopMember(shopId) && request.resource.data.castUserId == request.auth.uid);
+          || (isShopMember(shopId) && (request.resource.data.castUid == request.auth.uid
+              || request.resource.data.castUserId == request.auth.uid));
         allow delete: if isShopOwnerLike(shopId)
-          || (isShopMember(shopId) && resource.data.castUserId == request.auth.uid);
+          || (isShopMember(shopId) && (resource.data.castUid == request.auth.uid
+              || resource.data.castUserId == request.auth.uid));
       }
 
       match /goals/{gid} {
