@@ -4,6 +4,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { onAuthStateChanged } from 'firebase/auth';
 import { loginWithEmail, signinWithGoogle, signinWithApple, handlePostLoginRedirect } from '@/lib/auth';
+import { startLineLogin, isLineLoginEnabled } from '@/lib/auth/line';
 import { auth } from '@/lib/firebase/config';
 
 function LoginForm() {
@@ -271,6 +272,29 @@ function LoginForm() {
           ></span>
           Apple で続ける
         </button>
+
+        {isLineLoginEnabled() && (
+          <button
+            type="button"
+            onClick={() => { setLoading(true); setError(null); startLineLogin(redirect); }}
+            disabled={loading}
+            className="noxa-btn"
+            style={{ padding: '12px', fontSize: 14, width: '100%', background: '#06C755', color: '#fff', border: 'none', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}
+          >
+            <span
+              aria-hidden
+              style={{
+                width: 18, height: 18, borderRadius: 4,
+                background: '#fff', color: '#06C755',
+                display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                fontSize: 12, fontWeight: 700,
+              }}
+            >
+              L
+            </span>
+            LINE で続ける
+          </button>
+        )}
 
         <p style={{ textAlign: 'center', fontSize: 13, color: 'var(--noxa-text-muted)', margin: 0 }}>
           アカウントをお持ちでない？{' '}

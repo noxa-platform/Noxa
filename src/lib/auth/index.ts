@@ -84,7 +84,7 @@ export async function signOut(): Promise<void> {
  * account_users/{uid} を必ず存在させる。
  * 既存ユーザーは createdAt 等を保持。新規は基本フィールド + platformRole='user'。
  */
-async function ensureAccountUser(user: User, displayName?: string): Promise<void> {
+export async function ensureAccountUser(user: User, displayName?: string): Promise<void> {
   const ref = doc(db, `account_users/${user.uid}`);
   const snap = await getDoc(ref);
   if (snap.exists()) {

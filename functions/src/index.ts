@@ -84,3 +84,6 @@ export { consumeAiCredit } from './credits';
 
 // UGC バー所有権 claim 申請
 export { claimShop } from './claim-shop';
+
+// LINE ログイン（OAuth → Custom Token）
+export { lineLogin } from './line-auth';
