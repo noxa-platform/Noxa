@@ -5,7 +5,7 @@ import { getFirestore, connectFirestoreEmulator, type Firestore } from 'firebase
 // Noxa は yorulog / nomishugy と同じ Firebase プロジェクト (noxa-platform) を共有。
 // すべてのプロダクトが同一 Firebase Auth + Firestore を使うため、
 // account_users / account_subscriptions / account_credit_ledger 等の共通ドメインが直接読める。
-const firebaseConfig = {
+export const firebaseConfig = {
   apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY,
   authDomain: process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN,
   projectId: process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID,

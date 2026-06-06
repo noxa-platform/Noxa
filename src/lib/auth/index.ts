@@ -13,7 +13,10 @@ import {
   signOut as fbSignOut,
   GoogleAuthProvider,
   OAuthProvider,
+  EmailAuthProvider,
   linkWithCredential,
+  linkWithPopup,
+  unlink,
   fetchSignInMethodsForEmail,
   type AuthCredential,
   type User,
@@ -142,6 +145,43 @@ export async function completeLinkWithPassword(email: string, password: string, 
   await linkWithCredential(res.user, pendingCred);
   await ensureAccountUser(res.user);
   return res.user;
+}
+
+// ─────────────────────────────────────────────
+// ログイン後の「アカウント連携設定」用
+// ─────────────────────────────────────────────
+
+export type ProviderId = 'google.com' | 'apple.com' | 'password';
+
+/** 現在ログイン中ユーザーに紐付くプロバイダ ID 一覧 */
+export function linkedProviderIds(user: User): string[] {
+  return user.providerData.map((p) => p.providerId);
+}
+
+/** 現ユーザーに Google を追加連携 */
+export async function linkGoogle(user: User): Promise<void> {
+  const p = new GoogleAuthProvider();
+  p.setCustomParameters({ prompt: 'select_account' });
+  await linkWithPopup(user, p);
+}
+
+/** 現ユーザーに Apple を追加連携 */
+export async function linkApple(user: User): Promise<void> {
+  await linkWithPopup(user, newAppleProvider());
+}
+
+/** 現ユーザーにメール/パスワードを追加（OAuth 専用アカウントにパスワードを設定） */
+export async function linkEmailPassword(user: User, email: string, password: string): Promise<void> {
+  await linkWithCredential(user, EmailAuthProvider.credential(email, password));
+  await ensureAccountUser(user);
+}
+
+/** プロバイダ連携を解除（最後の1つは解除させない） */
+export async function unlinkProvider(user: User, providerId: string): Promise<void> {
+  if (linkedProviderIds(user).length <= 1) {
+    throw new Error('LAST_PROVIDER'); // 最低1つのログイン手段は残す
+  }
+  await unlink(user, providerId);
 }
 
 export async function signOut(): Promise<void> {

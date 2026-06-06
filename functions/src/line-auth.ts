@@ -15,7 +15,7 @@
 import { onRequest } from 'firebase-functions/v2/https';
 import { logger } from 'firebase-functions';
 import { getAuth } from 'firebase-admin/auth';
-import { getAdminApp } from './admin';
+import { db, getAdminApp } from './admin';
 
 // node20 グローバル fetch（functions の lib に dom が無いため最小宣言）
 declare const fetch: (
@@ -115,10 +115,17 @@ export const lineLogin = onRequest({ cors: false, region: 'asia-northeast1', inv
 
     if (!lineUserId) { res.status(401).json({ error: 'NO_SUBJECT' }); return; }
 
-    // 3) uid 解決（email 一致なら既存アカウントに統合）
+    // 3) uid 解決
     const auth = adminAuth();
     let uid = `line_${lineUserId}`;
-    if (email) {
+    let resolved = false;
+    // 3-1) 統合済み LINE マッピング（account_users.lineUserId）を最優先
+    try {
+      const m = await db().collection('account_users').where('lineUserId', '==', lineUserId).limit(1).get();
+      if (!m.empty) { uid = m.docs[0].id; resolved = true; }
+    } catch { /* index 等の問題は無視して次へ */ }
+    // 3-2) email 一致なら既存アカウントに統合
+    if (!resolved && email) {
       try { const existing = await auth.getUserByEmail(email); uid = existing.uid; } catch { /* 既存なし → line_ uid で新規 */ }
     }
 

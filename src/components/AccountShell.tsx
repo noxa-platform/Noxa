@@ -9,6 +9,7 @@ import { useShopContext, useDeviceClaims } from '@/lib/useShopContext';
 const NAV_ACCOUNT: { label: string; href: string; icon: string }[] = [
   { label: 'ダッシュボード', href: '/account',         icon: '◇' },
   { label: 'プロフィール',   href: '/account/profile', icon: '◇' },
+  { label: 'ログイン方法・連携', href: '/account/connections', icon: '◇' },
   { label: '退会',           href: '/account/delete',  icon: '◇' },
 ];
 

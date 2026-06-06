@@ -4,6 +4,7 @@ import { Suspense, useEffect, useRef, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { finishLineLogin } from '@/lib/auth/line';
+import { isLineMergePending, finishLineMerge } from '@/lib/auth/merge';
 import { handlePostLoginRedirect } from '@/lib/auth';
 
 function LineCallback() {
@@ -20,6 +21,13 @@ function LineCallback() {
     const errParam = params.get('error');
     if (errParam) { setError('LINEログインがキャンセルされました。'); return; }
     if (!code || !state) { setError('不正なコールバックです。'); return; }
+    // 統合フロー（既存アカウントへ LINE 由来アカウントを統合）
+    if (isLineMergePending()) {
+      finishLineMerge(code, state)
+        .then(() => router.push('/account/connections?merged=1'))
+        .catch((e) => { console.error('[line-merge]', e); setError('LINE アカウントの統合に失敗しました。'); });
+      return;
+    }
     finishLineLogin(code, state)
       .then((redirect) => handlePostLoginRedirect(redirect, router))
       .catch((e) => { console.error('[line-callback]', e); setError('LINEログインに失敗しました。もう一度お試しください。'); });

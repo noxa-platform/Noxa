@@ -87,3 +87,6 @@ export { claimShop } from './claim-shop';
 
 // LINE ログイン（OAuth → Custom Token）
 export { lineLogin } from './line-auth';
+
+// アカウント統合（誤って2アカウント作成時）
+export { mergeAccounts } from './merge';
