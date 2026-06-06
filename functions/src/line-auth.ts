@@ -57,24 +57,28 @@ export const lineLogin = onRequest({ cors: false, region: 'asia-northeast1', inv
   if (req.method !== 'POST') { res.status(405).json({ error: 'METHOD_NOT_ALLOWED' }); return; }
 
   try {
-    const body = (req.body ?? {}) as { code?: string; redirectUri?: string };
-    const code = (body.code ?? '').trim();
-    const redirectUri = (body.redirectUri ?? '').trim();
-    if (!code || !redirectUri) { res.status(400).json({ error: 'BAD_REQUEST' }); return; }
+    // Web: { code, redirectUri }（認可コードフロー）/ ネイティブ(iOS LINE SDK): { idToken } を直接受け付ける
+    const body = (req.body ?? {}) as { code?: string; redirectUri?: string; idToken?: string };
 
     const channelId = process.env.LINE_CHANNEL_ID;
     const channelSecret = process.env.LINE_CHANNEL_SECRET;
     if (!channelId || !channelSecret) { logger.error('[lineLogin] LINE_CHANNEL_ID/SECRET 未設定'); res.status(500).json({ error: 'NOT_CONFIGURED' }); return; }
 
-    // 1) 認可コード → トークン交換
-    const tokenRes = await fetch(LINE_TOKEN_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: form({ grant_type: 'authorization_code', code, redirect_uri: redirectUri, client_id: channelId, client_secret: channelSecret }),
-    });
-    if (!tokenRes.ok) { logger.error('[lineLogin] token exchange failed', await tokenRes.text()); res.status(401).json({ error: 'TOKEN_EXCHANGE_FAILED' }); return; }
-    const tokenJson = await tokenRes.json();
-    const idToken = typeof tokenJson.id_token === 'string' ? tokenJson.id_token : '';
+    let idToken = (body.idToken ?? '').trim();
+    if (!idToken) {
+      // 1) Web: 認可コード → トークン交換（client_secret はサーバのみ保持）
+      const code = (body.code ?? '').trim();
+      const redirectUri = (body.redirectUri ?? '').trim();
+      if (!code || !redirectUri) { res.status(400).json({ error: 'BAD_REQUEST' }); return; }
+      const tokenRes = await fetch(LINE_TOKEN_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: form({ grant_type: 'authorization_code', code, redirect_uri: redirectUri, client_id: channelId, client_secret: channelSecret }),
+      });
+      if (!tokenRes.ok) { logger.error('[lineLogin] token exchange failed', await tokenRes.text()); res.status(401).json({ error: 'TOKEN_EXCHANGE_FAILED' }); return; }
+      const tokenJson = await tokenRes.json();
+      idToken = typeof tokenJson.id_token === 'string' ? tokenJson.id_token : '';
+    }
     if (!idToken) { res.status(401).json({ error: 'NO_ID_TOKEN' }); return; }
 
     // 2) id_token を LINE で検証（署名・aud・exp を LINE 側で確認）
