@@ -2,8 +2,10 @@
 import { useState, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
-import { signupWithEmail, signinWithGoogle, signinWithApple, handlePostLoginRedirect } from '@/lib/auth';
+import type { AuthCredential } from 'firebase/auth';
+import { signupWithEmail, signinWithGoogle, signinWithApple, handlePostLoginRedirect, LinkPasswordRequiredError } from '@/lib/auth';
 import { startLineLogin, isLineLoginEnabled } from '@/lib/auth/line';
+import { LinkAccountDialog } from '@/components/auth/LinkAccountDialog';
 
 function SignupForm() {
   const router = useRouter();
@@ -15,6 +17,7 @@ function SignupForm() {
   const [agreedToTerms, setAgreedToTerms] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [linkReq, setLinkReq] = useState<{ email: string; pendingCred: AuthCredential } | null>(null);
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
@@ -28,6 +31,11 @@ function SignupForm() {
       await signupWithEmail(email, password, displayName);
       await handlePostLoginRedirect(redirect, router);
     } catch (err: unknown) {
+      if (err instanceof LinkPasswordRequiredError) {
+        setLinkReq({ email: err.email, pendingCred: err.pendingCred });
+        setLoading(false);
+        return;
+      }
       setError(parseFirebaseSignupError(err));
       setLoading(false);
     }
@@ -44,6 +52,11 @@ function SignupForm() {
       await signinWithGoogle();
       await handlePostLoginRedirect(redirect, router);
     } catch (err: unknown) {
+      if (err instanceof LinkPasswordRequiredError) {
+        setLinkReq({ email: err.email, pendingCred: err.pendingCred });
+        setLoading(false);
+        return;
+      }
       setError(parseFirebaseSignupError(err));
       setLoading(false);
     }
@@ -56,6 +69,11 @@ function SignupForm() {
       await signinWithApple();
       await handlePostLoginRedirect(redirect, router);
     } catch (err: unknown) {
+      if (err instanceof LinkPasswordRequiredError) {
+        setLinkReq({ email: err.email, pendingCred: err.pendingCred });
+        setLoading(false);
+        return;
+      }
       setError(parseFirebaseSignupError(err));
       setLoading(false);
     }
@@ -292,6 +310,15 @@ function SignupForm() {
           </Link>
         </p>
       </div>
+
+      {linkReq && (
+        <LinkAccountDialog
+          email={linkReq.email}
+          pendingCred={linkReq.pendingCred}
+          onLinked={async () => { setLinkReq(null); await handlePostLoginRedirect(redirect, router); }}
+          onCancel={() => setLinkReq(null)}
+        />
+      )}
     </main>
   );
 }

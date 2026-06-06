@@ -13,6 +13,9 @@ import {
   signOut as fbSignOut,
   GoogleAuthProvider,
   OAuthProvider,
+  linkWithCredential,
+  fetchSignInMethodsForEmail,
+  type AuthCredential,
   type User,
 } from 'firebase/auth';
 import { doc, setDoc, getDoc, serverTimestamp } from 'firebase/firestore';
@@ -52,28 +55,93 @@ export async function loginWithEmail(email: string, password: string): Promise<U
   return cred.user;
 }
 
-/** Google サインイン（ポップアップ） */
-export async function signinWithGoogle(): Promise<User> {
-  googleProvider.setCustomParameters({ prompt: 'select_account' });
-  const cred = await signInWithPopup(auth, googleProvider);
-  await ensureAccountUser(cred.user);
-  return cred.user;
+/**
+ * 既存メールが別プロバイダで登録済みのとき、パスワード入力でリンクが必要なことを示す。
+ * UI 側でこれを catch してパスワードを尋ね、completeLinkWithPassword を呼ぶ。
+ */
+export class LinkPasswordRequiredError extends Error {
+  email: string;
+  pendingCred: AuthCredential;
+  constructor(email: string, pendingCred: AuthCredential) {
+    super('LINK_PASSWORD_REQUIRED');
+    this.name = 'LinkPasswordRequiredError';
+    this.email = email;
+    this.pendingCred = pendingCred;
+  }
+}
+
+function newAppleProvider(): OAuthProvider {
+  const p = new OAuthProvider('apple.com');
+  p.addScope('email');
+  p.addScope('name');
+  return p;
 }
 
 /**
- * Apple サインイン（ポップアップ）
+ * OAuth ポップアップでサインイン。同一メールが別プロバイダで存在し
+ * account-exists-with-different-credential になった場合は自動でアカウント統合する:
+ *   - 既存が Google/Apple → 既存プロバイダで再サインイン → linkWithCredential で結合
+ *   - 既存が password → LinkPasswordRequiredError を投げ、UI でパスワードを尋ねる
+ */
+async function popupOrLink(
+  provider: GoogleAuthProvider | OAuthProvider,
+  credentialFromError: (e: unknown) => AuthCredential | null,
+): Promise<User> {
+  try {
+    const cred = await signInWithPopup(auth, provider);
+    await ensureAccountUser(cred.user);
+    return cred.user;
+  } catch (e: unknown) {
+    if ((e as { code?: string })?.code !== 'auth/account-exists-with-different-credential') throw e;
+    const pendingCred = credentialFromError(e);
+    const email = (e as { customData?: { email?: string } })?.customData?.email;
+    if (!pendingCred || !email) throw e;
+
+    const methods = await fetchSignInMethodsForEmail(auth, email);
+    if (methods.includes('google.com')) {
+      const gp = new GoogleAuthProvider();
+      gp.setCustomParameters({ login_hint: email });
+      const res = await signInWithPopup(auth, gp);
+      await linkWithCredential(res.user, pendingCred);
+      await ensureAccountUser(res.user);
+      return res.user;
+    }
+    if (methods.includes('apple.com')) {
+      const res = await signInWithPopup(auth, newAppleProvider());
+      await linkWithCredential(res.user, pendingCred);
+      await ensureAccountUser(res.user);
+      return res.user;
+    }
+    if (methods.includes('password')) {
+      throw new LinkPasswordRequiredError(email, pendingCred);
+    }
+    throw e;
+  }
+}
+
+/** Google サインイン（同一メール自動リンク対応） */
+export async function signinWithGoogle(): Promise<User> {
+  googleProvider.setCustomParameters({ prompt: 'select_account' });
+  return popupOrLink(googleProvider, (e) => GoogleAuthProvider.credentialFromError(e as never));
+}
+
+/**
+ * Apple サインイン（同一メール自動リンク対応）
  * Firebase Console で Apple provider 有効化 + Service ID 設定済み前提:
  *   - Service ID: app.noxa.signin
  *   - Apple Developer の Web Auth Domain に noxa-platform.firebaseapp.com 登録済み
  *   - Return URL: https://noxa-platform.firebaseapp.com/__/auth/handler
  */
 export async function signinWithApple(): Promise<User> {
-  const provider = new OAuthProvider('apple.com');
-  provider.addScope('email');
-  provider.addScope('name');
-  const cred = await signInWithPopup(auth, provider);
-  await ensureAccountUser(cred.user);
-  return cred.user;
+  return popupOrLink(newAppleProvider(), (e) => OAuthProvider.credentialFromError(e as never));
+}
+
+/** パスワードで既存アカウントにログインし、保留中の OAuth 資格情報をリンクする。 */
+export async function completeLinkWithPassword(email: string, password: string, pendingCred: AuthCredential): Promise<User> {
+  const res = await signInWithEmailAndPassword(auth, email, password);
+  await linkWithCredential(res.user, pendingCred);
+  await ensureAccountUser(res.user);
+  return res.user;
 }
 
 export async function signOut(): Promise<void> {

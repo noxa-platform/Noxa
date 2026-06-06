@@ -3,8 +3,10 @@ import { useState, useEffect, Suspense, useRef } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { onAuthStateChanged } from 'firebase/auth';
-import { loginWithEmail, signinWithGoogle, signinWithApple, handlePostLoginRedirect } from '@/lib/auth';
+import type { AuthCredential } from 'firebase/auth';
+import { loginWithEmail, signinWithGoogle, signinWithApple, handlePostLoginRedirect, LinkPasswordRequiredError } from '@/lib/auth';
 import { startLineLogin, isLineLoginEnabled } from '@/lib/auth/line';
+import { LinkAccountDialog } from '@/components/auth/LinkAccountDialog';
 import { auth } from '@/lib/firebase/config';
 
 function LoginForm() {
@@ -15,6 +17,8 @@ function LoginForm() {
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  // 同一メールが password 登録済みで、OAuth 資格情報のリンクにパスワードが要る場合
+  const [linkReq, setLinkReq] = useState<{ email: string; pendingCred: AuthCredential } | null>(null);
   // 自動 redirect 実行済みフラグ — 多重発火と無限ループを防止
   const autoRedirectFiredRef = useRef(false);
 
@@ -48,6 +52,11 @@ function LoginForm() {
       await loginWithEmail(email, password);
       await handlePostLoginRedirect(redirect, router);
     } catch (err: unknown) {
+      if (err instanceof LinkPasswordRequiredError) {
+        setLinkReq({ email: err.email, pendingCred: err.pendingCred });
+        setLoading(false);
+        return;
+      }
       setError(parseFirebaseAuthError(err));
       setLoading(false);
     }
@@ -60,6 +69,11 @@ function LoginForm() {
       await signinWithGoogle();
       await handlePostLoginRedirect(redirect, router);
     } catch (err: unknown) {
+      if (err instanceof LinkPasswordRequiredError) {
+        setLinkReq({ email: err.email, pendingCred: err.pendingCred });
+        setLoading(false);
+        return;
+      }
       setError(parseFirebaseAuthError(err));
       setLoading(false);
     }
@@ -72,6 +86,11 @@ function LoginForm() {
       await signinWithApple();
       await handlePostLoginRedirect(redirect, router);
     } catch (err: unknown) {
+      if (err instanceof LinkPasswordRequiredError) {
+        setLinkReq({ email: err.email, pendingCred: err.pendingCred });
+        setLoading(false);
+        return;
+      }
       setError(parseFirebaseAuthError(err));
       setLoading(false);
     }
@@ -306,6 +325,15 @@ function LoginForm() {
           </Link>
         </p>
       </div>
+
+      {linkReq && (
+        <LinkAccountDialog
+          email={linkReq.email}
+          pendingCred={linkReq.pendingCred}
+          onLinked={async () => { setLinkReq(null); await handlePostLoginRedirect(redirect, router); }}
+          onCancel={() => setLinkReq(null)}
+        />
+      )}
     </main>
   );
 }
