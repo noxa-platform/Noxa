@@ -105,7 +105,7 @@ function StoreNewForm({ user }: { user: User }) {
         <div className="noxa-eyebrow" style={{ marginBottom: 6 }}>Noxa OS · Store</div>
         <h1 className="noxa-display" style={{ fontSize: 'clamp(24px, 4vw, 34px)', margin: '0 0 8px', fontFamily: 'var(--noxa-font-display-jp)', fontWeight: 500 }}>店舗を登録</h1>
         <p style={{ color: 'var(--noxa-text-muted)', fontSize: 13, margin: '0 0 24px', lineHeight: 1.6 }}>
-          登録すると POS・席回し・勤怠・給与・初回案内・送迎・在庫・体験入店・予約VIP・売掛・リスク客共有が解放されます。
+          登録すると POS・席回し・勤怠・給与・初回案内・送迎・在庫・体験入店・予約・売掛・リスク客共有が解放されます。
           店舗端末は<strong style={{ color: 'var(--noxa-text-primary)' }}>店舗管理パスワード（PIN）</strong>でデバイスログインします。
         </p>
 

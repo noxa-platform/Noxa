@@ -11,7 +11,7 @@ import { db } from '@/lib/firebase/config';
 import { useShopId } from '@/lib/useShopId';
 
 /**
- * 予約・VIP来店モジュール（実データ）
+ * 予約モジュール（実データ）
  *
  * 本日の予約タイムライン + VIP/常連 客リストを表示する。
  * 予約は shop_shops/{shopId}/reservations を読み書き（追加/編集/削除/ステータス遷移）。
@@ -300,7 +300,7 @@ export function ReservationClient({ user }: { user: User }) {
                 №&nbsp;08
               </span>
               <span style={{ fontFamily: 'var(--noxa-font-display-jp)', fontWeight: 500 }}>
-                予約・VIP来店
+                予約
               </span>
             </h1>
           </div>

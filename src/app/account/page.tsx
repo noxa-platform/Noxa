@@ -33,7 +33,7 @@ const STORE_MODULES = [
   { label: '送迎',        tag: '配車ボード',      href: '/transport' },
   { label: '在庫',        tag: '発注 / ボトル',   href: '/inventory' },
   { label: '体験入店',    tag: '体験 → 採用',     href: '/trial' },
-  { label: '予約・VIP',   tag: '来店予約',        href: '/reservation' },
+  { label: '予約',   tag: '来店予約',        href: '/reservation' },
   { label: '売掛管理',    tag: '未収金',          href: '/unpaid' },
   { label: 'リスク客共有', tag: '出禁 / 要注意',   href: '/risk' },
 ];
@@ -261,7 +261,7 @@ function AccountDashboard({ user }: { user: User }) {
         <Link href="/store/new" className="flex flex-col" style={{ background: 'var(--noxa-surface-card)', border: '1px dashed var(--noxa-border-strong)', borderRadius: 16, padding: 24, gap: 8, textDecoration: 'none', marginBottom: 32 }}>
           <span className="noxa-eyebrow">店舗運営</span>
           <span style={{ fontFamily: 'var(--noxa-font-display-jp)', fontSize: 18, fontWeight: 500, color: 'var(--noxa-text-primary)' }}>＋ 店舗を登録すると解放</span>
-          <span style={{ color: 'var(--noxa-text-muted)', fontSize: 12 }}>POS・席回し・勤怠・給与・初回案内・送迎・在庫・体験入店・予約VIP・売掛・リスク客共有。店舗端末は店舗管理パスワードでデバイスログイン。</span>
+          <span style={{ color: 'var(--noxa-text-muted)', fontSize: 12 }}>POS・席回し・勤怠・給与・初回案内・送迎・在庫・体験入店・予約・売掛・リスク客共有。店舗端末は店舗管理パスワードでデバイスログイン。</span>
           <span className="noxa-mono" style={{ color: 'var(--noxa-accent-primary-ink)', fontSize: 12 }}>店舗を登録する →</span>
         </Link>
       )}

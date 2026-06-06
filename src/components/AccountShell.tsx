@@ -32,7 +32,7 @@ const NAV_STORE: { label: string; href: string }[] = [
   { label: '送迎',        href: '/transport' },
   { label: '在庫',        href: '/inventory' },
   { label: '体験入店',    href: '/trial' },
-  { label: '予約・VIP',   href: '/reservation' },
+  { label: '予約',   href: '/reservation' },
   { label: '売掛管理',    href: '/unpaid' },
   { label: 'リスク客共有', href: '/risk' },
 ];
