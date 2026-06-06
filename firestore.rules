@@ -724,6 +724,15 @@ service cloud.firestore {
       allow read, write: if false;
     }
 
+    // 公開プロフィール（リンク集）。handle をキーにした公開ミラー兼ユニーク・レジストリ。
+    // 誰でも閲覧可（リンク集は公開）。作成/編集は本人（ownerUid）のみ。
+    // claim はトランザクションの create（既存なら失敗）でユニーク性を担保。
+    match /profile_pages/{handle} {
+      allow read: if true;
+      allow create: if isAuth() && request.resource.data.ownerUid == request.auth.uid;
+      allow update, delete: if isAuth() && resource.data.ownerUid == request.auth.uid;
+    }
+
     // ========================================
     // noxa コミュニティ (招待制クローズド × 完全匿名 掲示板 / Phase 1)
     //   board → post(スレッド) → comment(レス)。投稿者は authorUid（内部）のみ保持し

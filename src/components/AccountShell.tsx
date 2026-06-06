@@ -1,14 +1,18 @@
 'use client';
+import { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { usePathname } from 'next/navigation';
+import { usePathname, useRouter } from 'next/navigation';
+import { doc, getDoc } from 'firebase/firestore';
 import type { User } from 'firebase/auth';
 import { signOut } from '@/lib/auth';
+import { db } from '@/lib/firebase/config';
 import { useShopContext, useDeviceClaims } from '@/lib/useShopContext';
 
 // アカウント（OS 本体）。端末では非表示。
 const NAV_ACCOUNT: { label: string; href: string; icon: string }[] = [
   { label: 'ダッシュボード', href: '/account',         icon: '◇' },
   { label: 'プロフィール',   href: '/account/profile', icon: '◇' },
+  { label: '公開プロフィール', href: '/account/link', icon: '◇' },
   { label: 'ログイン方法・連携', href: '/account/connections', icon: '◇' },
   { label: '退会',           href: '/account/delete',  icon: '◇' },
 ];
@@ -53,10 +57,29 @@ const NAV_SERVICE: { label: string; href: string; external?: boolean; tint?: str
 
 export function AccountShell({ user, children }: { user: User; children: React.ReactNode }) {
   const pathname = usePathname();
+  const router = useRouter();
   const { hasShop } = useShopContext(user.uid);
   const device = useDeviceClaims(user);
   // 店舗デバイスログイン時は許可モジュールのみ（給与/売掛/リスク客は allow に含まれない）
   const storeNav = device.isDevice ? NAV_STORE.filter((it) => device.allow.includes(it.href.slice(1))) : NAV_STORE;
+
+  // ハンドル必須化: 個人ユーザーで handle 未設定なら オンボーディングへ誘導（店舗端末は除外）
+  const [needsHandle, setNeedsHandle] = useState(false);
+  useEffect(() => {
+    if (device.loading || device.isDevice) return;
+    let alive = true;
+    getDoc(doc(db, `account_users/${user.uid}`)).then((s) => {
+      if (!alive) return;
+      const h = s.exists() ? (s.data() as { handle?: string }).handle : undefined;
+      if (!h) { setNeedsHandle(true); if (pathname !== '/account/onboarding') router.replace('/account/onboarding'); }
+      else setNeedsHandle(false);
+    }).catch(() => { /* 取得失敗時はブロックしない */ });
+    return () => { alive = false; };
+  }, [device.loading, device.isDevice, user.uid, pathname, router]);
+
+  if (needsHandle && pathname !== '/account/onboarding') {
+    return <div style={{ minHeight: '60vh', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--noxa-text-muted)' }}>ハンドル設定へ移動中…</div>;
+  }
 
   // ── 描画ヘルパー ──
   const SectionLabel = ({ children }: { children: React.ReactNode }) => (
