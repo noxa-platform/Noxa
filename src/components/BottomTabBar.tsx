@@ -26,7 +26,6 @@ type Tab = {
 const DEFAULT_TABS: Tab[] = [
   { href: '/',                  label: 'ホーム',   glyph: '◇', match: (p) => p === '/' },
   { href: '/account',           label: 'アカウント', glyph: '◈', match: (p) => p.startsWith('/account') },
-  { href: 'https://yorulog.vercel.app',   label: 'yorulog',  glyph: '◆' },
   { href: 'https://nomishugy.vercel.app', label: 'nomishugy', glyph: '◇' },
   { href: '/community',         label: '掲示板',   glyph: '◆', match: (p) => p.startsWith('/community') },
 ];

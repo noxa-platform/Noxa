@@ -25,39 +25,39 @@ const MODULES: OsModule[] = [
   // MAIN ① 〜 ⑨
   {
     number: 1, id: 'pos', title: 'POS', desc: '注文 → 伝票出力に特化。決済は既存レジ運用と並走。',
-    href: 'https://yorulog.vercel.app/pos', external: true, status: 'planned', group: 'main',
+    href: '/pos', status: 'live', group: 'main',
   },
   {
     number: 2, id: 'sales', title: '売上管理', desc: '個人キャストも店舗も。今夜の数字を一目で。',
-    href: 'https://yorulog.vercel.app/home', external: true, status: 'live', group: 'main',
+    href: '/sales', status: 'live', group: 'main',
   },
   {
     number: 3, id: 'seating', title: '席回し', desc: '卓状況とキャストローテをタッチ操作で。',
-    href: 'https://yorulog.vercel.app/seating', external: true, status: 'planned', group: 'main',
+    href: '/seating', status: 'live', group: 'main',
   },
   {
     number: 4, id: 'attendance', title: '勤怠管理', desc: '出勤打刻 / シフト / 遅刻 / 無断欠勤。',
-    href: 'https://yorulog.vercel.app/attendance', external: true, status: 'planned', group: 'main',
+    href: '/attendance', status: 'live', group: 'main',
   },
   {
     number: 5, id: 'payroll', title: '給与計算', desc: '歩合 + 時給 + バック + 罰金を月締めで自動。',
-    href: 'https://yorulog.vercel.app/payroll', external: true, status: 'planned', group: 'main',
+    href: '/payroll', status: 'live', group: 'main',
   },
   {
     number: 6, id: 'first-visit', title: '初回案内', desc: '新人 OJT と新規客の初回接客フロー。',
-    href: 'https://yorulog.vercel.app/first-visit', external: true, status: 'planned', group: 'main',
+    href: '/first-visit', status: 'live', group: 'main',
   },
   {
     number: 7, id: 'transport', title: '送迎', desc: 'ドライバー配車・ピックアップ・帰宅送迎。',
-    href: 'https://yorulog.vercel.app/transport', external: true, status: 'planned', group: 'main',
+    href: '/transport', status: 'live', group: 'main',
   },
   {
     number: 8, id: 'inventory', title: '在庫管理', desc: 'ボトル・食材・消耗品。POS と自動連携。',
-    href: 'https://yorulog.vercel.app/inventory', external: true, status: 'planned', group: 'main',
+    href: '/inventory', status: 'live', group: 'main',
   },
   {
     number: 9, id: 'business-card', title: 'オリシャン名刺発注', desc: 'デザイン → 印刷 → 発送をワンストップ。',
-    href: 'https://yorulog.vercel.app/business-card', external: true, status: 'planned', group: 'main',
+    href: '/business-card', status: 'live', group: 'main',
   },
   // SUB A / B
   {
