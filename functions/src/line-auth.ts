@@ -57,44 +57,63 @@ export const lineLogin = onRequest({ cors: false, region: 'asia-northeast1', inv
   if (req.method !== 'POST') { res.status(405).json({ error: 'METHOD_NOT_ALLOWED' }); return; }
 
   try {
-    // Web: { code, redirectUri }（認可コードフロー）/ ネイティブ(iOS LINE SDK): { idToken } を直接受け付ける
-    const body = (req.body ?? {}) as { code?: string; redirectUri?: string; idToken?: string };
+    // 受付3モード:
+    //   Web         : { code, redirectUri }（認可コードフロー）
+    //   iOS(idToken): { idToken }（LINE SDK の ID トークン。email も取れる）
+    //   iOS(SDK)    : { accessToken }（LINE SDK のアクセストークン。/v2/profile で取得・email なし）
+    const body = (req.body ?? {}) as { code?: string; redirectUri?: string; idToken?: string; accessToken?: string };
 
     const channelId = process.env.LINE_CHANNEL_ID;
     const channelSecret = process.env.LINE_CHANNEL_SECRET;
     if (!channelId || !channelSecret) { logger.error('[lineLogin] LINE_CHANNEL_ID/SECRET 未設定'); res.status(500).json({ error: 'NOT_CONFIGURED' }); return; }
 
-    let idToken = (body.idToken ?? '').trim();
-    if (!idToken) {
-      // 1) Web: 認可コード → トークン交換（client_secret はサーバのみ保持）
-      const code = (body.code ?? '').trim();
-      const redirectUri = (body.redirectUri ?? '').trim();
-      if (!code || !redirectUri) { res.status(400).json({ error: 'BAD_REQUEST' }); return; }
-      const tokenRes = await fetch(LINE_TOKEN_URL, {
+    let lineUserId = '';
+    let email: string | undefined;
+    let name: string | undefined;
+    let picture: string | undefined;
+
+    const accessToken = (body.accessToken ?? '').trim();
+    if (accessToken) {
+      // ネイティブ: アクセストークンでプロフィール取得（email は含まれない）
+      const pr = await fetch('https://api.line.me/v2/profile', { method: 'GET', headers: { Authorization: `Bearer ${accessToken}` } });
+      if (!pr.ok) { logger.error('[lineLogin] profile failed', await pr.text()); res.status(401).json({ error: 'PROFILE_FAILED' }); return; }
+      const p = await pr.json(); // { userId, displayName?, pictureUrl? }
+      lineUserId = typeof p.userId === 'string' ? p.userId : '';
+      name = typeof p.displayName === 'string' ? p.displayName : undefined;
+      picture = typeof p.pictureUrl === 'string' ? p.pictureUrl : undefined;
+    } else {
+      let idToken = (body.idToken ?? '').trim();
+      if (!idToken) {
+        // Web: 認可コード → トークン交換（client_secret はサーバのみ保持）
+        const code = (body.code ?? '').trim();
+        const redirectUri = (body.redirectUri ?? '').trim();
+        if (!code || !redirectUri) { res.status(400).json({ error: 'BAD_REQUEST' }); return; }
+        const tokenRes = await fetch(LINE_TOKEN_URL, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+          body: form({ grant_type: 'authorization_code', code, redirect_uri: redirectUri, client_id: channelId, client_secret: channelSecret }),
+        });
+        if (!tokenRes.ok) { logger.error('[lineLogin] token exchange failed', await tokenRes.text()); res.status(401).json({ error: 'TOKEN_EXCHANGE_FAILED' }); return; }
+        const tokenJson = await tokenRes.json();
+        idToken = typeof tokenJson.id_token === 'string' ? tokenJson.id_token : '';
+      }
+      if (!idToken) { res.status(401).json({ error: 'NO_ID_TOKEN' }); return; }
+
+      // id_token を LINE で検証（署名・aud・exp を LINE 側で確認）
+      const verifyRes = await fetch(LINE_VERIFY_URL, {
         method: 'POST',
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        body: form({ grant_type: 'authorization_code', code, redirect_uri: redirectUri, client_id: channelId, client_secret: channelSecret }),
+        body: form({ id_token: idToken, client_id: channelId }),
       });
-      if (!tokenRes.ok) { logger.error('[lineLogin] token exchange failed', await tokenRes.text()); res.status(401).json({ error: 'TOKEN_EXCHANGE_FAILED' }); return; }
-      const tokenJson = await tokenRes.json();
-      idToken = typeof tokenJson.id_token === 'string' ? tokenJson.id_token : '';
+      if (!verifyRes.ok) { logger.error('[lineLogin] verify failed', await verifyRes.text()); res.status(401).json({ error: 'VERIFY_FAILED' }); return; }
+      const profile = await verifyRes.json(); // { sub, name?, picture?, email? }
+      lineUserId = typeof profile.sub === 'string' ? profile.sub : '';
+      email = typeof profile.email === 'string' ? profile.email : undefined;
+      name = typeof profile.name === 'string' ? profile.name : undefined;
+      picture = typeof profile.picture === 'string' ? profile.picture : undefined;
     }
-    if (!idToken) { res.status(401).json({ error: 'NO_ID_TOKEN' }); return; }
 
-    // 2) id_token を LINE で検証（署名・aud・exp を LINE 側で確認）
-    const verifyRes = await fetch(LINE_VERIFY_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: form({ id_token: idToken, client_id: channelId }),
-    });
-    if (!verifyRes.ok) { logger.error('[lineLogin] verify failed', await verifyRes.text()); res.status(401).json({ error: 'VERIFY_FAILED' }); return; }
-    const profile = await verifyRes.json(); // { sub, name?, picture?, email? }
-
-    const lineUserId = typeof profile.sub === 'string' ? profile.sub : '';
     if (!lineUserId) { res.status(401).json({ error: 'NO_SUBJECT' }); return; }
-    const email = typeof profile.email === 'string' ? profile.email : undefined;
-    const name = typeof profile.name === 'string' ? profile.name : undefined;
-    const picture = typeof profile.picture === 'string' ? profile.picture : undefined;
 
     // 3) uid 解決（email 一致なら既存アカウントに統合）
     const auth = adminAuth();
