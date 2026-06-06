@@ -91,6 +91,20 @@ service cloud.firestore {
       allow read, write: if isSelf(uid);
     }
 
+    // クレジット台帳 / AI 使用量: 本人 read のみ。書込は API・Functions(Admin SDK) 専用
+    match /account_credit_ledger/{uid}/entries/{eid} {
+      allow read: if isSelf(uid);
+      allow write: if false;
+    }
+    match /account_ai_usage/{uid}/monthly/{mid} {
+      allow read: if isSelf(uid);
+      allow write: if false;
+    }
+    // 店舗クレーム申請: Function(claim-shop) 専用
+    match /account_shop_claims/{cid} {
+      allow read, write: if false;
+    }
+
     match /account_follows/{docId} {
       allow read: if isAuth();
       allow create: if isAuth() && request.resource.data.fromUid == request.auth.uid;
@@ -160,6 +174,11 @@ service cloud.firestore {
         }
         match /gifts/{gid} {
           allow read, write: if isShopMember(shopId);
+        }
+        // AI フィードバック: メンバー read のみ。書込は AI API(Admin SDK) 専用
+        match /ai_feedback/{fid} {
+          allow read: if isShopMember(shopId);
+          allow write: if false;
         }
       }
 
@@ -293,10 +312,17 @@ service cloud.firestore {
       // 端末プロファイル（PIN）: オーナーのみ管理。端末ログインは Cloud Function(Admin SDK) 経由のため client 直読み不要
       match /device_profiles/{profileId} { allow read, write: if isShopOwnerLike(shopId); }
 
+      // AI / barapp 同期: 書込は API(Admin SDK) 専用。read のみ許可
+      match /ai_chat_feedback/{id}    { allow read: if isShopMember(shopId); allow write: if false; }
+      match /barapp_synced_sales/{id} { allow read: if isShopMember(shopId); allow write: if false; }
+      match /barapp_sync_log/{id}     { allow read: if isShopOwnerLike(shopId); allow write: if false; }
+
       // 店舗運営モジュール（メンバー read/write）
       match /inventory/{itemId}    { allow read, write: if isShopMember(shopId); }
+      match /bottle_keeps/{id}     { allow read, write: if isShopMember(shopId); }
       match /first_visits/{id}     { allow read, write: if isShopMember(shopId); }
       match /transport/{id}        { allow read, write: if isShopMember(shopId); }
+      match /transport_vehicles/{id} { allow read, write: if isShopMember(shopId); }
       match /trials/{id}           { allow read, write: if isShopMember(shopId); }
       match /reservations/{id}     { allow read, write: if isShopMember(shopId); }
       // 機微（売掛・リスク客）= 売上編集権限（owner/manager/accounting）のみ
@@ -686,6 +712,15 @@ service cloud.firestore {
       allow read: if false; // API のみ
       allow write: if false;
       match /{subcol=**} { allow read, write: if false; }
+    }
+
+    // 学習済み AI ナレッジ（旧名 ai_knowledge）/ Stripe 冪等性: いずれも API・webhook(Admin SDK) 専用
+    match /ai_knowledge/{docId} {
+      allow read, write: if false;
+      match /{subcol=**} { allow read, write: if false; }
+    }
+    match /processed_stripe_events/{eventId} {
+      allow read, write: if false;
     }
 
     // ========================================
