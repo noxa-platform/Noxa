@@ -35,6 +35,18 @@ function fmtElapsed(start: number | null): string {
   return `${Math.floor(m / 60)}:${String(m % 60).padStart(2, '0')}`;
 }
 
+// セット残り時間：現在のセット終わりまでの残分・何セット目か・残10分以下の警告
+type SetTimer = { remainingMin: number; setNumber: number; setLen: number; warning: boolean; progress: number };
+function setTimer(t: FloorTable): SetTimer | null {
+  if (t.status !== 'ACTIVE' || !t.startTime || !t.setTimeLength) return null;
+  const len = t.setTimeLength;
+  const elapsed = elapsedMin(t.startTime);
+  const setNumber = Math.floor(elapsed / len) + 1;
+  const remainingMin = Math.max(0, setNumber * len - elapsed);
+  const progress = Math.min(1, (len - remainingMin) / len);
+  return { remainingMin, setNumber, setLen: len, warning: remainingMin <= 10, progress };
+}
+
 export function SeatingClient({ user }: { user: User }) {
   const store = useSeatingStore(user);
   const cfg = useShopConfig(user);
@@ -44,7 +56,7 @@ export function SeatingClient({ user }: { user: User }) {
   const [side, setSide] = useState<'casts' | 'queue'>('casts');
   const [, setTick] = useState(0);
 
-  useEffect(() => { const t = setInterval(() => setTick((n) => n + 1), 30000); return () => clearInterval(t); }, []);
+  useEffect(() => { const t = setInterval(() => setTick((n) => n + 1), 15000); return () => clearInterval(t); }, []);
 
   const castById = useMemo(() => new Map(casts.map((c) => [c.id, c])), [casts]);
   const proposals = useMemo(() => generateAIProposals(tables, casts), [tables, casts]);
@@ -95,6 +107,30 @@ export function SeatingClient({ user }: { user: User }) {
         </div>
       )}
 
+      {/* 要対応アラート（会計 / セット残り10分以下） */}
+      {(() => {
+        const alerts = tables.filter((t) => t.status === 'CHECK' || setTimer(t)?.warning);
+        if (alerts.length === 0) return null;
+        return (
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 14 }}>
+            {alerts.map((t) => {
+              const tm = setTimer(t);
+              const check = t.status === 'CHECK';
+              return (
+                <button key={t.id} type="button" onClick={() => setSelectedTableId(t.id)}
+                  style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '6px 12px', borderRadius: 9999, cursor: 'pointer', fontSize: 12, fontWeight: 600,
+                    background: check ? 'rgba(196,56,74,0.12)' : 'rgba(245,212,114,0.12)',
+                    border: `1px solid ${check ? 'var(--noxa-status-error)' : 'var(--noxa-status-warning)'}`,
+                    color: check ? 'var(--noxa-status-error)' : 'var(--noxa-status-warning)' }}>
+                  <span aria-hidden style={{ width: 7, height: 7, borderRadius: 4, background: 'currentColor' }} />
+                  {t.name}：{check ? '会計' : `残${tm?.remainingMin}分`}
+                </button>
+              );
+            })}
+          </div>
+        );
+      })()}
+
       <div className="grid grid-cols-1 lg:grid-cols-[1fr_320px]" style={{ gap: 'clamp(12px,1.6vw,18px)', alignItems: 'start' }}>
         {/* 左：フロア + 卓詳細 */}
         <div style={{ minWidth: 0, display: 'flex', flexDirection: 'column', gap: 16 }}>
@@ -137,18 +173,22 @@ export function SeatingClient({ user }: { user: User }) {
 
 function TableCard({ table, castById, active, onSelect }: { table: FloorTable; castById: Map<string, Cast>; active: boolean; onSelect: () => void }) {
   const occupied = table.status !== 'EMPTY';
-  const over = table.status === 'ACTIVE' && elapsedMin(table.startTime) >= table.setTimeLength;
-  const statusColor = table.status === 'CHECK' ? 'var(--noxa-status-warning)'
-    : over ? 'var(--noxa-status-error)'
+  const timer = setTimer(table);
+  const isCheck = table.status === 'CHECK';
+  // 状態色: 会計=赤 / 残10分以下=黄 / 接客中=紫 / 空席=灰
+  const statusColor = isCheck ? 'var(--noxa-status-error)'
+    : timer?.warning ? 'var(--noxa-status-warning)'
     : occupied ? 'var(--noxa-accent-primary-ink)' : 'var(--noxa-text-faint)';
+  const barColor = timer?.warning ? 'var(--noxa-status-warning)' : 'var(--noxa-accent-primary)';
   return (
     <button type="button" onClick={onSelect} aria-pressed={active}
       style={{
-        appearance: 'none', cursor: 'pointer', textAlign: 'left', minHeight: 110, padding: 12, borderRadius: 14,
+        appearance: 'none', cursor: 'pointer', textAlign: 'left', minHeight: 116, padding: 12, borderRadius: 14,
         background: occupied ? 'var(--noxa-surface-card)' : 'transparent',
-        border: active ? '1px solid var(--noxa-accent-primary)' : `1px solid ${occupied ? 'var(--noxa-border-strong)' : 'var(--noxa-border)'}`,
-        boxShadow: active ? 'var(--noxa-glow-ring)' : 'none', color: 'var(--noxa-text-primary)',
-        display: 'flex', flexDirection: 'column', gap: 8, transition: 'border-color var(--noxa-duration-fast) var(--noxa-ease-natural)',
+        border: active ? '1px solid var(--noxa-accent-primary)' : `1px solid ${isCheck ? 'var(--noxa-status-error)' : occupied ? 'var(--noxa-border-strong)' : 'var(--noxa-border)'}`,
+        boxShadow: active ? 'var(--noxa-glow-ring)' : (timer?.warning || isCheck ? `0 0 0 1px ${statusColor}` : 'none'),
+        color: 'var(--noxa-text-primary)', display: 'flex', flexDirection: 'column', gap: 7,
+        transition: 'border-color var(--noxa-duration-fast) var(--noxa-ease-natural)',
       }}>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
         <span style={{ fontFamily: 'var(--noxa-font-display-jp)', fontSize: 16, fontWeight: 600 }}>{table.name}</span>
@@ -159,15 +199,34 @@ function TableCard({ table, castById, active, onSelect }: { table: FloorTable; c
       </div>
       {occupied ? (
         <>
-          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, fontFamily: mono, color: over ? 'var(--noxa-status-error)' : 'var(--noxa-text-muted)' }}>
-            <span>{table.status === 'CHECK' ? '会計' : fmtElapsed(table.startTime)}</span>
-            <span>{table.customers.length}名 / {table.setTimeLength}分</span>
+          {/* 残り時間 / 会計 */}
+          <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between' }}>
+            {isCheck ? (
+              <span style={{ fontSize: 14, fontWeight: 700, color: 'var(--noxa-status-error)', fontFamily: 'var(--noxa-font-display-jp)' }}>会計</span>
+            ) : timer ? (
+              <span style={{ display: 'flex', alignItems: 'baseline', gap: 4 }}>
+                <span style={{ fontFamily: 'var(--noxa-font-display-en)', fontSize: 22, fontWeight: 700, fontVariantNumeric: 'tabular-nums', color: timer.warning ? 'var(--noxa-status-warning)' : 'var(--noxa-text-primary)' }}>残{timer.remainingMin}</span>
+                <span style={{ fontSize: 10, color: 'var(--noxa-text-faint)', fontFamily: mono }}>分 · {timer.setNumber}set</span>
+              </span>
+            ) : <span style={{ fontSize: 12, fontFamily: mono, color: 'var(--noxa-text-muted)' }}>{fmtElapsed(table.startTime)}</span>}
+            <span style={{ fontSize: 10, fontFamily: mono, color: 'var(--noxa-text-faint)' }}>{table.customers.length}名 · 計{fmtElapsed(table.startTime)}</span>
           </div>
+          {/* セット進捗バー */}
+          {timer && (
+            <div style={{ height: 4, borderRadius: 9999, background: 'var(--noxa-surface-muted)', overflow: 'hidden' }}>
+              <div style={{ width: `${Math.round(timer.progress * 100)}%`, height: '100%', borderRadius: 9999, background: barColor, transition: 'width .4s var(--noxa-ease-natural)' }} />
+            </div>
+          )}
+          {/* キャスト chip（★本指名 / 現着）＋ 指名待ち */}
           <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
             {table.currentHostIds.map((cid) => {
               const c = castById.get(cid);
               const isMain = table.mainHostIds.includes(cid);
               return <span key={cid} style={{ fontSize: 10, padding: '2px 7px', borderRadius: 9999, background: 'var(--noxa-surface-muted)', color: 'var(--noxa-text-primary)', border: isMain ? '1px solid var(--noxa-accent-primary)' : '1px solid transparent' }}>{isMain ? '★' : ''}{c?.name ?? '?'}</span>;
+            })}
+            {(table.requestedHostIds ?? []).filter((id) => !table.currentHostIds.includes(id)).map((cid) => {
+              const c = castById.get(cid);
+              return <span key={`req-${cid}`} style={{ fontSize: 10, padding: '2px 7px', borderRadius: 9999, background: 'transparent', color: 'var(--noxa-status-info)', border: '1px dashed var(--noxa-status-info)' }}>待{c?.name ?? '?'}</span>;
             })}
             {table.currentHostIds.length === 0 && <span style={{ fontSize: 10, color: 'var(--noxa-status-warning)', fontFamily: mono }}>キャスト未配置</span>}
           </div>
