@@ -5,6 +5,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { collection, onSnapshot, addDoc, doc, updateDoc, serverTimestamp, increment, Timestamp, type DocumentData } from 'firebase/firestore';
 import { db } from '@/lib/firebase/config';
 import { useShopId } from '@/lib/useShopId';
+import { businessDayKey } from '@/lib/datetime';
 import type { User } from 'firebase/auth';
 
 /**
@@ -17,7 +18,6 @@ import type { User } from 'firebase/auth';
 const mono = 'var(--noxa-font-mono)';
 const yen = (n: number) => `¥${Math.round(n).toLocaleString('ja-JP')}`;
 
-function todayKey(): string { const d = new Date(); if (d.getHours() < 6) d.setDate(d.getDate() - 1); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; }
 function toMs(v: unknown): number | null { if (v instanceof Timestamp) return v.toMillis(); if (v && typeof v === 'object' && 'seconds' in (v as Record<string, unknown>)) return (v as { seconds: number }).seconds * 1000; return null; }
 
 type Sale = { id: string; amount: number; customerName: string | null; customerId: string | null; castName: string | null; dayKey: string; atMs: number | null; voided: boolean; source: string };
@@ -40,7 +40,7 @@ export function SalesClient({ user }: { user: User }) {
     return () => unsub();
   }, [colPath, shop.loading]);
 
-  const tk = todayKey();
+  const tk = businessDayKey();
   const mk = tk.slice(0, 7);
   const sum = useMemo(() => {
     let today = 0, month = 0, total = 0, count = 0;

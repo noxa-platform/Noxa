@@ -43,11 +43,7 @@ export function nowHHMM(): string {
   return `${d.getHours().toString().padStart(2, '0')}:${d.getMinutes().toString().padStart(2, '0')}`;
 }
 
-function dayKey(d = new Date()): string {
-  const base = new Date(d);
-  if (base.getHours() < 6) base.setDate(base.getDate() - 1);
-  return `${base.getFullYear()}-${String(base.getMonth() + 1).padStart(2, '0')}-${String(base.getDate()).padStart(2, '0')}`;
-}
+import { businessDayKey as dayKey } from '@/lib/datetime';
 
 export type ShopCustomer = { id: string; name: string; mainCastId?: string | null; mainCastUid?: string | null };
 
