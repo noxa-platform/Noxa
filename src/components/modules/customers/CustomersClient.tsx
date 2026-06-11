@@ -2,23 +2,23 @@
 
 import Link from 'next/link';
 import { useEffect, useMemo, useState } from 'react';
-import { collection, getDocs, query, where, Timestamp, type DocumentData } from 'firebase/firestore';
+import { collection, onSnapshot, addDoc, doc, updateDoc, deleteDoc, serverTimestamp, Timestamp, type DocumentData } from 'firebase/firestore';
 import { db } from '@/lib/firebase/config';
+import { useShopId } from '@/lib/useShopId';
+import { rankToStars, starsToRank } from '@/lib/customerRank';
 import type { User } from 'firebase/auth';
 
 /**
- * 顧客台帳 — Noxa OS 個人機能（実データ）
- * personal_customers/{uid}/items ＋ 自分が owner の shop_shops/{id}/customers を読み、
- * 顧客カード（名前・ランク・累計売上・来店・最終接触・タグ）を一覧表示。
+ * 顧客台帳（最小版・yorulog ベースを最低限で移植）。
+ * - 操作対象はワークスペース選択に追従：店舗なら shop_shops/{id}/customers、個人なら personal_customers/{uid}/items
+ * - 評価は rank(SS/S/A/B/C) を ★5段階で表示・入力（iOS実データに一致）
+ * - 一覧／検索／ランク絞り込み／追加／編集／削除のみ。AI・LINE取込等の複雑機能は持たない。
  */
 
 const mono = 'var(--noxa-font-mono)';
 const yen = (n: number) => `¥${Math.round(n).toLocaleString('ja-JP')}`;
 
-type Cust = {
-  id: string; name: string; totalSales: number; visitCount: number;
-  lastContactAt: number | null; rank: string | null; tags: string[]; castName: string | null;
-};
+type Cust = { id: string; name: string; totalSales: number; visitCount: number; lastContactAt: number | null; rank: string | null; castName: string | null };
 
 function toMs(v: unknown): number | null {
   if (v instanceof Timestamp) return v.toMillis();
@@ -27,180 +27,169 @@ function toMs(v: unknown): number | null {
 }
 function mapCust(id: string, d: DocumentData): Cust {
   return {
-    id,
-    name: (d.name as string) ?? '（無名）',
+    id, name: (d.name as string) ?? '（無名）',
     totalSales: typeof d.totalSales === 'number' ? d.totalSales : 0,
     visitCount: typeof d.visitCount === 'number' ? d.visitCount : 0,
-    lastContactAt: toMs(d.lastContactAt),
-    rank: (d.rank as string) ?? null,
-    tags: Array.isArray(d.tags) ? (d.tags as string[]).slice(0, 4) : [],
+    lastContactAt: toMs(d.lastContactAt), rank: (d.rank as string) ?? null,
     castName: (d.castName as string) ?? null,
   };
 }
-// ロール対応: owner=店舗全体の顧客 / cast=自分担当（mainCastUid==uid）の顧客 / +MyDeck
-async function loadCustomers(uid: string): Promise<Cust[]> {
-  const out: Cust[] = [];
-  try {
-    const snap = await getDocs(collection(db, `personal_customers/${uid}/items`));
-    snap.forEach((doc) => out.push(mapCust(doc.id, doc.data())));
-  } catch { /* skip */ }
-  // owner の店舗
-  let ownerShopIds: string[] = [];
-  try {
-    const shops = await getDocs(query(collection(db, 'shop_shops'), where('ownerUid', '==', uid)));
-    ownerShopIds = shops.docs.map((d) => d.id);
-    for (const id of ownerShopIds) {
-      try { const cs = await getDocs(collection(db, `shop_shops/${id}/customers`)); cs.forEach((doc) => out.push(mapCust(doc.id, doc.data()))); } catch { /* skip */ }
-    }
-  } catch { /* skip */ }
-  // owner でなければ、所属店舗で自分担当の顧客のみ
-  if (ownerShopIds.length === 0) {
-    try {
-      const ms = await getDocs(collection(db, `account_users/${uid}/memberships`));
-      for (const m of ms.docs) {
-        try { const cs = await getDocs(query(collection(db, `shop_shops/${m.id}/customers`), where('mainCastUid', '==', uid))); cs.forEach((doc) => out.push(mapCust(doc.id, doc.data()))); } catch { /* skip */ }
-      }
-    } catch { /* skip */ }
-  }
-  return out;
+const fmtDate = (ms: number | null) => { if (!ms) return '—'; const d = new Date(ms); return `${d.getMonth() + 1}/${d.getDate()}`; };
+
+/** ★表示（読み取り専用） */
+function Stars({ rank, size = 14 }: { rank?: string | null; size?: number }) {
+  const n = rankToStars(rank);
+  if (n === 0) return <span style={{ fontSize: size - 2, color: 'var(--noxa-text-faint)' }}>未評価</span>;
+  return <span aria-label={`星${n}`} style={{ fontSize: size, color: '#F5C451', letterSpacing: 1 }}>{'★'.repeat(n)}<span style={{ color: 'var(--noxa-border-strong)' }}>{'★'.repeat(5 - n)}</span></span>;
 }
-const fmtDate = (ms: number | null) => {
-  if (!ms) return '—';
-  const d = new Date(ms);
-  return `${d.getMonth() + 1}/${d.getDate()}`;
-};
+/** ★入力（クリックで選択） */
+function StarPicker({ value, onChange }: { value: number; onChange: (n: number) => void }) {
+  return (
+    <span style={{ display: 'inline-flex', gap: 2 }}>
+      {[1, 2, 3, 4, 5].map((s) => (
+        <button key={s} type="button" aria-label={`星${s}`} onClick={() => onChange(value === s ? 0 : s)}
+          style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 26, lineHeight: 1, padding: 0, color: s <= value ? '#F5C451' : 'var(--noxa-border-strong)' }}>★</button>
+      ))}
+    </span>
+  );
+}
 
 type Sort = 'sales' | 'recent' | 'visits';
 
 export function CustomersClient({ user }: { user: User }) {
-  const [loading, setLoading] = useState(true);
+  const shop = useShopId(user);
+  const colPath = shop.shopId ? `shop_shops/${shop.shopId}/customers` : `personal_customers/${user.uid}/items`;
   const [custs, setCusts] = useState<Cust[]>([]);
+  const [loading, setLoading] = useState(true);
   const [sort, setSort] = useState<Sort>('sales');
   const [q, setQ] = useState('');
-  const [castFilter, setCastFilter] = useState<string | null>(null);
+  const [starFilter, setStarFilter] = useState<number>(0); // 0=全部
+  const [adding, setAdding] = useState(false);
+  const [editId, setEditId] = useState<string | null>(null);
 
   useEffect(() => {
-    let alive = true;
-    loadCustomers(user.uid).then((c) => { if (alive) { setCusts(c); setLoading(false); } }).catch(() => { if (alive) setLoading(false); });
-    return () => { alive = false; };
-  }, [user.uid]);
-
-  // 担当キャスト一覧（顧客に紐づくキャスト名）
-  const castNames = useMemo(() => {
-    const s = new Set<string>();
-    custs.forEach((c) => { if (c.castName) s.add(c.castName); });
-    return Array.from(s).sort((a, b) => a.localeCompare(b, 'ja'));
-  }, [custs]);
+    if (shop.loading) return;
+    setLoading(true);
+    const unsub = onSnapshot(collection(db, colPath), (snap) => {
+      const list: Cust[] = []; snap.forEach((d) => list.push(mapCust(d.id, d.data())));
+      setCusts(list); setLoading(false);
+    }, () => setLoading(false));
+    return () => unsub();
+  }, [colPath, shop.loading]);
 
   const list = useMemo(() => {
-    let l = custs.filter((c) => (!q || c.name.includes(q)) && (!castFilter || c.castName === castFilter));
-    l = [...l].sort((a, b) =>
-      sort === 'sales' ? b.totalSales - a.totalSales :
-      sort === 'visits' ? (b.visitCount || 0) - (a.visitCount || 0) :
-      (b.lastContactAt ?? 0) - (a.lastContactAt ?? 0)
-    );
+    let l = custs.filter((c) => (!q || c.name.includes(q)) && (starFilter === 0 || rankToStars(c.rank) === starFilter));
+    l = [...l].sort((a, b) => sort === 'sales' ? b.totalSales - a.totalSales : sort === 'visits' ? (b.visitCount || 0) - (a.visitCount || 0) : (b.lastContactAt ?? 0) - (a.lastContactAt ?? 0));
     return l;
-  }, [custs, sort, q, castFilter]);
+  }, [custs, sort, q, starFilter]);
+
+  const editing = custs.find((c) => c.id === editId) ?? null;
+  const place = shop.shopId ? '店舗' : '個人';
+
+  const addCustomer = async (name: string, stars: number) => {
+    await addDoc(collection(db, colPath), { name: name.trim(), rank: starsToRank(stars), totalSales: 0, visitCount: 0, tags: [], createdAt: serverTimestamp(), updatedAt: serverTimestamp() });
+  };
+  const saveCustomer = async (id: string, name: string, stars: number) => {
+    await updateDoc(doc(db, `${colPath}/${id}`), { name: name.trim(), rank: starsToRank(stars), updatedAt: serverTimestamp() });
+  };
+  const removeCustomer = async (id: string) => { await deleteDoc(doc(db, `${colPath}/${id}`)); };
 
   return (
-    <div style={{ color: 'var(--noxa-text-primary)', fontFamily: 'var(--noxa-font-sans-jp)', borderRadius: 16, border: '1px solid var(--noxa-border)', padding: 'clamp(16px, 3vw, 28px)', position: 'relative', overflow: 'hidden' }}>
-      <div aria-hidden style={{ position: 'absolute', top: '-30%', right: '-10%', width: 700, height: 420, background: 'radial-gradient(ellipse, rgba(139,92,246,0.10) 0%, transparent 65%)', pointerEvents: 'none' }} />
-      <div style={{ position: 'relative' }}>
-        <nav aria-label="breadcrumb" style={{ marginBottom: 10 }}>
-          <ol style={{ display: 'flex', gap: 8, fontFamily: mono, fontSize: 11, letterSpacing: '0.06em', color: 'var(--noxa-text-faint)', listStyle: 'none', margin: 0, padding: 0 }}>
-            <li><Link href="/account" style={{ color: 'var(--noxa-text-muted)', textDecoration: 'none' }}>Noxa OS</Link></li><li aria-hidden>·</li><li>customers</li>
-          </ol>
-        </nav>
-        <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', gap: 16, flexWrap: 'wrap', marginBottom: 18 }}>
-          <div>
-            <div className="noxa-eyebrow" style={{ marginBottom: 6 }}>Noxa OS · Customers</div>
-            <h1 className="noxa-display" style={{ fontSize: 'clamp(26px, 4vw, 38px)', margin: 0, fontFamily: 'var(--noxa-font-display-jp)', fontWeight: 500 }}>顧客台帳</h1>
-          </div>
-          <div style={{ display: 'inline-flex', alignItems: 'center', gap: 8, padding: '6px 12px', background: 'rgba(123,232,161,0.10)', border: '1px solid rgba(123,232,161,0.30)', borderRadius: 9999, fontFamily: mono, fontSize: 10, letterSpacing: '0.12em', color: 'var(--noxa-status-success)', textTransform: 'uppercase' }}>
-            <span aria-hidden style={{ width: 6, height: 6, borderRadius: 3, background: 'var(--noxa-status-success)' }} />実データ {custs.length}
-          </div>
+    <div style={{ color: 'var(--noxa-text-primary)', fontFamily: 'var(--noxa-font-sans-jp)', borderRadius: 16, border: '1px solid var(--noxa-border)', padding: 'clamp(16px, 3vw, 28px)' }}>
+      <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', gap: 16, flexWrap: 'wrap', marginBottom: 18 }}>
+        <div>
+          <div className="noxa-eyebrow" style={{ marginBottom: 6 }}>顧客台帳 · {place}</div>
+          <h1 className="noxa-display" style={{ fontSize: 'clamp(24px, 4vw, 34px)', margin: 0, fontFamily: 'var(--noxa-font-display-jp)', fontWeight: 500 }}>顧客台帳</h1>
         </div>
+        <button type="button" onClick={() => setAdding(true)} className="noxa-btn noxa-btn-primary">＋ 顧客を追加</button>
+      </div>
 
-        {/* controls */}
-        <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 16 }}>
-          <input
-            value={q}
-            onChange={(e) => setQ(e.target.value)}
-            placeholder="顧客名で検索"
-            aria-label="顧客名で検索"
-            style={{ flex: '1 1 200px', minHeight: 40, padding: '8px 14px', borderRadius: 10, background: 'var(--noxa-surface-card)', border: '1px solid var(--noxa-border)', color: 'var(--noxa-text-primary)', fontSize: 16 }}
-          />
-          <div role="tablist" aria-label="並び替え" style={{ display: 'flex', gap: 6 }}>
-            {([['sales', '売上順'], ['recent', '最近順'], ['visits', '来店順']] as [Sort, string][]).map(([k, label]) => {
-              const active = sort === k;
-              return (
-                <button key={k} type="button" role="tab" aria-selected={active} onClick={() => setSort(k)}
-                  style={{ appearance: 'none', cursor: 'pointer', minHeight: 40, padding: '7px 14px', borderRadius: 9999, fontSize: 13, fontWeight: active ? 600 : 400, background: active ? 'var(--noxa-accent-primary)' : 'var(--noxa-surface-card)', color: active ? '#fff' : 'var(--noxa-text-muted)', border: `1px solid ${active ? 'var(--noxa-accent-primary)' : 'var(--noxa-border)'}` }}>
-                  {label}
-                </button>
-              );
-            })}
-          </div>
+      {/* 検索＋並び＋星フィルタ */}
+      <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 12 }}>
+        <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="名前で検索" className="noxa-input" style={{ flex: '1 1 200px' }} />
+        <div style={{ display: 'flex', gap: 6 }}>
+          {([['sales', '売上順'], ['recent', '最近順'], ['visits', '来店順']] as [Sort, string][]).map(([k, label]) => (
+            <button key={k} type="button" onClick={() => setSort(k)} style={chip(sort === k)}>{label}</button>
+          ))}
         </div>
+      </div>
+      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 16, alignItems: 'center' }}>
+        <span style={{ fontSize: 11, color: 'var(--noxa-text-faint)' }}>評価</span>
+        <button type="button" onClick={() => setStarFilter(0)} style={chip(starFilter === 0)}>全部</button>
+        {[5, 4, 3, 2, 1].map((s) => <button key={s} type="button" onClick={() => setStarFilter(s)} style={chip(starFilter === s)}>{'★'.repeat(s)}</button>)}
+      </div>
 
-        {/* 担当キャストで絞り込み */}
-        {castNames.length > 0 && (
-          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 16, alignItems: 'center' }}>
-            <span style={{ fontFamily: mono, fontSize: 10, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--noxa-text-faint)', marginRight: 2 }}>担当</span>
-            {([null, ...castNames]).map((cn) => {
-              const active = castFilter === cn;
-              return (
-                <button key={cn ?? '__all'} type="button" onClick={() => setCastFilter(cn)}
-                  style={{ appearance: 'none', cursor: 'pointer', minHeight: 32, padding: '4px 12px', borderRadius: 9999, fontSize: 12, fontWeight: active ? 600 : 400, background: active ? 'var(--noxa-accent-primary)' : 'var(--noxa-surface-card)', color: active ? '#fff' : 'var(--noxa-text-muted)', border: `1px solid ${active ? 'var(--noxa-accent-primary)' : 'var(--noxa-border)'}` }}>
-                  {cn ?? '全員'}
-                </button>
-              );
-            })}
-          </div>
-        )}
-
-        {loading ? (
-          <div className="noxa-eyebrow" style={{ padding: '40px 0' }}>読み込み中…</div>
-        ) : custs.length === 0 ? (
-          <div style={{ padding: 24, border: '1px solid var(--noxa-border)', borderRadius: 14, background: 'var(--noxa-surface-card)' }}>
-            <p style={{ margin: '0 0 8px', fontSize: 15 }}>まだ顧客がいません。</p>
-            <p style={{ margin: 0, fontSize: 13, color: 'var(--noxa-text-muted)' }}>ネイティブアプリ「YoruLog」で顧客を登録すると、ここに台帳として表示されます。</p>
-          </div>
-        ) : (
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3" style={{ gap: 12 }}>
-            {list.map((c) => (
-              <div key={c.id} style={{ background: 'var(--noxa-surface-card)', border: '1px solid var(--noxa-border)', borderRadius: 14, padding: 16, display: 'flex', flexDirection: 'column', gap: 10 }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                  <span style={{ width: 36, height: 36, borderRadius: 18, background: 'linear-gradient(135deg,#8B5CF6,#C4384A)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', fontFamily: 'var(--noxa-font-display-en)', fontSize: 15, flex: 'none' }}>{c.name[0]}</span>
-                  <div style={{ minWidth: 0, flex: 1 }}>
-                    <div style={{ fontSize: 15, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c.name}</div>
-                    <div style={{ display: 'flex', gap: 8, alignItems: 'baseline' }}>
-                      {c.rank && <span style={{ fontSize: 11, color: 'var(--noxa-accent-primary-ink)', fontFamily: mono }}>{c.rank}</span>}
-                      {c.castName && <span style={{ fontSize: 10, color: 'var(--noxa-text-faint)' }}>担当 {c.castName}</span>}
-                    </div>
-                  </div>
+      {loading ? (
+        <div className="noxa-eyebrow" style={{ padding: '40px 0' }}>読み込み中…</div>
+      ) : custs.length === 0 ? (
+        <div style={{ padding: 24, border: '1px dashed var(--noxa-border-strong)', borderRadius: 14, background: 'var(--noxa-surface-card)' }}>
+          <p style={{ margin: '0 0 6px', fontSize: 15 }}>まだ顧客がいません。</p>
+          <p style={{ margin: 0, fontSize: 13, color: 'var(--noxa-text-muted)' }}>「＋ 顧客を追加」から登録できます（{place}の台帳）。</p>
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3" style={{ gap: 12 }}>
+          {list.map((c) => (
+            <button key={c.id} type="button" onClick={() => setEditId(c.id)} style={{ appearance: 'none', textAlign: 'left', cursor: 'pointer', background: 'var(--noxa-surface-card)', border: '1px solid var(--noxa-border)', borderRadius: 14, padding: 16, display: 'flex', flexDirection: 'column', gap: 10, color: 'var(--noxa-text-primary)' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <span style={{ width: 38, height: 38, borderRadius: 19, background: 'linear-gradient(135deg,#8B5CF6,#C4384A)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', fontSize: 16, flex: 'none' }}>{c.name[0]}</span>
+                <div style={{ minWidth: 0, flex: 1 }}>
+                  <div style={{ fontSize: 16, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c.name}</div>
+                  <Stars rank={c.rank} />
                 </div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', borderTop: '1px solid var(--noxa-divider)', paddingTop: 10 }}>
-                  <Stat label="累計売上" value={yen(c.totalSales)} accent />
-                  <Stat label="来店" value={`${c.visitCount || 0}`} />
-                  <Stat label="最終接触" value={fmtDate(c.lastContactAt)} />
-                </div>
-                {c.tags.length > 0 && (
-                  <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-                    {c.tags.map((t, i) => <span key={i} style={{ fontSize: 10, padding: '2px 8px', borderRadius: 9999, background: 'var(--noxa-surface-muted)', color: 'var(--noxa-text-muted)' }}>{t}</span>)}
-                  </div>
-                )}
               </div>
-            ))}
-          </div>
-        )}
-        <p style={{ margin: '16px 0 0', fontSize: 11, lineHeight: 1.6, color: 'var(--noxa-text-faint)', fontFamily: mono }}>
-          ※ 実データ集計（noxa-platform）。カルテ詳細・AI 文面・編集はネイティブアプリ「YoruLog」で。
-        </p>
+              <div style={{ display: 'flex', justifyContent: 'space-between', borderTop: '1px solid var(--noxa-divider)', paddingTop: 10 }}>
+                <Stat label="累計売上" value={yen(c.totalSales)} accent />
+                <Stat label="来店" value={`${c.visitCount || 0}`} />
+                <Stat label="最終" value={fmtDate(c.lastContactAt)} />
+              </div>
+            </button>
+          ))}
+        </div>
+      )}
+
+      {(adding || editing) && (
+        <CustomerDialog
+          initial={editing ? { name: editing.name, stars: rankToStars(editing.rank) } : { name: '', stars: 0 }}
+          title={editing ? '顧客を編集' : '顧客を追加'}
+          onClose={() => { setAdding(false); setEditId(null); }}
+          onSave={async (name, stars) => { if (editing) await saveCustomer(editing.id, name, stars); else await addCustomer(name, stars); setAdding(false); setEditId(null); }}
+          onDelete={editing ? async () => { if (window.confirm(`${editing.name} を削除しますか？`)) { await removeCustomer(editing.id); setEditId(null); } } : undefined}
+        />
+      )}
+
+      <p style={{ margin: '16px 0 0', fontSize: 11, color: 'var(--noxa-text-faint)' }}>
+        ※ {place}の台帳（noxa-platform 共有）。評価は★（SS〜C）。カードをタップで編集。
+        {!shop.shopId && <> 店舗で使うには上部の <Link href="/seating" style={{ color: 'var(--noxa-accent-primary-ink)' }}>店舗</Link> に切替。</>}
+      </p>
+    </div>
+  );
+}
+
+function CustomerDialog({ initial, title, onClose, onSave, onDelete }: {
+  initial: { name: string; stars: number }; title: string;
+  onClose: () => void; onSave: (name: string, stars: number) => Promise<void>; onDelete?: () => Promise<void>;
+}) {
+  const [name, setName] = useState(initial.name);
+  const [stars, setStars] = useState(initial.stars);
+  const [busy, setBusy] = useState(false);
+  return (
+    <div role="dialog" aria-label={title} onClick={onClose} style={{ position: 'fixed', inset: 0, zIndex: 60, background: 'rgba(0,0,0,0.55)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }}>
+      <div onClick={(e) => e.stopPropagation()} style={{ width: 'min(420px, 94vw)', background: 'var(--noxa-bg-base)', border: '1px solid var(--noxa-border-strong)', borderRadius: 16, padding: 20, display: 'flex', flexDirection: 'column', gap: 16 }}>
+        <h2 style={{ margin: 0, fontSize: 18, fontFamily: 'var(--noxa-font-display-jp)', fontWeight: 700 }}>{title}</h2>
+        <label style={{ display: 'flex', flexDirection: 'column', gap: 6 }}><span className="noxa-label" style={{ margin: 0 }}>お名前</span>
+          <input value={name} onChange={(e) => setName(e.target.value)} placeholder="例：田中様" className="noxa-input" autoFocus /></label>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}><span className="noxa-label" style={{ margin: 0 }}>評価（★）</span><StarPicker value={stars} onChange={setStars} /></div>
+        <div style={{ display: 'flex', gap: 10, marginTop: 4 }}>
+          <button type="button" disabled={!name.trim() || busy} onClick={async () => { setBusy(true); try { await onSave(name, stars); } finally { setBusy(false); } }} className="noxa-btn noxa-btn-primary" style={{ flex: 1 }}>{busy ? '保存中…' : '保存'}</button>
+          <button type="button" onClick={onClose} className="noxa-btn noxa-btn-secondary" style={{ width: 90 }}>閉じる</button>
+        </div>
+        {onDelete && <button type="button" onClick={onDelete} style={{ background: 'none', border: 'none', color: 'var(--noxa-status-error)', cursor: 'pointer', fontSize: 13 }}>この顧客を削除</button>}
       </div>
     </div>
   );
 }
+
+const chip = (on: boolean): React.CSSProperties => ({ appearance: 'none', cursor: 'pointer', minHeight: 40, padding: '7px 14px', borderRadius: 9999, fontSize: 13, fontWeight: on ? 600 : 400, background: on ? 'var(--noxa-accent-primary)' : 'var(--noxa-surface-card)', color: on ? '#fff' : 'var(--noxa-text-muted)', border: `1px solid ${on ? 'var(--noxa-accent-primary)' : 'var(--noxa-border)'}` });
 
 function Stat({ label, value, accent }: { label: string; value: string; accent?: boolean }) {
   return (
