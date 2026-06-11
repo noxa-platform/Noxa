@@ -10,6 +10,7 @@ import { useShopContext, useDeviceClaims } from '@/lib/useShopContext';
 import { useTheme } from '@/lib/useTheme';
 import { useUiMode } from '@/lib/useUiMode';
 import { useShopConfig, DEFAULT_MODULES } from '@/lib/shopConfig';
+import { WorkspaceSwitcher } from '@/components/WorkspaceSwitcher';
 
 // アカウント（OS 本体）。端末では非表示。
 const NAV_ACCOUNT: { label: string; href: string; icon: string }[] = [
@@ -139,6 +140,9 @@ export function AccountShell({ user, children }: { user: User; children: React.R
             <div style={{ fontSize: 10, color: 'var(--noxa-text-faint)', marginTop: 4 }}>給与・売掛・個人機能は非表示</div>
           </div>
         )}
+
+        {/* ワークスペース切替（個人 / 各店舗）。端末は固定なので非表示 */}
+        {!device.isDevice && <WorkspaceSwitcher user={user} />}
 
         <div className="flex flex-col" style={{ gap: 2, display: device.isDevice ? 'none' : undefined }}>
           <div

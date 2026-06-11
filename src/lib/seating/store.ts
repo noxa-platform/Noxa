@@ -23,6 +23,7 @@ import { useDeviceClaims } from '@/lib/useShopContext';
 import type { Cast, CastStatus, FloorTable, QueueItem, TableType, Customer, Rank } from './types';
 import { createEmptyTable } from './types';
 import { DEFAULT_TABLE_NAMES } from './tables';
+import { getActiveShop, pickShopId } from '@/lib/workspace';
 
 type StoredCast = {
   id: string; name: string; rank: Rank; hourlyWage: number; isLocked: boolean;
@@ -47,8 +48,8 @@ function useShopTarget(user: User): ShopTarget {
       try {
         const snap = await getDocs(query(collection(db, 'shop_shops'), where('ownerUid', '==', user.uid)));
         if (!alive) return;
-        if (snap.empty) { setCtx({ loading: false, shopId: null, canManage: false, isDevice: false, error: null }); return; }
-        setCtx({ loading: false, shopId: snap.docs[0].id, canManage: true, isDevice: false, error: null });
+        const { shopId, isOwner } = pickShopId(snap.docs.map((d) => d.id), [], getActiveShop());
+        setCtx({ loading: false, shopId, canManage: isOwner, isDevice: false, error: null });
       } catch (e) {
         if (alive) setCtx({ loading: false, shopId: null, canManage: false, isDevice: false, error: String((e as Error)?.message ?? e) });
       }

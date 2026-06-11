@@ -21,6 +21,7 @@ import {
 import type { User } from 'firebase/auth';
 import { db } from '@/lib/firebase/config';
 import { useDeviceClaims } from '@/lib/useShopContext';
+import { getActiveShop, pickShopId } from '@/lib/workspace';
 import type { StoreConfig } from './types';
 import { createDefaultStoreConfig } from './defaultConfig';
 import {
@@ -68,8 +69,8 @@ function usePosShop(user: User): PosShopContext {
       try {
         const snap = await getDocs(query(collection(db, 'shop_shops'), where('ownerUid', '==', user.uid)));
         if (!alive) return;
-        if (snap.empty) { setCtx({ loading: false, shopId: null, canConfig: false, isDevice: false, error: null }); return; }
-        setCtx({ loading: false, shopId: snap.docs[0].id, canConfig: true, isDevice: false, error: null });
+        const { shopId, isOwner } = pickShopId(snap.docs.map((d) => d.id), [], getActiveShop());
+        setCtx({ loading: false, shopId, canConfig: isOwner, isDevice: false, error: null });
       } catch (e) {
         if (alive) setCtx({ loading: false, shopId: null, canConfig: false, isDevice: false, error: String((e as Error)?.message ?? e) });
       }

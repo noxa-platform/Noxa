@@ -8,6 +8,7 @@ import { useEffect } from 'react';
 import { collection, doc, getDoc, getDocs, query, where } from 'firebase/firestore';
 import type { User } from 'firebase/auth';
 import { db } from '@/lib/firebase/config';
+import { getActiveShop, pickShopId } from '@/lib/workspace';
 
 export const THEME_KEY = 'noxa_theme'; // '' | 'auto' | 'noxa' | 'concafe'
 
@@ -35,10 +36,12 @@ export function useTheme(user: User | undefined): void {
       try {
         let storeTypeName: string | undefined;
         const owned = await getDocs(query(collection(db, 'shop_shops'), where('ownerUid', '==', user.uid)));
-        if (!owned.empty) storeTypeName = (owned.docs[0].data() as { storeTypeName?: string }).storeTypeName;
-        else {
-          const ms = await getDocs(collection(db, `account_users/${user.uid}/memberships`));
-          if (!ms.empty) { const s = await getDoc(doc(db, `shop_shops/${ms.docs[0].id}`)); storeTypeName = (s.data() as { storeTypeName?: string } | undefined)?.storeTypeName; }
+        const ms = await getDocs(collection(db, `account_users/${user.uid}/memberships`));
+        const ownedById = new Map(owned.docs.map((d) => [d.id, d]));
+        const { shopId } = pickShopId(owned.docs.map((d) => d.id), ms.docs.map((d) => d.id), getActiveShop());
+        if (shopId) {
+          const docData = ownedById.get(shopId)?.data() ?? (await getDoc(doc(db, `shop_shops/${shopId}`))).data();
+          storeTypeName = (docData as { storeTypeName?: string } | undefined)?.storeTypeName;
         }
         if (alive) applyTheme(industryToTheme(storeTypeName));
       } catch { applyTheme(''); }
