@@ -24,10 +24,11 @@ type Tab = {
 };
 
 const DEFAULT_TABS: Tab[] = [
-  { href: '/',                  label: 'ホーム',   glyph: '◇', match: (p) => p === '/' },
-  { href: '/account',           label: 'アカウント', glyph: '◈', match: (p) => p.startsWith('/account') },
-  { href: 'https://nomishugy.vercel.app', label: 'nomishugy', glyph: '◇' },
-  { href: '/community',         label: '掲示板',   glyph: '◆', match: (p) => p.startsWith('/community') },
+  { href: '/account',   label: 'ホーム',   glyph: '🏠', match: (p) => p === '/account' },
+  { href: '/seating',   label: '席回し',   glyph: '🪑', match: (p) => p.startsWith('/seating') || p.startsWith('/pos') },
+  { href: '/sales',     label: '売上',     glyph: '💰', match: (p) => p.startsWith('/sales') },
+  { href: '/customers', label: '顧客',     glyph: '📒', match: (p) => p.startsWith('/customers') },
+  { href: '/account/profile', label: 'マイページ', glyph: '👤', match: (p) => p.startsWith('/account/profile') },
 ];
 
 export type BottomTabBarProps = {

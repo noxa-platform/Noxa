@@ -11,6 +11,7 @@ import { useTheme } from '@/lib/useTheme';
 import { useUiMode } from '@/lib/useUiMode';
 import { useShopConfig, DEFAULT_MODULES } from '@/lib/shopConfig';
 import { WorkspaceSwitcher } from '@/components/WorkspaceSwitcher';
+import { BottomTabBar } from '@/components/BottomTabBar';
 
 // メニューのアイコン（href→絵文字）。非tech層に分かりやすいよう視覚記号を付与。
 const ICONS: Record<string, string> = {
@@ -289,12 +290,12 @@ export function AccountShell({ user, children }: { user: User; children: React.R
       </header>
 
       {/* Main */}
-      <main
-        className="flex-1 overflow-auto pt-16 md:pt-0"
-        style={{ padding: '36px 40px' }}
-      >
+      <main className="flex-1 overflow-auto px-5 md:px-10 pt-20 md:pt-9 pb-24 md:pb-10">
         {children}
       </main>
+
+      {/* モバイル下部ナビ（スマホでメニューに到達できるように。端末kioskでは非表示） */}
+      {!device.isDevice && <BottomTabBar />}
     </div>
   );
 }
