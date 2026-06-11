@@ -358,7 +358,7 @@ export async function POST(request: NextRequest) {
       const overrideStr = formData.get('overrideModel') as string | null;
       if (overrideStr && overrideStr.startsWith('openrouter:')) overrideModel = overrideStr.slice('openrouter:'.length);
       const historyStr = formData.get('history') as string;
-      history = historyStr ? JSON.parse(historyStr) : undefined;
+      try { history = historyStr ? JSON.parse(historyStr) : undefined; } catch { history = undefined; }
 
       // 画像をbase64に変換
       const imageFiles = formData.getAll('images') as File[];
