@@ -73,7 +73,7 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   try {
     const uid = await verifyRequest(request);
-    const body = (await request.json()) as ClaimBody;
+    const body = (await request.json().catch(() => ({}))) as ClaimBody;
     if (!body.workspaceId) {
       return NextResponse.json({ error: 'workspaceId が必要です' }, { status: 400 });
     }

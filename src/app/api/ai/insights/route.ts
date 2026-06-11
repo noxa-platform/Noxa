@@ -78,7 +78,7 @@ async function getRelationshipRiskData(workspaceId: string): Promise<string> {
 export async function POST(request: NextRequest) {
   try {
     const uid = await verifyRequest(request);
-    const { workspaceId, type } = await request.json();
+    const { workspaceId, type } = await request.json().catch(() => ({}));
 
     if (!workspaceId) {
       return NextResponse.json({ error: 'パラメータ不足' }, { status: 400 });

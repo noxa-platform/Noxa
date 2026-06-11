@@ -131,7 +131,7 @@ const PURPOSE_PROMPTS: Record<string, string> = {
 export async function POST(request: NextRequest) {
   try {
     const uid = await verifyRequest(request);
-    const { wid, customerId, purpose, customPrompt } = await request.json();
+    const { wid, customerId, purpose, customPrompt } = await request.json().catch(() => ({}));
 
     if (!wid || !customerId) {
       return NextResponse.json({ error: 'パラメータ不足' }, { status: 400 });

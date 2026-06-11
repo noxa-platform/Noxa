@@ -26,7 +26,7 @@ export async function POST(request: NextRequest) {
       output,
       rating,
       notes,
-    } = await request.json();
+    } = await request.json().catch(() => ({}));
 
     if (!workspaceId || !source || typeof rating !== 'number') {
       return NextResponse.json({ error: 'パラメータ不足' }, { status: 400 });

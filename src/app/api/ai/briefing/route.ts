@@ -91,7 +91,7 @@ JSON 出力形式（必ず厳密 JSON のみ、説明文不要）:
 export async function POST(request: NextRequest) {
   try {
     const uid = await verifyRequest(request);
-    const { workspaceId, customerId } = await request.json();
+    const { workspaceId, customerId } = await request.json().catch(() => ({}));
 
     if (!workspaceId || !customerId) {
       return NextResponse.json({ error: 'パラメータ不足' }, { status: 400 });

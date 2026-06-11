@@ -45,7 +45,7 @@ const SYSTEM_INSTRUCTION = `あなたはホスト/キャスト向けの売上ア
 export async function POST(request: NextRequest) {
   try {
     const uid = await verifyRequest(request);
-    const body = (await request.json()) as NarrativeRequestBody;
+    const body = (await request.json().catch(() => ({}))) as NarrativeRequestBody;
     if (!body.workspaceId) {
       return NextResponse.json({ error: 'workspaceId が必要です' }, { status: 400 });
     }

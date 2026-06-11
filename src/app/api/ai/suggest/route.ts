@@ -29,7 +29,7 @@ async function getCustomerWithLogs(workspaceId: string, customerId: string): Pro
 export async function POST(request: NextRequest) {
   try {
     const uid = await verifyRequest(request);
-    const { workspaceId, customerId, lastLogType } = await request.json();
+    const { workspaceId, customerId, lastLogType } = await request.json().catch(() => ({}));
 
     if (!workspaceId || !customerId) {
       return NextResponse.json({ error: 'パラメータ不足' }, { status: 400 });

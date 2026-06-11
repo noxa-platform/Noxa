@@ -37,7 +37,7 @@ export async function POST(request: NextRequest) {
     if (!isAdmin(userRecord.email)) {
       return NextResponse.json({ error: '運営者専用です' }, { status: 403 });
     }
-    const body = (await request.json()) as BenchRequest;
+    const body = (await request.json().catch(() => ({}))) as BenchRequest;
     if (!body.model || !body.system || !body.user) {
       return NextResponse.json({ error: 'model / system / user が必要' }, { status: 400 });
     }

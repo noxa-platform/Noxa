@@ -21,7 +21,7 @@ const MAX_BYTES = 16 * 1024; // 短い発話想定。16KB 上限。
 export async function POST(request: NextRequest) {
   try {
     const uid = await verifyRequest(request);
-    const body = await request.json();
+    const body = await request.json().catch(() => ({}));
     const workspaceId: string | undefined = body?.workspaceId;
     const text: string | undefined = body?.text;
 

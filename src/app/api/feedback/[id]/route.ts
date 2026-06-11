@@ -25,7 +25,7 @@ export async function PATCH(
   try {
     const { email } = await requireAdmin(request);
     const { id } = await context.params;
-    const body = await request.json();
+    const body = await request.json().catch(() => ({}));
     const { action, approvedQuote, approvedPersonaLabel, approvedLocation } = body;
 
     if (action !== 'approve' && action !== 'reject') {

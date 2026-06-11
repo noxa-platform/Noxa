@@ -7,7 +7,7 @@ import { verifyRequest, AuthError } from '../../lib/firebase-admin';
 export async function POST(request: NextRequest) {
   try {
     const uid = await verifyRequest(request);
-    const { customerName, logs, existingTags } = await request.json();
+    const { customerName, logs, existingTags } = await request.json().catch(() => ({}));
 
     if (!customerName) {
       return NextResponse.json({ error: 'パラメータ不足' }, { status: 400 });

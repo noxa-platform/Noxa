@@ -44,7 +44,7 @@ JSON 配列で 3 つのメッセージを出力:
 export async function POST(request: NextRequest) {
   try {
     const uid = await verifyRequest(request);
-    const body = (await request.json()) as SalesMessageBody;
+    const body = (await request.json().catch(() => ({}))) as SalesMessageBody;
     const customerName = body.customerName?.trim();
     if (!customerName) {
       return NextResponse.json({ error: 'customerName が必要です' }, { status: 400 });

@@ -139,7 +139,7 @@ function matchKnownCustomers(
 export async function POST(request: NextRequest) {
   try {
     const uid = await verifyRequest(request);
-    const body = (await request.json()) as ExtractRequestBody;
+    const body = (await request.json().catch(() => ({}))) as ExtractRequestBody;
     const { workspaceId, images, knownCustomers } = body;
     if (!workspaceId || !Array.isArray(images) || images.length === 0) {
       return NextResponse.json({ error: '画像が指定されていません' }, { status: 400 });

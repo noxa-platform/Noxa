@@ -27,7 +27,7 @@ const MAX_BYTES = 1024 * 1024; // 1MB（learn-from-text と整合）
 export async function POST(request: NextRequest) {
   try {
     const uid = await verifyRequest(request);
-    const body = await request.json();
+    const body = await request.json().catch(() => ({}));
     const workspaceId: string | undefined = body?.workspaceId;
     const text: string | undefined = body?.text;
     const hint: string | undefined = body?.hint;

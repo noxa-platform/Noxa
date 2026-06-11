@@ -62,7 +62,7 @@ interface LogDoc {
 export async function POST(request: NextRequest) {
   try {
     const uid = await verifyRequest(request);
-    const body = await request.json();
+    const body = await request.json().catch(() => ({}));
     const workspaceId: string | undefined = body?.workspaceId;
     const customerId: string | undefined = body?.customerId;
 

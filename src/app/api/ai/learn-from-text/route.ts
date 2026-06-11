@@ -90,7 +90,7 @@ export async function POST(request: NextRequest) {
   let uid: string | null = null;
   try {
     uid = await verifyRequest(request);
-    const body = (await request.json()) as LearnFromTextBody;
+    const body = (await request.json().catch(() => ({}))) as LearnFromTextBody;
     const { workspaceId, customerId, content } = body;
     if (!workspaceId || !customerId) {
       return NextResponse.json({ error: 'workspaceId / customerId が必要です' }, { status: 400 });

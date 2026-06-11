@@ -370,7 +370,7 @@ export async function POST(request: NextRequest) {
       }
     } else {
       // JSON（テキストのみ）
-      const body = await request.json();
+      const body = await request.json().catch(() => ({}));
       workspaceId = body.workspaceId;
       threadId = body.threadId;
       message = body.message;

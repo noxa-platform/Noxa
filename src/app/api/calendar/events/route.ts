@@ -74,7 +74,7 @@ export async function POST(request: NextRequest) {
   } catch {
     return NextResponse.json({ error: '未認証' }, { status: 401 });
   }
-  const body = await request.json();
+  const body = await request.json().catch(() => ({}));
   const { calendarId, summary, start, end, customerId, workspaceId } = body;
 
   if (!calendarId || !summary || !start) {

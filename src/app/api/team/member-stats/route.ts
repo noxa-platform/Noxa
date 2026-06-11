@@ -17,7 +17,7 @@ export const maxDuration = 60;
 export async function POST(request: NextRequest) {
   try {
     const uid = await verifyRequest(request);
-    const body = await request.json();
+    const body = await request.json().catch(() => ({}));
     const shopId: string | undefined = body?.shopId;
     if (!shopId || typeof shopId !== 'string') {
       return NextResponse.json({ error: 'shopId は必須です' }, { status: 400 });

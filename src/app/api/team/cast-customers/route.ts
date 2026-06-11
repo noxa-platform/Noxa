@@ -13,7 +13,7 @@ import { verifyRequest, getAdminDb, AuthError } from '../../lib/firebase-admin';
 export async function POST(request: NextRequest) {
   try {
     const uid = await verifyRequest(request);
-    const body = await request.json();
+    const body = await request.json().catch(() => ({}));
     const shopId: string | undefined = body?.shopId;
     const castUid: string | undefined = body?.castUid;
     if (!shopId || !castUid) {
