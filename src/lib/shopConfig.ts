@@ -43,6 +43,9 @@ export const DEFAULT_MODULES: { key: string; label: string }[] = [
   { key: 'risk', label: 'リスク客共有' },
 ];
 
+/** 既定で表示するコアモジュール（実証済み＋夜職で標準的に使う）。それ以外は既定OFF＝店舗設定でONに。 */
+export const CORE_MODULE_KEYS = new Set(['seating', 'pos', 'attendance', 'payroll', 'first-visit']);
+
 export const DEFAULT_ROLES: RoleWage[] = [
   { name: 'BOSS', wage: 10000 },
   { name: '役職', wage: 8000 },
@@ -71,7 +74,7 @@ export const INDUSTRY_TERMS: Record<string, Record<string, string>> = {
 export const DEFAULT_CONFIG: ShopConfig = {
   terminology: {},
   roles: DEFAULT_ROLES,
-  modules: DEFAULT_MODULES.map((m) => ({ key: m.key, enabled: true })),
+  modules: DEFAULT_MODULES.map((m) => ({ key: m.key, enabled: CORE_MODULE_KEYS.has(m.key) })),
   salesAttribution: 'mainCast',
   setTimeLength: 60,
   rotationTimeLength: 15,
@@ -92,7 +95,7 @@ export function mergeModules(cfg: ModuleCfg[] | undefined): ModuleCfg[] {
   for (const m of cfg ?? []) {
     if (DEFAULT_MODULES.some((d) => d.key === m.key)) { out.push(m); seen.add(m.key); }
   }
-  for (const d of DEFAULT_MODULES) if (!seen.has(d.key)) out.push({ key: d.key, enabled: true });
+  for (const d of DEFAULT_MODULES) if (!seen.has(d.key)) out.push({ key: d.key, enabled: CORE_MODULE_KEYS.has(d.key) });
   return out;
 }
 

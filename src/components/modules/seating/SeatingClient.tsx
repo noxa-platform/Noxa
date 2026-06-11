@@ -354,6 +354,7 @@ function TableDetail({ table, casts, tables, castById, store }: {
 
           {/* アクション */}
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', borderTop: '1px solid var(--noxa-divider)', paddingTop: 12 }}>
+            <Link href="/pos" style={{ ...chipStyle(true), textDecoration: 'none', display: 'inline-flex', alignItems: 'center' }}>🧾 伝票・会計を開く</Link>
             <button type="button" onClick={() => store.rotateHosts(table.id)} style={chipStyle(false)} disabled={table.currentHostIds.length < 2}>席内ローテ</button>
             <button type="button" onClick={() => store.toggleInnerRotation(table.id)} style={chipStyle(table.innerRotationEnabled)}>自動ローテ提案</button>
             <button type="button" onClick={() => store.extendTime(table.id, 30)} style={chipStyle(false)}>＋30分延長</button>
