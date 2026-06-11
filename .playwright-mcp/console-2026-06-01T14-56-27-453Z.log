@@ -1,4 +1,0 @@
-[     584ms] [ERROR] Firestore getAll(bars) error: FirebaseError: Missing or insufficient permissions. @ https://nomishugy.vercel.app/_next/static/chunks/f3d80d719421b3ff.js:0
-[     584ms] [ERROR] Error fetching bars FirebaseError: Missing or insufficient permissions. @ https://nomishugy.vercel.app/_next/static/chunks/f3d80d719421b3ff.js:0
-[     644ms] [ERROR] Firestore getAll(bars) error: FirebaseError: Missing or insufficient permissions. @ https://nomishugy.vercel.app/_next/static/chunks/f3d80d719421b3ff.js:0
-[     644ms] [ERROR] Error fetching bars (fallback): FirebaseError: Missing or insufficient permissions. @ https://nomishugy.vercel.app/_next/static/chunks/f3d80d719421b3ff.js:0

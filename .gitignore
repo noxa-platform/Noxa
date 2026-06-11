@@ -37,3 +37,7 @@ firebase-adminsdk-*.json
 .idea/
 .vercel
 .gstack/
+
+# Playwright MCP artifacts / screenshots
+.playwright-mcp/
+/noxa-*.png

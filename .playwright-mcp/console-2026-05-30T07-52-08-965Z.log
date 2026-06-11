@@ -1,9 +1,0 @@
-[    1988ms] [VERBOSE] [DOM] Input elements should have autocomplete attributes (suggested: "current-password"): (More info: https://goo.gl/9p2vKq) %o @ https://noxa-delta.vercel.app/account/login?redirect=https://yorulog.vercel.app/home:0
-[    1988ms] [ERROR] Failed to load resource: the server responded with a status of 404 () @ https://noxa-delta.vercel.app/terms?_rsc=1mc9l:0
-[    2008ms] [ERROR] Failed to load resource: the server responded with a status of 404 () @ https://noxa-delta.vercel.app/privacy?_rsc=1mc9l:0
-[    2056ms] [ERROR] Failed to load resource: the server responded with a status of 404 () @ https://noxa-delta.vercel.app/account/reset?_rsc=1mc9l:0
-[    2272ms] [ERROR] Failed to load resource: the server responded with a status of 401 () @ https://asia-northeast1-noxa-platform.cloudfunctions.net/exchangeAuthToken:0
-[    2273ms] [ERROR] [noxa] custom token exchange failed, falling back to /account Error: token exchange failed: 401
-    at m (https://noxa-delta.vercel.app/_next/static/chunks/47c20c15fcdfee53.js:9:68691)
-    at async y (https://noxa-delta.vercel.app/_next/static/chunks/47c20c15fcdfee53.js:9:68939) @ https://noxa-delta.vercel.app/_next/static/chunks/47c20c15fcdfee53.js:8
-[    2362ms] [ERROR] Failed to load resource: the server responded with a status of 404 () @ https://noxa-delta.vercel.app/community?_rsc=195rt:0

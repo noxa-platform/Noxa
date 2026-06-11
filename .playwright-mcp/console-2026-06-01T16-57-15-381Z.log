@@ -1,6 +1,0 @@
-[      90ms] [ERROR] Error: <polyline> attribute points: Expected number, "0,55% 25%,48% 50%,52…". @ http://localhost:3000/modpreview?m=transport:24
-[      90ms] [ERROR] Error: <polyline> attribute points: Expected number, "20%,0 30%,35% 55%,…". @ http://localhost:3000/modpreview?m=transport:24
-[     132ms] [INFO] %cDownload the React DevTools for a better development experience: https://react.dev/link/react-devtools font-weight:bold @ http://localhost:3000/_next/static/chunks/cd045_next_dist_492679fb._.js:2303
-[     170ms] [LOG] [HMR] connected @ http://localhost:3000/_next/static/chunks/cd045_next_dist_492679fb._.js:2303
-[   37673ms] [LOG] [Fast Refresh] rebuilding @ http://localhost:3000/_next/static/chunks/cd045_next_dist_492679fb._.js:2303
-[   37980ms] [LOG] [Fast Refresh] done in 390ms @ http://localhost:3000/_next/static/chunks/cd045_next_dist_492679fb._.js:2303
