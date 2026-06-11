@@ -1,0 +1,183 @@
+- generic [active] [ref=e1]:
+  - main [ref=e3]:
+    - generic [ref=e4]:
+      - generic [ref=e5]:
+        - navigation "breadcrumb" [ref=e6]:
+          - list [ref=e7]:
+            - listitem [ref=e8]:
+              - link "NOXA OS" [ref=e9] [cursor=pointer]:
+                - /url: /
+            - listitem [ref=e10]: ·
+            - listitem [ref=e11]: first-visit
+        - generic [ref=e12]:
+          - generic [ref=e13]:
+            - generic [ref=e14]: NOXA OS · Module 06 · First Visit
+            - heading "№ 06 初回案内" [level=1] [ref=e15]:
+              - generic [ref=e16]: № 06
+              - generic [ref=e17]: 初回案内
+          - note "このモジュールはモックです" [ref=e18]: UI モック · データ保存なし
+      - generic [ref=e20]:
+        - region "新人チェックリスト" [ref=e21]:
+          - heading "新人チェックリスト" [level=2] [ref=e22]
+          - generic [ref=e23]:
+            - generic [ref=e24]:
+              - generic [ref=e25]: チェック完了
+              - generic [ref=e26]:
+                - text: "8"
+                - generic [ref=e27]: / 12
+                - generic [ref=e28]: 67%
+            - progressbar "チェックリスト進捗 67%" [ref=e29]
+          - generic [ref=e31]:
+            - generic [ref=e32]:
+              - generic [ref=e35]: 持ち物
+              - list [ref=e36]:
+                - listitem [ref=e37]:
+                  - generic [ref=e38] [cursor=pointer]:
+                    - checkbox "身分証明書 (成人確認)" [checked] [ref=e39]
+                    - img
+                    - generic [ref=e40]: 身分証明書 (成人確認)
+                - listitem [ref=e41]:
+                  - generic [ref=e42] [cursor=pointer]:
+                    - checkbox "ヒール / 靴（指定なし可）" [checked] [ref=e43]
+                    - img
+                    - generic [ref=e44]: ヒール / 靴（指定なし可）
+                - listitem [ref=e45]:
+                  - generic [ref=e46] [cursor=pointer]:
+                    - checkbox "ロッカー用南京錠" [checked] [ref=e47]
+                    - img
+                    - generic [ref=e48]: ロッカー用南京錠
+            - generic [ref=e49]:
+              - generic [ref=e52]: 服装
+              - list [ref=e53]:
+                - listitem [ref=e54]:
+                  - generic [ref=e55] [cursor=pointer]:
+                    - checkbox "ドレスコードを満たした衣装" [checked] [ref=e56]
+                    - img
+                    - generic [ref=e57]: ドレスコードを満たした衣装
+                - listitem [ref=e58]:
+                  - generic [ref=e59] [cursor=pointer]:
+                    - checkbox "ネイル・香水は控えめに" [checked] [ref=e60]
+                    - img
+                    - generic [ref=e61]: ネイル・香水は控えめに
+            - generic [ref=e62]:
+              - generic [ref=e65]: 接客 NG
+              - list [ref=e66]:
+                - listitem [ref=e67]:
+                  - generic [ref=e68] [cursor=pointer]:
+                    - checkbox "SNS で店内を無断撮影しない" [checked] [ref=e69]
+                    - img
+                    - generic [ref=e70]: SNS で店内を無断撮影しない
+                - listitem [ref=e71]:
+                  - generic [ref=e72] [cursor=pointer]:
+                    - checkbox "客への連絡先交換 — 店外NG" [checked] [ref=e73]
+                    - img
+                    - generic [ref=e74]: 客への連絡先交換 — 店外NG
+                - listitem [ref=e75]:
+                  - generic [ref=e76] [cursor=pointer]:
+                    - checkbox "泥酔・バックヤードへの案内 NG" [ref=e77]
+                    - generic [ref=e78]: 泥酔・バックヤードへの案内 NG
+            - generic [ref=e79]:
+              - generic [ref=e82]: 料金理解
+              - list [ref=e83]:
+                - listitem [ref=e84]:
+                  - generic [ref=e85] [cursor=pointer]:
+                    - checkbox "セット料金を暗記している" [checked] [ref=e86]
+                    - img
+                    - generic [ref=e87]: セット料金を暗記している
+                - listitem [ref=e88]:
+                  - generic [ref=e89] [cursor=pointer]:
+                    - checkbox "指名料・延長料の案内ができる" [ref=e90]
+                    - generic [ref=e91]: 指名料・延長料の案内ができる
+                - listitem [ref=e92]:
+                  - generic [ref=e93] [cursor=pointer]:
+                    - checkbox "ボトルキープの仕組みを理解した" [ref=e94]
+                    - generic [ref=e95]: ボトルキープの仕組みを理解した
+                - listitem [ref=e96]:
+                  - generic [ref=e97] [cursor=pointer]:
+                    - checkbox "同伴・場内指名の定義を知っている" [ref=e98]
+                    - generic [ref=e99]: 同伴・場内指名の定義を知っている
+        - generic [ref=e100]:
+          - region "暗記カード" [ref=e101]:
+            - heading "暗記カード" [level=2] [ref=e102]
+            - generic [ref=e103]:
+              - tablist "暗記カードカテゴリ" [ref=e104]:
+                - tab "料金体系" [selected] [ref=e105] [cursor=pointer]
+                - tab "メニュー" [ref=e106] [cursor=pointer]
+                - tab "ボトル紹介" [ref=e107] [cursor=pointer]
+                - tab "指名トーク" [ref=e108] [cursor=pointer]
+              - tabpanel "料金体系カード一覧" [ref=e109]:
+                - 'button "カード: セット料金（60分）とは？（タップで答えを見る）" [ref=e110] [cursor=pointer]':
+                  - generic [ref=e111]:
+                    - generic [ref=e112]: Q
+                    - generic [ref=e113]: セット料金（60分）とは？
+                  - generic [ref=e114]: タップして答えを確認 →
+                - 'button "カード: 延長料金は？（タップで答えを見る）" [ref=e115] [cursor=pointer]':
+                  - generic [ref=e116]:
+                    - generic [ref=e117]: Q
+                    - generic [ref=e118]: 延長料金は？
+                  - generic [ref=e119]: タップして答えを確認 →
+                - 'button "カード: 指名料とは？（タップで答えを見る）" [ref=e120] [cursor=pointer]':
+                  - generic [ref=e121]:
+                    - generic [ref=e122]: Q
+                    - generic [ref=e123]: 指名料とは？
+                  - generic [ref=e124]: タップして答えを確認 →
+                - 'button "カード: 同伴料とは？（タップで答えを見る）" [ref=e125] [cursor=pointer]':
+                  - generic [ref=e126]:
+                    - generic [ref=e127]: Q
+                    - generic [ref=e128]: 同伴料とは？
+                  - generic [ref=e129]: タップして答えを確認 →
+                - 'button "カード: 場内指名とは？（タップで答えを見る）" [ref=e130] [cursor=pointer]':
+                  - generic [ref=e131]:
+                    - generic [ref=e132]: Q
+                    - generic [ref=e133]: 場内指名とは？
+                  - generic [ref=e134]: タップして答えを確認 →
+                - 'button "カード: サービス料とは？（タップで答えを見る）" [ref=e135] [cursor=pointer]':
+                  - generic [ref=e136]:
+                    - generic [ref=e137]: Q
+                    - generic [ref=e138]: サービス料とは？
+                  - generic [ref=e139]: タップして答えを確認 →
+          - region "OJT進捗" [ref=e140]:
+            - heading "OJT 進捗 — 店長ビュー" [level=2] [ref=e141]
+            - generic [ref=e142]:
+              - generic [ref=e143]:
+                - generic [ref=e144]:
+                  - generic [ref=e145]:
+                    - generic [ref=e146]: ひ
+                    - generic [ref=e147]:
+                      - generic [ref=e148]: ひより
+                      - generic [ref=e149]: 入店 2026-05-12 · 担当 玲奈
+                  - generic [ref=e150]: 92%
+                - generic [ref=e151]: "フェーズ: 最終確認"
+                - progressbar "ひよりのOJT進捗 92%" [ref=e152]
+              - generic [ref=e154]:
+                - generic [ref=e155]:
+                  - generic [ref=e156]:
+                    - generic [ref=e157]: み
+                    - generic [ref=e158]:
+                      - generic [ref=e159]: みお
+                      - generic [ref=e160]: 入店 2026-05-26 · 担当 美咲
+                  - generic [ref=e161]: 67%
+                - generic [ref=e162]: "フェーズ: 暗記カード習得中"
+                - progressbar "みおのOJT進捗 67%" [ref=e163]
+              - generic [ref=e165]:
+                - generic [ref=e166]:
+                  - generic [ref=e167]:
+                    - generic [ref=e168]: こ
+                    - generic [ref=e169]:
+                      - generic [ref=e170]: ことな
+                      - generic [ref=e171]: 入店 2026-06-01 · 担当 玲奈
+                  - generic [ref=e172]: 30%
+                - generic [ref=e173]: "フェーズ: 初日チェック完了"
+                - progressbar "ことなのOJT進捗 30%" [ref=e174]
+  - generic [ref=e177]:
+    - paragraph [ref=e178]:
+      - text: 当サイトでは、サービス提供と利用分析のために Cookie（Firebase 認証・流入計測等）を使用しています。
+      - link "プライバシーポリシー" [ref=e179] [cursor=pointer]:
+        - /url: /legal/privacy
+    - generic [ref=e180]:
+      - button "拒否" [ref=e181]
+      - button "同意する" [ref=e182]
+  - region "Notifications alt+T"
+  - button "Open Next.js Dev Tools" [ref=e188] [cursor=pointer]:
+    - img [ref=e189]
+  - alert [ref=e192]

@@ -1,0 +1,354 @@
+- generic [ref=e1]:
+  - generic [ref=e8]:
+    - banner [ref=e9]:
+      - generic [ref=e10]:
+        - generic [ref=e11]:
+          - generic [ref=e12]:
+            - text: 
+            - link [ref=e13] [cursor=pointer]:
+              - /url: /ja/
+              - img [ref=e14]
+          - navigation [ref=e15]:
+            - generic [ref=e16]:
+              - definition [ref=e17]:
+                - link "About" [ref=e19] [cursor=pointer]:
+                  - /url: /ja/about/
+              - definition [ref=e20]:
+                - link "ニュース" [ref=e22] [cursor=pointer]:
+                  - /url: /ja/news/
+              - definition [ref=e23]:
+                - link "プロダクト" [ref=e25] [cursor=pointer]:
+                  - /url: /ja/services/
+              - definition [ref=e26]:
+                - link "ドキュメント" [ref=e28] [cursor=pointer]:
+                  - /url: /ja/docs/
+              - definition [ref=e29]:
+                - link "FAQ" [ref=e31] [cursor=pointer]:
+                  - /url: /ja/faq/
+              - definition [ref=e32]:
+                - link "用語集" [ref=e34] [cursor=pointer]:
+                  - /url: /ja/glossary/
+              - definition [ref=e35]:
+                - navigation [ref=e36]:
+                  - generic [ref=e37] [cursor=pointer]: その他
+                  - text:      
+            - text:   
+        - text:      
+        - generic [ref=e38]:
+          - generic [ref=e40] [cursor=pointer]:
+            - generic [ref=e41]: 
+            - generic [ref=e42]: 
+          - button "" [ref=e45] [cursor=pointer]:
+            - generic [ref=e48]: 
+          - img [ref=e51] [cursor=pointer]
+          - generic [ref=e53]: 
+    - complementary [ref=e54]:
+      - link "コンソール（ホーム）" [ref=e55] [cursor=pointer]:
+        - /url: /console/
+      - generic [ref=e56]:
+        - heading "プロバイダー" [level=4] [ref=e57] [cursor=pointer]
+        - generic [ref=e59]:
+          - textbox "検索..." [ref=e62]
+          - generic [ref=e63]:
+            - generic [ref=e64] [cursor=pointer]: Admin
+            - list [ref=e67]:
+              - listitem [ref=e68]:
+                - link "Egshugy" [ref=e69] [cursor=pointer]:
+                  - /url: /console/provider/2004810361
+                  - generic [ref=e70]: Egshugy
+      - link "ツール" [ref=e71] [cursor=pointer]:
+        - /url: /console/tools
+      - link "サポート" [ref=e72] [cursor=pointer]:
+        - /url: /console/support
+    - navigation [ref=e73]:
+      - link "トップ" [ref=e74] [cursor=pointer]:
+        - /url: /console/
+      - generic [ref=e75]: 
+      - generic [ref=e76]: 新規チャネル作成
+    - generic [ref=e79]:
+      - heading "新規チャネル作成" [level=2] [ref=e80]
+      - generic [ref=e81]:
+        - generic [ref=e82]: チャネルの種類
+        - generic [ref=e85]: LINEログイン
+      - generic [ref=e86]:
+        - generic [ref=e87]: プロバイダー
+        - generic [ref=e89]:
+          - generic:
+            - text: Egshugy
+            - combobox:
+              - option "プロバイダーを選択してください"
+              - option "Egshugy" [selected]
+              - option "新規プロバイダー作成"
+      - generic [ref=e90]:
+        - generic [ref=e91]:
+          - generic [ref=e92]:
+            - text: サービスを提供する地域
+            - generic [ref=e93]: 
+          - generic [ref=e96]:
+            - generic [ref=e97]:
+              - radio "日本" [checked] [ref=e98] [cursor=pointer]
+              - generic [ref=e100] [cursor=pointer]: 日本
+            - generic [ref=e101]:
+              - radio "タイ" [ref=e102] [cursor=pointer]
+              - generic [ref=e104] [cursor=pointer]: タイ
+            - generic [ref=e105]:
+              - radio "台湾" [ref=e106] [cursor=pointer]
+              - generic [ref=e108] [cursor=pointer]: 台湾
+            - generic [ref=e109]:
+              - radio "インドネシア" [ref=e110] [cursor=pointer]
+              - generic [ref=e112] [cursor=pointer]: インドネシア
+        - generic [ref=e113]:
+          - generic [ref=e114]:
+            - text: 会社・事業者の所在国・地域
+            - generic [ref=e115]: 
+          - generic [ref=e118]:
+            - text: 未設定
+            - combobox [ref=e119]:
+              - option "未設定" [disabled] [selected]
+              - option "日本"
+              - option "台湾"
+              - option "タイ"
+              - option "インドネシア"
+              - option "アイスランド"
+              - option "アイルランド"
+              - option "アメリカ合衆国"
+              - option "アラブ首長国連邦"
+              - option "イギリス"
+              - option "イスラエル"
+              - option "イタリア"
+              - option "イラン"
+              - option "インド"
+              - option "ウクライナ"
+              - option "エストニア"
+              - option "オーストラリア"
+              - option "オーストリア"
+              - option "オマーン"
+              - option "オランダ"
+              - option "カザフスタン"
+              - option "カタール"
+              - option "カナダ"
+              - option "カンボジア"
+              - option "キプロス"
+              - option "ギリシャ"
+              - option "キルギス"
+              - option "クロアチア"
+              - option "サウジアラビア"
+              - option "シンガポール"
+              - option "スイス"
+              - option "スウェーデン"
+              - option "スペイン"
+              - option "スリランカ"
+              - option "スロバキア"
+              - option "スロベニア"
+              - option "チェコ"
+              - option "デンマーク"
+              - option "ドイツ"
+              - option "トリニダード・トバゴ"
+              - option "トルコ"
+              - option "ナイジェリア"
+              - option "ニュージーランド"
+              - option "ノルウェー"
+              - option "ハイチ"
+              - option "ハンガリー"
+              - option "バングラデシュ"
+              - option "フィリピン"
+              - option "フィンランド"
+              - option "ブラジル"
+              - option "フランス"
+              - option "ブルガリア"
+              - option "ベトナム"
+              - option "ベルギー"
+              - option "ポーランド"
+              - option "ポルトガル"
+              - option "マルタ"
+              - option "マレーシア"
+              - option "ミャンマー"
+              - option "メキシコ"
+              - option "モロッコ"
+              - option "ラオス"
+              - option "ラトビア"
+              - option "リトアニア"
+              - option "リヒテンシュタイン"
+              - option "ルーマニア"
+              - option "ルクセンブルク"
+              - option "ロシア連邦"
+              - option "大韓民国"
+              - option "香港"
+              - option "中華人民共和国"
+              - option "南アフリカ"
+          - complementary [ref=e120]:
+            - text: 法人の場合は会社の所在国・地域を、個人の場合は店舗や居住地の所在国・地域を選択してください。
+            - list [ref=e123]:
+              - listitem [ref=e124]:
+                - generic [ref=e125]: 
+                - text: 入力必須項目です
+        - generic [ref=e126]:
+          - generic [ref=e127]:
+            - text: チャネルアイコン
+            - generic [ref=e128]: 任意
+          - generic [ref=e133]:
+            - generic [ref=e134]:
+              - button "Choose a file..." [ref=e135] [cursor=pointer]
+              - generic [ref=e136]: Choose a file...
+            - generic:
+              - generic: 登録
+          - complementary [ref=e137]:
+            - list [ref=e140]:
+              - listitem [ref=e141]:
+                - generic [ref=e142]: 
+                - text: 対応ファイル形式：PNG, JPG, JPEG, GIF, BMP
+              - listitem [ref=e143]:
+                - generic [ref=e144]: 
+                - text: ファイルサイズ：3 MB以内
+        - generic [ref=e145]:
+          - generic [ref=e146]: チャネル名
+          - textbox "チャネル名を入力してください" [ref=e150]: NOXA
+          - complementary [ref=e151]:
+            - list [ref=e154]:
+              - listitem [ref=e155]:
+                - generic [ref=e156]: 
+                - text: 入力必須項目です
+              - listitem [ref=e157]:
+                - generic [ref=e158]: 
+                - text: 特殊な文字（4バイトのユニコード文字）を使用しないでください
+              - listitem [ref=e159]:
+                - generic [ref=e160]: 
+                - text: 20文字以内で入力してください
+        - generic [ref=e161]:
+          - generic [ref=e162]: チャネル説明
+          - textbox "チャネル説明を入力してください" [ref=e166]: NOXA（夜の街の統合OS）のLINEログイン認証用チャネル
+          - complementary [ref=e167]:
+            - list [ref=e170]:
+              - listitem [ref=e171]:
+                - generic [ref=e172]: 
+                - text: 入力必須項目です
+              - listitem [ref=e173]:
+                - generic [ref=e174]: 
+                - text: 特殊な文字（4バイトのユニコード文字）を使用しないでください
+              - listitem [ref=e175]:
+                - generic [ref=e176]: 
+                - text: 500文字以内で入力してください
+        - generic [ref=e177]:
+          - generic [ref=e178]:
+            - text: アプリタイプ
+            - generic [ref=e179]: 
+          - generic [ref=e181]:
+            - generic [ref=e182]:
+              - checkbox "ウェブアプリ" [checked] [ref=e183] [cursor=pointer]
+              - generic [ref=e185] [cursor=pointer]: ウェブアプリ
+            - generic [ref=e186]:
+              - checkbox "ネイティブアプリ" [ref=e187] [cursor=pointer]
+              - generic [ref=e189] [cursor=pointer]: ネイティブアプリ
+          - complementary [ref=e190]:
+            - list [ref=e193]:
+              - listitem [ref=e194]:
+                - generic [ref=e195]: 
+                - text: 入力必須項目です
+        - generic [ref=e196]:
+          - generic [ref=e197]: 2要素認証の必須化
+          - complementary [ref=e202]:
+            - generic [ref=e203]:
+              - text: ユーザーが本チャネルにログインする際に、2要素認証を要求します。
+              - list [ref=e204]:
+                - listitem [ref=e205]: LINEログインの2要素認証は、LINEアカウントによるパスワード認証と、画面に表示された認証番号をスマートフォン版LINEに入力することで行います。
+                - listitem [ref=e206]: 一度2要素認証でログインしたブラウザでは、1年間は信頼済み状態が継続し、認証番号の入力を求められることはありません。
+              - text: 2要素認証について詳しくは、
+              - link "ドキュメント" [ref=e207] [cursor=pointer]:
+                - /url: /ja/docs/line-login/overview/#two-factor-authentication
+              - text: を参照してください。
+        - generic [ref=e208]:
+          - generic [ref=e209]:
+            - text: メールアドレス
+            - generic [ref=e210]: 
+          - textbox "メールアドレスを入力してください" [ref=e214]: wpuhs2216@gmail.com
+          - complementary [ref=e215]:
+            - list [ref=e218]:
+              - listitem [ref=e219]:
+                - generic [ref=e220]: 
+                - text: 入力必須項目です
+              - listitem [ref=e221]:
+                - generic [ref=e222]: 
+                - text: 有効なメールアドレスを入力してください
+              - listitem [ref=e223]:
+                - generic [ref=e224]: 
+                - text: 100文字以内で入力してください
+        - generic [ref=e225]:
+          - generic [ref=e226]:
+            - text: プライバシーポリシーURL
+            - generic [ref=e227]: 任意
+          - textbox "プライバシーポリシーURLを入力してください" [ref=e231]
+          - complementary [ref=e232]:
+            - list [ref=e235]:
+              - listitem [ref=e236]:
+                - generic [ref=e237]: 
+                - text: 有効なHTTPS URLを入力してください
+              - listitem [ref=e238]:
+                - generic [ref=e239]: 
+                - text: 500文字以内で入力してください
+        - generic [ref=e240]:
+          - generic [ref=e241]:
+            - text: サービス利用規約URL
+            - generic [ref=e242]: 任意
+          - textbox "サービス利用規約URLを入力してください" [ref=e246]
+          - complementary [ref=e247]:
+            - list [ref=e250]:
+              - listitem [ref=e251]:
+                - generic [ref=e252]: 
+                - text: 有効なHTTPS URLを入力してください
+              - listitem [ref=e253]:
+                - generic [ref=e254]: 
+                - text: 500文字以内で入力してください
+        - generic [ref=e255]:
+          - generic [ref=e258]:
+            - checkbox "LINE開発者契約に同意します。" [ref=e259] [cursor=pointer]
+            - generic [ref=e261] [cursor=pointer]:
+              - link "LINE開発者契約" [active] [ref=e262]:
+                - /url: https://terms2.line.me/LINE_Developers_Agreement?lang=ja
+              - text: に同意します。
+          - complementary [ref=e263]:
+            - list [ref=e266]:
+              - listitem [ref=e267]:
+                - generic [ref=e268]: 
+                - text: 関連文書をよく読んで、チェックボックスを選択してください
+      - generic [ref=e269]:
+        - button "作成" [disabled]
+    - contentinfo [ref=e270]:
+      - generic [ref=e271]:
+        - generic [ref=e272]: © LY Corporation
+        - generic [ref=e273]:
+          - navigation [ref=e274]:
+            - list [ref=e275]:
+              - listitem [ref=e276]:
+                - link "LINE Developersサイトとは" [ref=e277] [cursor=pointer]:
+                  - /url: /ja/about/
+              - listitem [ref=e278]:
+                - link "規約とポリシー" [ref=e279] [cursor=pointer]:
+                  - /url: /ja/terms-and-policies/
+              - listitem [ref=e280]:
+                - link "商標について" [ref=e281] [cursor=pointer]:
+                  - /url: /ja/trademark/
+              - listitem [ref=e282]:
+                - link "不具合報告フォーム" [ref=e283] [cursor=pointer]:
+                  - /url: https://contact-cc.line.me/serviceId/11556/
+          - navigation [ref=e284]:
+            - list [ref=e285]:
+              - listitem [ref=e286]:
+                - generic [ref=e287] [cursor=pointer]: Family Sites
+                - generic [ref=e288]: 
+                - text:    
+            - button "" [ref=e290] [cursor=pointer]:
+              - generic [ref=e291]: 
+            - link "" [ref=e293] [cursor=pointer]:
+              - /url: https://twitter.com/lycorptech_jp
+              - generic [ref=e294]: 
+  - iframe [ref=e7]:
+    - generic [ref=f1e2]:
+      - img [ref=f1e4]
+      - generic [ref=f1e11]:
+        - heading "Status embed installed correctly" [level=1] [ref=f1e12]:
+          - paragraph [ref=f1e13]: Status embed installed correctly
+        - generic [ref=f1e14]: This will be shown if an incident or maintenance is posted on your status page.
+        - link "View latest updates" [ref=f1e16] [cursor=pointer]:
+          - /url: https://api.line-status.info?utm_source=embed
+      - button [ref=f1e18] [cursor=pointer]:
+        - img [ref=f1e19]

@@ -1,0 +1,5 @@
+[     218ms] [VERBOSE] [DOM] Input elements should have autocomplete attributes (suggested: "current-password"): (More info: https://goo.gl/9p2vKq) %o @ https://noxa-delta.vercel.app/account/login:0
+[     233ms] [ERROR] Failed to load resource: the server responded with a status of 404 () @ https://noxa-delta.vercel.app/privacy?_rsc=1mc9l:0
+[     240ms] [ERROR] Failed to load resource: the server responded with a status of 404 () @ https://noxa-delta.vercel.app/account/reset?_rsc=1mc9l:0
+[     240ms] [ERROR] Failed to load resource: the server responded with a status of 404 () @ https://noxa-delta.vercel.app/terms?_rsc=1mc9l:0
+[    9884ms] [ERROR] Failed to load resource: the server responded with a status of 401 () @ https://asia-northeast1-noxa-platform.cloudfunctions.net/exchangeAuthToken:0

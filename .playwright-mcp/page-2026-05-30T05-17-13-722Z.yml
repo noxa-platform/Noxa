@@ -1,0 +1,151 @@
+- generic [ref=e2]:
+  - heading "NOXA — Variant B · Editorial Minimal" [level=1] [ref=e4]
+  - paragraph [ref=e5]: 雑誌の見開きを意識した余白拡大版。color は violet 3 段階 + wine + bone white に絞り、グラデーション完全撤廃。display タイポは Cormorant italic の存在感で勝負。
+  - generic [ref=e6]:
+    - heading "変更点サマリ" [level=2] [ref=e7]
+    - paragraph [ref=e8]: "余白: hero 96px → 160px、padding 全般 1.5〜2 倍 / グラデ廃止：radial-glow も使わない / display 120px Cormorant Light Italic / divider は bone hairline 10% / 装飾なし、罫線で構造を示す / 色は violet+wine+bone のみ"
+  - generic [ref=e9]: Landing Page · 1280×1280（縦長）
+  - generic [ref=e11]:
+    - generic [ref=e12]:
+      - generic [ref=e13]: NOXA
+      - generic [ref=e14]:
+        - generic [ref=e15]: yorulog
+        - generic [ref=e16]: nomishugy
+        - generic [ref=e17]: community
+      - generic [ref=e19]: Sign in
+    - generic [ref=e20]:
+      - generic [ref=e21]:
+        - generic [ref=e22]: Issue 01
+        - generic [ref=e23]:
+          - text: May 2026
+          - text: Vol. 1 — Refined.
+          - text: An umbrella
+          - text: for the night
+          - text: economy.
+      - generic [ref=e24]:
+        - heading "Nightfall," [level=1] [ref=e25]
+        - heading "refined." [level=1] [ref=e26]
+        - generic [ref=e28]:
+          - text: 働く、集う、つながる。
+          - text: 夜の街に必要なすべてを、ひとつに。
+        - generic [ref=e29]:
+          - generic [ref=e30] [cursor=pointer]: Open an account →
+          - generic [ref=e31] [cursor=pointer]: See the products
+    - generic [ref=e32]:
+      - generic [ref=e33]:
+        - generic [ref=e34]: Three Imprints
+        - generic [ref=e35]:
+          - text: One family.
+          - text: Three rooms.
+      - generic [ref=e36]:
+        - generic [ref=e37]:
+          - generic [ref=e38]: № 01 · YORULOG
+          - generic [ref=e39]:
+            - text: 夜職売上
+            - text: CRM
+          - generic [ref=e40]: For ホスト・キャスト. 今夜の同伴・指名・売上が一目で。
+          - text: try yorulog →
+        - generic [ref=e41]:
+          - generic [ref=e42]: № 02 · NOMISHUGY
+          - generic [ref=e43]:
+            - text: 大阪
+            - text: バーポータル
+          - generic [ref=e44]: バーを見つけ、飲み仲間と出会い、求人を見つける。
+          - text: open nomishugy →
+        - generic [ref=e45]:
+          - generic [ref=e46]: № 03 · COMMUNITY
+          - generic [ref=e47]:
+            - text: 交流
+            - text: 掲示板
+          - generic [ref=e48]: 夜の街で働く・遊ぶ人の声が集まる場所。Coming soon.
+          - text: — in preparation
+  - generic [ref=e49]: Login · 1280×820
+  - generic [ref=e51]:
+    - generic [ref=e52]:
+      - generic [ref=e53]: NOXA
+      - generic [ref=e54]:
+        - generic [ref=e55]: A return.
+        - generic [ref=e56]:
+          - text: Welcome,
+          - text: again.
+        - generic [ref=e58]:
+          - text: おかえりなさい。
+          - text: 夜は夜の文法を持っている。
+      - generic [ref=e59]:
+        - generic [ref=e60]: © 2026 NOXA
+        - generic [ref=e61]: ·
+        - generic [ref=e62]: 利用規約
+        - generic [ref=e63]: ·
+        - generic [ref=e64]: プライバシー
+    - generic [ref=e65]:
+      - generic [ref=e66]:
+        - generic [ref=e67]: Sign in
+        - generic [ref=e68]: NOXA アカウント
+      - generic [ref=e69]:
+        - generic [ref=e70]:
+          - generic [ref=e71]: Email
+          - textbox [ref=e72]: rin@noxa.app
+        - generic [ref=e73]:
+          - generic [ref=e74]: Password
+          - textbox [ref=e75]: ••••••••
+          - generic [ref=e76]: パスワードを忘れた？
+      - button "Sign in" [ref=e77] [cursor=pointer]
+      - generic [ref=e80]: OR
+      - generic [ref=e82]:
+        - button "Continue with Google" [ref=e83] [cursor=pointer]
+        - button "Continue with Apple" [ref=e84] [cursor=pointer]
+      - generic [ref=e85]: New here? Open an account
+  - generic [ref=e86]: Account Dashboard · 1280×900
+  - generic [ref=e88]:
+    - generic [ref=e89]:
+      - generic [ref=e90]: NOXA
+      - generic [ref=e91]:
+        - generic [ref=e92]: Account
+        - generic [ref=e93]: Dashboard
+        - generic [ref=e94]: Plan
+        - generic [ref=e95]: Credits
+        - generic [ref=e96]: Billing
+        - generic [ref=e97]: Team
+      - generic [ref=e98]:
+        - generic [ref=e99]: Services
+        - generic [ref=e100]: — yorulog
+        - generic [ref=e101]: — nomishugy
+        - generic [ref=e102]: — community SOON
+      - generic [ref=e103]:
+        - generic [ref=e104]: 凛
+        - generic [ref=e105]: rin@noxa.app
+    - generic [ref=e106]:
+      - generic [ref=e107]: Account · 2026.05.26
+      - generic [ref=e108]:
+        - heading "こんばんは、凛。" [level=1] [ref=e109]
+        - generic [ref=e110]: Settings
+      - generic [ref=e111]:
+        - generic [ref=e112]:
+          - generic [ref=e113]: Current plan
+          - generic [ref=e114]: NOXA Pro
+          - generic [ref=e115]:
+            - text: ¥4,800 / 月 · Annual
+            - text: 次回更新 2026 / 06 / 12
+        - generic [ref=e116]:
+          - generic [ref=e117]: Credits
+          - generic [ref=e118]:
+            - generic [ref=e119]: 4,200
+            - generic [ref=e120]: / 5,000
+          - generic [ref=e123]: Add credits
+      - generic [ref=e124]: Services
+      - generic [ref=e125]:
+        - generic [ref=e126]:
+          - generic [ref=e127]: № 01 · YORULOG
+          - generic [ref=e128]: 夜職売上CRM
+          - generic [ref=e129]: ¥84,200
+          - generic [ref=e130]: tonight · 営業中
+        - generic [ref=e131]:
+          - generic [ref=e132]: № 02 · NOMISHUGY
+          - generic [ref=e133]: 大阪バーポータル
+          - generic [ref=e134]: 8 messages
+          - generic [ref=e135]: unread · アクティブ
+        - generic [ref=e136]:
+          - generic [ref=e137]: № 03 · COMMUNITY
+          - generic [ref=e138]: 交流掲示板
+          - generic [ref=e139]: "#142"
+          - generic [ref=e140]: waitlist · 近日

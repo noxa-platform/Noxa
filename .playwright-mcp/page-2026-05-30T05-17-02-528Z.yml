@@ -1,0 +1,194 @@
+- generic [ref=e2]:
+  - generic [ref=e3]:
+    - heading "NOXA — Variant A · Warmer Nightfall" [level=1] [ref=e4]
+    - paragraph [ref=e5]: violet ヒエラルキー維持 + gold/champagne を 2nd accent に。yorulog のサブブランド色は wine に変更し親 NOXA と明確分離。温度感を底上げ。
+  - generic [ref=e6]:
+    - heading "変更点サマリ" [level=2] [ref=e7]
+    - paragraph [ref=e8]:
+      - text: "背景:"
+      - code [ref=e9]: "#0B0710"
+      - text: →
+      - code [ref=e10]: "#100A0E"
+      - text: "（青み減・暖色寄り） / 2nd accent: gold"
+      - code [ref=e11]: "#D4B27A"
+      - text: "追加 / yorulog tint: violet → wine / divider: violet hairline → gold hairline / text-primary:"
+      - code [ref=e12]: "#F5F1FA"
+      - text: →
+      - code [ref=e13]: "#F5EDE2"
+  - generic [ref=e14]: Landing Page · 1280×1100
+  - generic [ref=e16]:
+    - generic [ref=e17]:
+      - generic [ref=e18]: NOXA
+      - generic [ref=e19]:
+        - generic [ref=e20]: yorulog
+        - generic [ref=e21]: nomishugy
+        - generic [ref=e22]: community
+        - generic [ref=e23]: 料金
+        - generic [ref=e24]: ニュース
+      - generic [ref=e25]:
+        - generic [ref=e26]: ログイン
+        - button "はじめる" [ref=e27]
+    - generic [ref=e28]:
+      - generic [ref=e29]: 夜の街のための、統合プラットフォーム
+      - heading "Nightfall, refined." [level=1] [ref=e30]:
+        - text: Nightfall,
+        - emphasis [ref=e31]: refined
+        - text: .
+      - generic [ref=e32]:
+        - text: 働く、集う、つながる。
+        - text: 夜の街に必要なすべてを、ひとつに。
+      - generic [ref=e33]:
+        - button "アカウントを作成" [ref=e34]
+        - button "製品を見る ↗" [ref=e35]
+    - generic [ref=e36]:
+      - generic [ref=e37]: 3 PRODUCTS · ONE FAMILY
+      - generic [ref=e38]:
+        - generic [ref=e39]:
+          - generic [ref=e43]: yorulog
+          - generic [ref=e44]: 夜職売上CRM
+          - generic [ref=e45]: ホスト・キャスト向け。今夜の同伴・指名・売上が一目で。
+          - generic [ref=e46]: try yorulog →
+        - generic [ref=e47]:
+          - generic [ref=e51]: nomishugy
+          - generic [ref=e52]: 大阪バーポータル
+          - generic [ref=e53]: バーを見つけ、飲み仲間と出会い、求人を見つける。
+          - generic [ref=e54]: open nomishugy →
+        - generic [ref=e55]:
+          - generic [ref=e59]: community
+          - generic [ref=e60]: 交流掲示板
+          - generic [ref=e61]: 夜の街で働く・遊ぶ人の声が集まる場所。Coming soon.
+          - generic [ref=e62]: 近日公開
+      - generic [ref=e63]:
+        - generic [ref=e65]:
+          - generic [ref=e66]: Get started
+          - generic [ref=e67]:
+            - text: あなたの夜を、
+            - emphasis [ref=e68]: もっと整える
+            - text: 。
+          - generic [ref=e69]: 30 秒でアカウント作成。クレジットカード不要。
+        - button "はじめる →" [ref=e70]
+  - generic [ref=e71]: Login · 1280×820
+  - generic [ref=e73]:
+    - generic [ref=e74]:
+      - generic [ref=e77]: NOXA
+      - generic [ref=e78]:
+        - generic [ref=e79]:
+          - text: おかえりなさい。
+          - text: A warmer night, again.
+        - generic [ref=e80]: yorulog, nomishugy, NOXA Community. ひとつの NOXA アカウントで、全てのサービスに。
+      - generic [ref=e81]:
+        - generic [ref=e82]: © 2026 NOXA
+        - generic [ref=e83]: ·
+        - generic [ref=e84]: 利用規約
+        - generic [ref=e85]: ·
+        - generic [ref=e86]: プライバシー
+    - generic [ref=e87]:
+      - generic [ref=e88]:
+        - generic [ref=e89]: Sign in
+        - generic [ref=e90]: Welcome back
+        - generic [ref=e91]: NOXA アカウントでログイン
+      - generic [ref=e92]:
+        - generic [ref=e93]:
+          - generic [ref=e94]: メールアドレス
+          - textbox [ref=e95]: rin@noxa.app
+        - generic [ref=e96]:
+          - generic [ref=e97]: パスワード
+          - textbox [ref=e98]: ••••••••
+          - generic [ref=e99]: パスワードを忘れた？
+      - button "ログイン" [ref=e100] [cursor=pointer]
+      - generic [ref=e103]: OR
+      - generic [ref=e105]:
+        - button "G Google で続ける" [ref=e106] [cursor=pointer]:
+          - generic [ref=e107]: G
+          - text: Google で続ける
+        - button "Apple で続ける" [ref=e108] [cursor=pointer]: Apple で続ける
+      - generic [ref=e110]: アカウントをお持ちでない？ 新規登録
+  - generic [ref=e111]: Account Dashboard · 1280×900
+  - generic [ref=e113]:
+    - generic [ref=e114]:
+      - generic [ref=e116]: NOXA
+      - generic [ref=e117]:
+        - generic [ref=e118]: Account
+        - generic [ref=e119]:
+          - generic [ref=e120]: ◇
+          - generic [ref=e121]: ダッシュボード
+        - generic [ref=e122]:
+          - generic [ref=e123]: ◈
+          - generic [ref=e124]: プラン
+        - generic [ref=e125]:
+          - generic [ref=e126]: ◆
+          - generic [ref=e127]: クレジット
+        - generic [ref=e128]:
+          - generic [ref=e129]: ◇
+          - generic [ref=e130]: 請求
+        - generic [ref=e131]:
+          - generic [ref=e132]: ◇
+          - generic [ref=e133]: チーム
+      - generic [ref=e134]:
+        - generic [ref=e135]: Services
+        - generic [ref=e138]: yorulog
+        - generic [ref=e141]: nomishugy
+        - generic [ref=e142]:
+          - generic [ref=e144]: community
+          - generic [ref=e145]: SOON
+      - generic [ref=e146]:
+        - generic [ref=e147]: 凛
+        - generic [ref=e148]:
+          - generic [ref=e149]: 凛 / Rin
+          - generic [ref=e150]: rin@noxa.app
+    - generic [ref=e151]:
+      - generic [ref=e152]: Account
+      - generic [ref=e153]:
+        - heading "こんばんは、凛 さん" [level=1] [ref=e154]
+        - button "設定 →" [ref=e155]
+      - generic [ref=e156]:
+        - generic [ref=e159]:
+          - generic [ref=e160]: Current plan
+          - generic [ref=e161]:
+            - generic [ref=e162]: NOXA Pro
+            - generic [ref=e163]: ANNUAL
+          - generic [ref=e164]: ¥4,800 / 月 · 次回更新 2026/06/12
+          - generic [ref=e166]:
+            - generic [ref=e167]: ● yorulog 無制限
+            - generic [ref=e168]: ● nomishugy Premium
+            - generic [ref=e169]: ● Community 早期アクセス
+        - generic [ref=e170]:
+          - generic [ref=e171]: Credits
+          - generic [ref=e172]:
+            - generic [ref=e173]: 4,200
+            - generic [ref=e174]: / 5,000
+          - button "クレジット追加" [ref=e177]
+      - generic [ref=e178]:
+        - heading "サービス" [level=2] [ref=e179]
+        - generic [ref=e180]: 3 つ連携中
+      - generic [ref=e181]:
+        - generic [ref=e182]:
+          - generic [ref=e183]:
+            - generic [ref=e184]:
+              - generic [ref=e185]: "Y"
+              - generic [ref=e186]:
+                - generic [ref=e187]: yorulog
+                - generic [ref=e188]: 夜職売上CRM
+            - generic [ref=e189]: 営業中
+          - generic [ref=e192]: 今夜 ¥84,200
+          - generic [ref=e193]: open →
+        - generic [ref=e194]:
+          - generic [ref=e195]:
+            - generic [ref=e196]:
+              - generic [ref=e197]: "N"
+              - generic [ref=e198]:
+                - generic [ref=e199]: nomishugy
+                - generic [ref=e200]: 大阪バーポータル
+            - generic [ref=e201]: アクティブ
+          - generic [ref=e204]: 8 件の新着メッセージ
+          - generic [ref=e205]: open →
+        - generic [ref=e206]:
+          - generic [ref=e207]:
+            - generic [ref=e208]:
+              - generic [ref=e209]: C
+              - generic [ref=e210]:
+                - generic [ref=e211]: community
+                - generic [ref=e212]: 交流掲示板
+            - generic [ref=e213]: 近日公開
+          - generic [ref=e216]: "ウェイトリスト #142"
+          - generic [ref=e217]: 通知を受け取る →

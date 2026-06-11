@@ -1,0 +1,128 @@
+[      94ms] [INFO] %cDownload the React DevTools for a better development experience: https://react.dev/link/react-devtools font-weight:bold @ http://localhost:3000/_next/static/chunks/cd045_next_dist_492679fb._.js:2303
+[     123ms] [LOG] [HMR] connected @ http://localhost:3000/_next/static/chunks/cd045_next_dist_492679fb._.js:2303
+[    2062ms] [ERROR] A tree hydrated but some attributes of the server rendered HTML didn't match the client properties. This won't be patched up. This can happen if a SSR-ed Client Component used:
+
+- A server/client branch `if (typeof window !== 'undefined')`.
+- Variable input such as `Date.now()` or `Math.random()` which changes each time it's called.
+- Date formatting in a user's locale which doesn't match the server.
+- External changing data without sending a snapshot of it along with the HTML.
+- Invalid HTML tag nesting.
+
+It can also happen if the client has a browser extension installed which messes with the HTML before React loaded.
+
+%s%s https://react.dev/link/hydration-mismatch 
+
+  ...
+    <SegmentViewNode type="page" pagePath="/egshugy-p...">
+      <SegmentTrieNode>
+      <ClientPageRoot Component={function ModPreviewPage} serverProvidedParams={{...}}>
+        <ModPreviewPage params={Promise} searchParams={Promise}>
+          <Suspense>
+            <Inner>
+              <div className="px-4 py-3 ...">
+                <TransportClient>
+                  <main className="noxa-zone" style={{...}}>
+                    <div>
+                    <div>
+                    <div style={{position:"..."}}>
+                      <header>
+                      <section>
+                      <div className="grid grid-..." style={{gap:"clamp...", ...}}>
+                        <section>
+                        <section aria-label="地図パネル">
+                          <PaneTitle>
+                          <div aria-label="地図プレビュー（モック）" role="img" style={{position:"...", ...}}>
+                            <svg>
+                            <svg
+                              aria-hidden={true}
+                              style={{position:"absolute",inset:0,width:"100%",height:"100%",opacity:0.18}}
+                              xmlns="http://www.w3.org/2000/svg"
+-                             viewBox="0 0 100 100"
+-                             preserveAspectRatio="none"
+                            >
+                              <polyline
++                               points="0,55% 25%,48% 50%,52% 75%,44% 100%,50%"
+-                               points="0,55 25,48 50,52 75,44 100,50"
+                                fill="none"
+                                stroke="var(--noxa-border-strong)"
+                                strokeWidth="2"
+-                               vector-effect="non-scaling-stroke"
+                              >
+                              <polyline
++                               points="20%,0 30%,35% 55%,55% 65%,100%"
+-                               points="20,0 30,35 55,55 65,100"
+                                fill="none"
+                                stroke="var(--noxa-border-strong)"
+                                strokeWidth="2"
+-                               vector-effect="non-scaling-stroke"
+                              >
+                            ...
+                          ...
+    ...
+ @ http://localhost:3000/_next/static/chunks/cd045_next_dist_492679fb._.js:3133
+[   20566ms] [ERROR] WebSocket connection to 'ws://localhost:3000/_next/webpack-hmr?id=7UNWa6dCwcl1k4AADAFQd' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:3000/_next/static/chunks/cd045_next_dist_client_f8ab72f2._.js:10879
+[   23939ms] [ERROR] WebSocket connection to 'ws://localhost:3000/_next/webpack-hmr?id=7UNWa6dCwcl1k4AADAFQd' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:3000/_next/static/chunks/cd045_next_dist_client_f8ab72f2._.js:10879
+[   27315ms] [ERROR] WebSocket connection to 'ws://localhost:3000/_next/webpack-hmr?id=7UNWa6dCwcl1k4AADAFQd' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:3000/_next/static/chunks/cd045_next_dist_client_f8ab72f2._.js:10879
+[   30412ms] [LOG] [HMR] connected @ http://localhost:3000/_next/static/chunks/cd045_next_dist_492679fb._.js:2303
+[   33058ms] [INFO] %cDownload the React DevTools for a better development experience: https://react.dev/link/react-devtools font-weight:bold @ http://localhost:3000/_next/static/chunks/cd045_next_dist_492679fb._.js:2303
+[   33084ms] [LOG] [HMR] connected @ http://localhost:3000/_next/static/chunks/cd045_next_dist_492679fb._.js:2303
+[   35028ms] [ERROR] A tree hydrated but some attributes of the server rendered HTML didn't match the client properties. This won't be patched up. This can happen if a SSR-ed Client Component used:
+
+- A server/client branch `if (typeof window !== 'undefined')`.
+- Variable input such as `Date.now()` or `Math.random()` which changes each time it's called.
+- Date formatting in a user's locale which doesn't match the server.
+- External changing data without sending a snapshot of it along with the HTML.
+- Invalid HTML tag nesting.
+
+It can also happen if the client has a browser extension installed which messes with the HTML before React loaded.
+
+%s%s https://react.dev/link/hydration-mismatch 
+
+  ...
+    <SegmentViewNode type="page" pagePath="/egshugy-p...">
+      <SegmentTrieNode>
+      <ClientPageRoot Component={function ModPreviewPage} serverProvidedParams={{...}}>
+        <ModPreviewPage params={Promise} searchParams={Promise}>
+          <Suspense>
+            <Inner>
+              <div className="px-4 py-3 ...">
+                <TransportClient>
+                  <main className="noxa-zone" style={{...}}>
+                    <div>
+                    <div>
+                    <div style={{position:"..."}}>
+                      <header>
+                      <section>
+                      <div className="grid grid-..." style={{gap:"clamp...", ...}}>
+                        <section>
+                        <section aria-label="地図パネル">
+                          <PaneTitle>
+                          <div aria-label="地図プレビュー（モック）" role="img" style={{position:"...", ...}}>
+                            <svg>
+                            <svg
+                              aria-hidden={true}
+                              style={{position:"absolute",inset:0,width:"100%",height:"100%",opacity:0.18}}
+                              xmlns="http://www.w3.org/2000/svg"
+-                             viewBox="0 0 100 100"
+-                             preserveAspectRatio="none"
+                            >
+                              <polyline
++                               points="0,55% 25%,48% 50%,52% 75%,44% 100%,50%"
+-                               points="0,55 25,48 50,52 75,44 100,50"
+                                fill="none"
+                                stroke="var(--noxa-border-strong)"
+                                strokeWidth="2"
+-                               vector-effect="non-scaling-stroke"
+                              >
+                              <polyline
++                               points="20%,0 30%,35% 55%,55% 65%,100%"
+-                               points="20,0 30,35 55,55 65,100"
+                                fill="none"
+                                stroke="var(--noxa-border-strong)"
+                                strokeWidth="2"
+-                               vector-effect="non-scaling-stroke"
+                              >
+                            ...
+                          ...
+    ...
+ @ http://localhost:3000/_next/static/chunks/cd045_next_dist_492679fb._.js:3133

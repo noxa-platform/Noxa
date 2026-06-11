@@ -1,0 +1,36 @@
+- generic [active] [ref=e1]:
+  - generic [ref=e3]:
+    - generic [ref=e4]:
+      - img "Noxa" [ref=e6]
+      - generic [ref=e7]: Noxa
+      - generic [ref=e8]: ログインしてください
+    - generic [ref=e9]:
+      - generic [ref=e10]:
+        - generic [ref=e11]:
+          - generic [ref=e12]: メールアドレス
+          - textbox "メールアドレス" [ref=e13]
+        - generic [ref=e14]:
+          - generic [ref=e15]: パスワード
+          - textbox "パスワード" [ref=e16]
+        - button "パスワードをお忘れですか？" [ref=e18]
+        - button "ログイン" [ref=e19]
+      - generic [ref=e24]: または
+      - generic [ref=e25]:
+        - button "Googleでログイン" [ref=e26]
+        - button "メールリンクでログイン" [ref=e27]:
+          - img
+          - text: メールリンクでログイン
+        - button "Appleでログイン" [ref=e28]:
+          - img
+          - text: Appleでログイン
+      - button "新規アカウント作成" [ref=e30]
+  - generic [ref=e32]:
+    - paragraph [ref=e33]:
+      - text: 当サイトでは、サービス提供と利用分析のために Cookie（Firebase 認証・流入計測等）を使用しています。
+      - link "プライバシーポリシー" [ref=e34] [cursor=pointer]:
+        - /url: /legal/privacy
+    - generic [ref=e35]:
+      - button "拒否" [ref=e36]
+      - button "同意する" [ref=e37]
+  - region "Notifications alt+T"
+  - alert [ref=e38]

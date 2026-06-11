@@ -1,0 +1,118 @@
+- generic [active] [ref=e1]:
+  - main [ref=e3]:
+    - generic [ref=e4]:
+      - generic [ref=e5]:
+        - navigation "breadcrumb" [ref=e6]:
+          - list [ref=e7]:
+            - listitem [ref=e8]:
+              - link "NOXA OS" [ref=e9] [cursor=pointer]:
+                - /url: /
+            - listitem [ref=e10]: ·
+            - listitem [ref=e11]: pos
+        - generic [ref=e12]:
+          - generic [ref=e13]:
+            - generic [ref=e14]: NOXA OS · Module 01 · Order Entry
+            - heading "№ 01 POS · オーダー" [level=1] [ref=e15]:
+              - generic [ref=e16]: № 01
+              - generic [ref=e17]: POS · オーダー
+          - note "このモジュールは決済機能を持ちません" [ref=e18]: 決済なし · 伝票出力まで
+      - generic [ref=e20]:
+        - region "卓選択" [ref=e21]:
+          - heading "卓選択" [level=2] [ref=e22]
+          - generic [ref=e23]:
+            - button "卓1 接客中" [pressed] [ref=e24] [cursor=pointer]:
+              - generic [ref=e26]: 卓1
+              - generic [ref=e28]: 接客中
+              - generic [ref=e29]: 玲奈 · 2名
+            - button "卓2 空席" [ref=e30] [cursor=pointer]:
+              - generic [ref=e32]: 卓2
+              - generic [ref=e34]: 空席
+            - button "卓3 会計待ち" [ref=e35] [cursor=pointer]:
+              - generic [ref=e37]: 卓3
+              - generic [ref=e39]: 会計待ち
+              - generic [ref=e40]: 美咲 · 3名
+            - button "卓4 接客中" [ref=e41] [cursor=pointer]:
+              - generic [ref=e43]: 卓4
+              - generic [ref=e45]: 接客中
+              - generic [ref=e46]: ひかり · 1名
+            - button "卓5 空席" [ref=e47] [cursor=pointer]:
+              - generic [ref=e49]: 卓5
+              - generic [ref=e51]: 空席
+            - button "卓6 接客中" [ref=e52] [cursor=pointer]:
+              - generic [ref=e54]: 卓6
+              - generic [ref=e56]: 接客中
+              - generic [ref=e57]: さくら · 4名
+            - button "卓7 会計待ち" [ref=e58] [cursor=pointer]:
+              - generic [ref=e60]: 卓7
+              - generic [ref=e62]: 会計待ち
+              - generic [ref=e63]: ゆい · 2名
+            - button "卓8 空席" [ref=e64] [cursor=pointer]:
+              - generic [ref=e66]: 卓8
+              - generic [ref=e68]: 空席
+        - region "メニュー" [ref=e69]:
+          - heading "メニュー" [level=2] [ref=e70]
+          - tablist "メニューカテゴリ" [ref=e71]:
+            - tab "フード" [ref=e72] [cursor=pointer]
+            - tab "ドリンク" [selected] [ref=e73] [cursor=pointer]
+            - tab "ボトル" [ref=e74] [cursor=pointer]
+            - tab "サービス" [ref=e75] [cursor=pointer]
+            - tab "セット" [ref=e76] [cursor=pointer]
+          - generic [ref=e77]:
+            - button "ハイボール ¥900 を注文に追加" [ref=e78] [cursor=pointer]:
+              - generic [ref=e79]: ハイボール
+              - generic [ref=e80]: ¥900
+            - button "生ビール ¥1,000 を注文に追加" [ref=e81] [cursor=pointer]:
+              - generic [ref=e82]: 生ビール
+              - generic [ref=e83]: ¥1,000
+            - button "カシスオレンジ ¥1,000 を注文に追加" [ref=e84] [cursor=pointer]:
+              - generic [ref=e85]: カシスオレンジ
+              - generic [ref=e86]: ¥1,000
+            - button "ジントニック ¥1,100 を注文に追加" [ref=e87] [cursor=pointer]:
+              - generic [ref=e88]: ジントニック
+              - generic [ref=e89]: ¥1,100
+            - button "ウーロン茶 ¥600 を注文に追加" [ref=e90] [cursor=pointer]:
+              - generic [ref=e91]: ウーロン茶
+              - generic [ref=e92]: ¥600
+            - button "シャンパングラス ¥2,000 を注文に追加" [ref=e93] [cursor=pointer]:
+              - generic [ref=e94]: シャンパングラス
+              - generic [ref=e95]: ¥2,000
+        - region "現在の注文" [ref=e96]:
+          - heading "現在の注文卓1 · 玲奈" [level=2] [ref=e97]:
+            - text: 現在の注文
+            - generic [ref=e98]: 卓1 · 玲奈
+          - generic [ref=e99]:
+            - generic [ref=e100]:
+              - generic [ref=e101]: 卓1
+              - generic [ref=e102]: 経過 42分
+            - list [ref=e103]:
+              - listitem [ref=e104]:
+                - generic [ref=e105]: 指名（玲奈）
+                - generic [ref=e106]: ×1
+                - generic [ref=e107]: ¥3,000
+              - listitem [ref=e108]:
+                - generic [ref=e109]: セット 60分
+                - generic [ref=e110]: ×2
+                - generic [ref=e111]: ¥10,000
+              - listitem [ref=e112]:
+                - generic [ref=e113]: ハイボール
+                - generic [ref=e114]: ×4
+                - generic [ref=e115]: ¥3,600
+              - listitem [ref=e116]:
+                - generic [ref=e117]: ドンペリ 白
+                - generic [ref=e118]: ×1
+                - generic [ref=e119]: ¥80,000
+            - generic [ref=e120]:
+              - generic [ref=e121]:
+                - generic [ref=e122]: 小計
+                - generic [ref=e123]: ¥96,600
+              - generic [ref=e124]:
+                - generic [ref=e125]: サービス料（15%）
+                - generic [ref=e126]: ¥14,490
+              - generic [ref=e127]:
+                - generic [ref=e128]: 合計
+                - generic [ref=e129]: ¥111,090
+            - generic [ref=e130]:
+              - button "会計伝票を出力" [ref=e131] [cursor=pointer]
+              - button "卓を締める" [ref=e132] [cursor=pointer]
+            - paragraph [ref=e133]: ※ 決済は既存レジ運用。NOXA POS は伝票出力 → ② 売上管理へ自動転記。
+  - region "Notifications alt+T"

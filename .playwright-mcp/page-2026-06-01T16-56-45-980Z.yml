@@ -1,0 +1,155 @@
+- generic [active] [ref=e1]:
+  - main [ref=e3]:
+    - generic [ref=e4]:
+      - generic [ref=e5]:
+        - navigation "breadcrumb" [ref=e6]:
+          - list [ref=e7]:
+            - listitem [ref=e8]:
+              - link "NOXA OS" [ref=e9] [cursor=pointer]:
+                - /url: /
+            - listitem [ref=e10]: ·
+            - listitem [ref=e11]: payroll
+        - generic [ref=e12]:
+          - generic [ref=e13]:
+            - generic [ref=e14]: NOXA OS · Module 05 · Payroll
+            - heading "№ 05 給与" [level=1] [ref=e15]:
+              - generic [ref=e16]: № 05
+              - generic [ref=e17]: 給与
+          - note "モックデータ表示中" [ref=e18]: Mock · 計算ロジック未実装
+      - region "対象絞り込み" [ref=e20]:
+        - generic [ref=e21]: 対象
+        - generic [ref=e22]:
+          - generic [ref=e23]: 月
+          - combobox "対象月" [ref=e24] [cursor=pointer]:
+            - option "2026年6月"
+            - option "2026年5月" [selected]
+            - option "2026年4月"
+            - option "2026年3月"
+        - generic [ref=e25]:
+          - generic [ref=e26]: キャスト
+          - combobox "対象キャスト" [ref=e27] [cursor=pointer]:
+            - option "玲奈" [selected]
+            - option "美咲"
+            - option "ひかり"
+            - option "さくら"
+            - option "ゆい"
+            - option "真奈"
+      - generic [ref=e28]:
+        - region "玲奈の給与明細" [ref=e29]:
+          - generic [ref=e30]:
+            - generic [ref=e31]:
+              - generic [ref=e32]: 給与明細
+              - generic [ref=e33]: 玲奈
+            - generic [ref=e34]: 2026年5月
+          - generic [ref=e35]: 加算
+          - list [ref=e36]:
+            - listitem [ref=e37]:
+              - generic [ref=e38]: 売上歩合（売上 ¥1,050,000 × 40%）
+              - generic [ref=e39]: +¥420,000
+            - listitem [ref=e40]:
+              - generic [ref=e41]: 時給（96h × ¥1,000）
+              - generic [ref=e42]: +¥96,000
+            - listitem [ref=e43]:
+              - generic [ref=e44]: 同伴バック（6件 × ¥5,000）
+              - generic [ref=e45]: +¥30,000
+            - listitem [ref=e46]:
+              - generic [ref=e47]: 指名バック（12件 × ¥1,500）
+              - generic [ref=e48]: +¥18,000
+            - listitem [ref=e49]:
+              - generic [ref=e50]: アフターバック（3件 × ¥3,000）
+              - generic [ref=e51]: +¥9,000
+          - generic [ref=e53]: 減算
+          - list [ref=e54]:
+            - listitem [ref=e55]:
+              - generic [ref=e56]: 遅刻罰金（2回）
+              - generic [ref=e57]: "-¥3,000"
+            - listitem [ref=e58]:
+              - generic [ref=e59]: 欠勤罰金（1回）
+              - generic [ref=e60]: "-¥2,000"
+            - listitem [ref=e61]:
+              - generic [ref=e62]: 立替・前借り精算
+              - generic [ref=e63]: "-¥27,000"
+          - generic [ref=e65]:
+            - generic [ref=e66]: 差引支給額
+            - generic [ref=e67]: ¥541,000
+        - complementary "支給内訳サマリ" [ref=e68]:
+          - generic [ref=e69]: 内訳サマリ
+          - generic [ref=e70]:
+            - generic [ref=e71]: 総加算
+            - generic [ref=e72]: ¥573,000
+          - generic [ref=e73]:
+            - generic [ref=e74]: 総控除
+            - generic [ref=e75]: "-¥32,000"
+          - generic [ref=e77]:
+            - generic [ref=e78]: 差引
+            - generic [ref=e79]: ¥541,000
+          - generic [ref=e80]:
+            - generic [ref=e81]: 売上歩合率
+            - generic [ref=e82]: 40%
+            - generic [ref=e83]: 対象売上 ¥1,050,000
+          - paragraph [ref=e84]: ※ 確定値はモック。実装時は ② 売上管理 + ④ 勤怠から自動取得。
+      - region "全スタッフ月締め" [ref=e85]:
+        - generic [ref=e86]:
+          - heading "全スタッフ月締め · 2026年5月" [level=2] [ref=e87]
+          - generic [ref=e88]:
+            - button "PDF出力（未実装）" [ref=e89] [cursor=pointer]:
+              - img [ref=e90]
+              - text: PDF 出力
+            - button "振込データ出力（未実装）" [ref=e94] [cursor=pointer]:
+              - img [ref=e95]
+              - text: 振込データ出力
+        - table [ref=e98]:
+          - rowgroup [ref=e99]:
+            - row "キャスト 総支給 控除合計 差引支給額" [ref=e100]:
+              - columnheader "キャスト" [ref=e101]
+              - columnheader "総支給" [ref=e102]
+              - columnheader "控除合計" [ref=e103]
+              - columnheader "差引支給額" [ref=e104]
+          - rowgroup [ref=e105]:
+            - row "玲奈 ¥573,000 -¥32,000 ¥541,000" [ref=e106]:
+              - cell "玲奈" [ref=e107]
+              - cell "¥573,000" [ref=e108]
+              - cell "-¥32,000" [ref=e109]
+              - cell "¥541,000" [ref=e110]
+            - row "美咲 ¥418,000 -¥12,000 ¥406,000" [ref=e111]:
+              - cell "美咲" [ref=e112]
+              - cell "¥418,000" [ref=e113]
+              - cell "-¥12,000" [ref=e114]
+              - cell "¥406,000" [ref=e115]
+            - row "ひかり ¥285,000 -¥5,000 ¥280,000" [ref=e116]:
+              - cell "ひかり" [ref=e117]
+              - cell "¥285,000" [ref=e118]
+              - cell "-¥5,000" [ref=e119]
+              - cell "¥280,000" [ref=e120]
+            - row "さくら ¥362,000 -¥18,000 ¥344,000" [ref=e121]:
+              - cell "さくら" [ref=e122]
+              - cell "¥362,000" [ref=e123]
+              - cell "-¥18,000" [ref=e124]
+              - cell "¥344,000" [ref=e125]
+            - row "ゆい ¥210,000 -¥3,000 ¥207,000" [ref=e126]:
+              - cell "ゆい" [ref=e127]
+              - cell "¥210,000" [ref=e128]
+              - cell "-¥3,000" [ref=e129]
+              - cell "¥207,000" [ref=e130]
+            - row "真奈 ¥156,000 -¥2,000 ¥154,000" [ref=e131]:
+              - cell "真奈" [ref=e132]
+              - cell "¥156,000" [ref=e133]
+              - cell "-¥2,000" [ref=e134]
+              - cell "¥154,000" [ref=e135]
+            - row "TOTAL ¥2,004,000 -¥72,000 ¥1,932,000" [ref=e136]:
+              - cell "TOTAL" [ref=e137]
+              - cell "¥2,004,000" [ref=e138]
+              - cell "-¥72,000" [ref=e139]
+              - cell "¥1,932,000" [ref=e140]
+  - generic [ref=e142]:
+    - paragraph [ref=e143]:
+      - text: 当サイトでは、サービス提供と利用分析のために Cookie（Firebase 認証・流入計測等）を使用しています。
+      - link "プライバシーポリシー" [ref=e144] [cursor=pointer]:
+        - /url: /legal/privacy
+    - generic [ref=e145]:
+      - button "拒否" [ref=e146]
+      - button "同意する" [ref=e147]
+  - region "Notifications alt+T"
+  - button "Open Next.js Dev Tools" [ref=e153] [cursor=pointer]:
+    - img [ref=e154]
+  - alert [ref=e157]

@@ -1,0 +1,11 @@
+- iframe [ref=e7]:
+  - generic [ref=f2e2]:
+    - img [ref=f2e4]
+    - generic [ref=f2e11]:
+      - heading "Status..." [level=1] [ref=f2e12]:
+        - paragraph [ref=f2e13]: Status...
+      - generic [ref=f2e14]: This will be shown if an incident or maintenance is posted on your status page.
+      - link "View latest updates" [ref=f2e16] [cursor=pointer]:
+        - /url: https://api.line-status.info?utm_source=embed
+    - button [ref=f2e18] [cursor=pointer]:
+      - img [ref=f2e19]

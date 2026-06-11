@@ -36,3 +36,4 @@ firebase-adminsdk-*.json
 .vscode/
 .idea/
 .vercel
+.gstack/

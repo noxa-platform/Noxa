@@ -1,0 +1,137 @@
+- generic [ref=e1]:
+  - link "メインコンテンツへスキップ" [ref=e2] [cursor=pointer]:
+    - /url: "#main"
+  - main [ref=e3]:
+    - generic [ref=e7]:
+      - complementary [ref=e8]:
+        - link "Noxa" [ref=e9] [cursor=pointer]:
+          - /url: /
+          - text: "N"
+          - emphasis [ref=e10]: o
+          - text: xa
+        - generic [ref=e11]:
+          - generic [ref=e12]: 店舗端末
+          - generic [ref=e13]: フロア端末
+          - generic [ref=e14]: 給与・売掛・個人機能は非表示
+        - generic [ref=e15]:
+          - generic [ref=e16]: 店舗端末 · フロア端末
+          - link "POS" [ref=e17] [cursor=pointer]:
+            - /url: /pos
+            - generic [ref=e19]: POS
+          - link "席回し" [ref=e20] [cursor=pointer]:
+            - /url: /seating
+            - generic [ref=e22]: 席回し
+          - link "勤怠" [ref=e23] [cursor=pointer]:
+            - /url: /attendance
+            - generic [ref=e25]: 勤怠
+          - link "初回案内" [ref=e26] [cursor=pointer]:
+            - /url: /first-visit
+            - generic [ref=e28]: 初回案内
+          - link "送迎" [ref=e29] [cursor=pointer]:
+            - /url: /transport
+            - generic [ref=e31]: 送迎
+          - link "在庫" [ref=e32] [cursor=pointer]:
+            - /url: /inventory
+            - generic [ref=e34]: 在庫
+          - link "体験入店" [ref=e35] [cursor=pointer]:
+            - /url: /trial
+            - generic [ref=e37]: 体験入店
+          - link "予約・VIP" [ref=e38] [cursor=pointer]:
+            - /url: /reservation
+            - generic [ref=e40]: 予約・VIP
+        - generic [ref=e41]:
+          - generic [ref=e42]: "N"
+          - generic [ref=e44]: Noxa ユーザー
+          - button "↗" [ref=e45] [cursor=pointer]
+      - main [ref=e46]:
+        - generic [ref=e48]:
+          - navigation "breadcrumb" [ref=e49]:
+            - list [ref=e50]:
+              - listitem [ref=e51]:
+                - link "Noxa OS" [ref=e52] [cursor=pointer]:
+                  - /url: /account
+              - listitem [ref=e53]: ·
+              - listitem [ref=e54]: pos
+          - generic [ref=e55]:
+            - generic [ref=e56]:
+              - generic [ref=e57]: Noxa OS · Module 01 · Order Entry
+              - heading "№ 01 POS · オーダー" [level=1] [ref=e58]:
+                - generic [ref=e59]: № 01
+                - generic [ref=e60]: POS · オーダー
+            - note [ref=e62]: 店舗端末 · 実データ
+          - generic [ref=e64]:
+            - region "卓選択" [ref=e65]:
+              - heading "卓 （席回しと同期）" [level=2] [ref=e66]
+              - generic [ref=e67]:
+                - button "A 1伝票 · ¥7,500" [ref=e68] [cursor=pointer]:
+                  - generic [ref=e70]: A
+                  - generic [ref=e72]: 1伝票 · ¥7,500
+                - button "B-1 1伝票 · ¥7,500 琥" [ref=e73] [cursor=pointer]:
+                  - generic [ref=e75]: B-1
+                  - generic [ref=e77]: 1伝票 · ¥7,500
+                  - generic [ref=e78]: 琥
+                - button "B-2 空席" [pressed] [ref=e79] [cursor=pointer]:
+                  - generic [ref=e81]: B-2
+                  - generic [ref=e83]: 空席
+                - button "C-1 空席" [ref=e84] [cursor=pointer]:
+                  - generic [ref=e86]: C-1
+                  - generic [ref=e88]: 空席
+                - button "C-2 空席" [ref=e89] [cursor=pointer]:
+                  - generic [ref=e91]: C-2
+                  - generic [ref=e93]: 空席
+                - button "D 空席" [ref=e94] [cursor=pointer]:
+                  - generic [ref=e96]: D
+                  - generic [ref=e98]: 空席
+                - button "E-1 空席" [ref=e99] [cursor=pointer]:
+                  - generic [ref=e101]: E-1
+                  - generic [ref=e103]: 空席
+                - button "E-2 空席" [ref=e104] [cursor=pointer]:
+                  - generic [ref=e106]: E-2
+                  - generic [ref=e108]: 空席
+                - button "E-3 空席" [ref=e109] [cursor=pointer]:
+                  - generic [ref=e111]: E-3
+                  - generic [ref=e113]: 空席
+            - region "オーダー" [ref=e114]:
+              - heading "B-2 の伝票" [level=2] [ref=e119]
+              - button "＋ 伝票" [active] [ref=e121] [cursor=pointer]
+              - generic [ref=e122]: 「＋ 伝票」で新しい伝票を開いてください。
+            - region "会計" [ref=e116]:
+              - heading "会計" [level=2] [ref=e117]
+              - generic [ref=e118]: 伝票を選択すると会計伝票が表示されます。
+          - dialog "新規伝票" [ref=e123]:
+            - generic [ref=e124]:
+              - generic [ref=e125]: B-2 · 新規伝票
+              - generic [ref=e126]:
+                - generic [ref=e127]: 客層
+                - generic [ref=e128]:
+                  - button "通常" [ref=e129] [cursor=pointer]
+                  - button "初回" [ref=e130] [cursor=pointer]
+                  - button "R内" [ref=e131] [cursor=pointer]
+                  - button "R後" [ref=e132] [cursor=pointer]
+              - generic [ref=e133]:
+                - generic [ref=e134]: 担当（指名）キャスト
+                - generic [ref=e135]:
+                  - button "指定なし" [ref=e136] [cursor=pointer]
+                  - button "TO-YA" [ref=e137] [cursor=pointer]
+                  - button "琥" [ref=e138] [cursor=pointer]
+                  - button "じゅり" [ref=e139] [cursor=pointer]
+                  - button "聡" [ref=e140] [cursor=pointer]
+                  - button "夏目" [ref=e141] [cursor=pointer]
+                  - button "カヲル" [ref=e142] [cursor=pointer]
+                  - button "J" [ref=e143] [cursor=pointer]
+                  - button "祐也" [ref=e144] [cursor=pointer]
+                  - button "迅" [ref=e145] [cursor=pointer]
+                  - button "ちんすこう" [ref=e146] [cursor=pointer]
+                  - button "夢麗" [ref=e147] [cursor=pointer]
+                  - button "宗" [ref=e148] [cursor=pointer]
+                  - button "クロム" [ref=e149] [cursor=pointer]
+                  - button "大和" [ref=e150] [cursor=pointer]
+                  - button "スバル" [ref=e151] [cursor=pointer]
+              - generic [ref=e152]:
+                - generic [ref=e153]: 顧客（担当の既存客から選択）
+                - generic [ref=e154]: 担当キャストを選ぶと、その顧客から選べます（または下に入力）。
+                - textbox "その他（手入力）" [ref=e155]
+              - generic [ref=e156]:
+                - button "伝票を作成" [ref=e157] [cursor=pointer]
+                - button "戻る" [ref=e158] [cursor=pointer]
+  - alert [ref=e6]

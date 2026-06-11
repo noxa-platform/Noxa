@@ -1,0 +1,11 @@
+- generic [active] [ref=e1]:
+  - generic [ref=e5]:
+    - paragraph [ref=e6]:
+      - text: 当サイトでは、サービス提供と利用分析のために Cookie（Firebase 認証・流入計測等）を使用しています。
+      - link "プライバシーポリシー" [ref=e7] [cursor=pointer]:
+        - /url: /legal/privacy
+    - generic [ref=e8]:
+      - button "拒否" [ref=e9]
+      - button "同意する" [ref=e10]
+  - region "Notifications alt+T"
+  - alert [ref=e11]

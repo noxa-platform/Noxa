@@ -1,0 +1,17 @@
+- generic [active] [ref=e1]:
+  - link "メインコンテンツへスキップ" [ref=e2] [cursor=pointer]:
+    - /url: "#main"
+  - main [ref=e3]:
+    - main [ref=e4]:
+      - generic [ref=e5]: 404 · Not Found
+      - heading "404" [level=1] [ref=e6]
+      - paragraph [ref=e7]: この夜は、見つかりませんでした。
+      - paragraph [ref=e8]: お探しのページは移動した、または存在しません。
+      - generic [ref=e9]:
+        - link "ホームへ戻る" [ref=e10] [cursor=pointer]:
+          - /url: /
+        - link "アカウント" [ref=e11] [cursor=pointer]:
+          - /url: /account
+  - button "Open Next.js Dev Tools" [ref=e17] [cursor=pointer]:
+    - img [ref=e18]
+  - alert [ref=e21]

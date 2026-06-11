@@ -1,0 +1,42 @@
+- generic [active] [ref=e1]:
+  - link "メインコンテンツへスキップ" [ref=e2] [cursor=pointer]:
+    - /url: "#main"
+  - main [ref=e3]:
+    - main [ref=e4]:
+      - generic [ref=e5]:
+        - link "Noxa" [ref=e6] [cursor=pointer]:
+          - /url: /
+          - text: "N"
+          - emphasis [ref=e7]: o
+          - text: xa
+        - generic [ref=e8]: 店舗デバイスログイン
+        - generic [ref=e9]:
+          - generic [ref=e10]:
+            - generic [ref=e11]: 店舗 ID
+            - textbox "店舗 ID" [ref=e12]:
+              - /placeholder: 店舗コード
+              - text: 16OtcQIeDA786qsAO1dP
+          - generic [ref=e13]:
+            - generic [ref=e14]: 端末プロファイル
+            - generic [ref=e15]:
+              - button "フロア端末 POS・席回し・初回案内・勤怠打刻・送迎・在庫" [pressed] [ref=e16] [cursor=pointer]:
+                - generic [ref=e17]: フロア端末
+                - generic [ref=e18]: POS・席回し・初回案内・勤怠打刻・送迎・在庫
+              - button "初回案内パネル 初回案内（パネル表示）のみ" [ref=e19] [cursor=pointer]:
+                - generic [ref=e20]: 初回案内パネル
+                - generic [ref=e21]: 初回案内（パネル表示）のみ
+              - button "レジ / 締め端末 POS・在庫・締め" [ref=e22] [cursor=pointer]:
+                - generic [ref=e23]: レジ / 締め端末
+                - generic [ref=e24]: POS・在庫・締め
+          - generic [ref=e25]:
+            - generic [ref=e26]: 店舗管理パスワード（PIN）
+            - textbox "店舗管理パスワード（PIN）" [ref=e27]:
+              - /placeholder: • • • • • •
+              - text: "482913"
+          - button "ログイン中…" [disabled] [ref=e32]
+        - paragraph [ref=e29]:
+          - text: 給与・売掛・リスク客は端末では表示されません。
+          - text: オーナーの方は
+          - link "個人ログイン" [ref=e30] [cursor=pointer]:
+            - /url: /account/login
+  - alert [ref=e31]

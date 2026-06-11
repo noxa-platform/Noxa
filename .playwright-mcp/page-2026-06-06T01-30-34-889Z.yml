@@ -1,0 +1,11 @@
+- iframe [ref=e7]:
+  - generic [ref=f16e2]:
+    - img [ref=f16e4]
+    - generic [ref=f16e11]:
+      - heading "Status embed installed correctly" [level=1] [ref=f16e12]:
+        - paragraph [ref=f16e13]: Status embed installed correctly
+      - generic [ref=f16e14]: This will be shown if an incident or maintenance is posted on your status page.
+      - link "View latest updates" [ref=f16e16] [cursor=pointer]:
+        - /url: https://api.line-status.info?utm_source=embed
+    - button [ref=f16e18] [cursor=pointer]:
+      - img [ref=f16e19]

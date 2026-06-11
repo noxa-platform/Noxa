@@ -1,0 +1,123 @@
+- generic [active] [ref=e1]:
+  - main [ref=e3]:
+    - generic [ref=e4]:
+      - generic [ref=e5]:
+        - navigation "breadcrumb" [ref=e6]:
+          - list [ref=e7]:
+            - listitem [ref=e8]:
+              - link "NOXA OS" [ref=e9] [cursor=pointer]:
+                - /url: /
+            - listitem [ref=e10]: ·
+            - listitem [ref=e11]: transport
+        - generic [ref=e12]:
+          - generic [ref=e13]:
+            - generic [ref=e14]: NOXA OS · Module 07 · Transport
+            - heading "№ 07 送迎" [level=1] [ref=e15]:
+              - generic [ref=e16]: № 07
+              - generic [ref=e17]: 送迎
+          - note "このモジュールはモックUIです" [ref=e18]: モック UI · ロジックなし
+      - region "配車ボード" [ref=e20]:
+        - heading "配車ボード" [level=2] [ref=e21]
+        - generic [ref=e22]:
+          - 'article "アルファード #1 — 待機中" [ref=e23]':
+            - generic [ref=e24]:
+              - generic [ref=e25]: "アルファード #1"
+              - generic [ref=e26]: 待機中
+            - generic [ref=e28]: 田中ドライバー
+          - 'article "ヴェルファイア #2 — 送迎中" [ref=e29]':
+            - generic [ref=e30]:
+              - generic [ref=e31]: "ヴェルファイア #2"
+              - generic [ref=e32]: 送迎中
+            - generic [ref=e34]: 山田ドライバー
+            - generic [ref=e35]: 大阪ミナミ → 梅田
+          - 'article "ハイエース #3 — 戻り中" [ref=e36]':
+            - generic [ref=e37]:
+              - generic [ref=e38]: "ハイエース #3"
+              - generic [ref=e39]: 戻り中
+            - generic [ref=e41]: 佐藤ドライバー
+            - generic [ref=e42]: 心斎橋より戻り中
+      - generic [ref=e43]:
+        - region "送迎リクエスト一覧" [ref=e44]:
+          - heading "送迎リクエスト" [level=2] [ref=e45]
+          - generic [ref=e46]:
+            - rowheader [ref=e47]:
+              - generic [ref=e48]: 時刻
+              - generic [ref=e49]: 種別
+              - generic [ref=e50]: 行き先
+              - generic [ref=e51]: 担当
+              - generic [ref=e52]: 状態
+            - list "送迎リクエスト" [ref=e53]:
+              - row "22:15 同伴PU 北新地 THE BAR 玲奈 配車済 玲奈 のリクエストに配車する" [selected] [ref=e54] [cursor=pointer]:
+                - generic [ref=e55]: 22:15
+                - generic [ref=e56]: 同伴PU
+                - generic [ref=e57]: 北新地 THE BAR
+                - generic [ref=e58]: 玲奈
+                - generic [ref=e59]: 配車済
+                - button "玲奈 のリクエストに配車する" [ref=e60]: 配車する
+              - row "22:30 同伴PU 心斎橋 Lounge Lux ひかり 待機 ひかり のリクエストに配車する" [ref=e61] [cursor=pointer]:
+                - generic [ref=e62]: 22:30
+                - generic [ref=e63]: 同伴PU
+                - generic [ref=e64]: 心斎橋 Lounge Lux
+                - generic [ref=e65]: ひかり
+                - generic [ref=e66]: 待機
+                - button "ひかり のリクエストに配車する" [ref=e67]: 配車する
+              - row "23:45 退勤 堺筋本町（自宅方面） 美咲 送迎中 美咲 のリクエストに配車する" [ref=e68] [cursor=pointer]:
+                - generic [ref=e69]: 23:45
+                - generic [ref=e70]: 退勤
+                - generic [ref=e71]: 堺筋本町（自宅方面）
+                - generic [ref=e72]: 美咲
+                - generic [ref=e73]: 送迎中
+                - button "美咲 のリクエストに配車する" [disabled] [ref=e74]: 配車する
+              - row "01:00 退勤 天王寺（自宅方面） さくら 待機 さくら のリクエストに配車する" [ref=e75] [cursor=pointer]:
+                - generic [ref=e76]: 01:00
+                - generic [ref=e77]: 退勤
+                - generic [ref=e78]: 天王寺（自宅方面）
+                - generic [ref=e79]: さくら
+                - generic [ref=e80]: 待機
+                - button "さくら のリクエストに配車する" [ref=e81]: 配車する
+              - row "01:30 退勤 難波周辺 ゆい 完了 ゆい のリクエストに配車する" [ref=e82] [cursor=pointer]:
+                - generic [ref=e83]: 01:30
+                - generic [ref=e84]: 退勤
+                - generic [ref=e85]: 難波周辺
+                - generic [ref=e86]: ゆい
+                - generic [ref=e87]: 完了
+                - button "ゆい のリクエストに配車する" [disabled] [ref=e88]: 配車する
+        - region "地図パネル" [ref=e89]:
+          - heading "地図プレビュー" [level=2] [ref=e90]
+          - img "地図プレビュー（モック）" [ref=e91]:
+            - img [ref=e92]
+            - img [ref=e93]
+            - generic:
+              - generic: MAP PREVIEW
+              - generic: 実地図 API 未接続
+            - generic "地図凡例" [ref=e105]:
+              - generic [ref=e108]: 待機中
+              - generic [ref=e111]: 送迎中
+              - generic [ref=e114]: 戻り中
+          - generic "玲奈 のリクエスト詳細" [ref=e115]:
+            - generic [ref=e116]:
+              - generic [ref=e117]: 玲奈
+              - generic [ref=e118]: 配車済
+            - generic [ref=e119]:
+              - generic [ref=e120]:
+                - generic [ref=e121]: 時刻
+                - generic [ref=e122]: 22:15
+              - generic [ref=e123]:
+                - generic [ref=e124]: 種別
+                - generic [ref=e125]: 同伴PU
+              - generic [ref=e126]:
+                - generic [ref=e127]: 行き先
+                - generic [ref=e128]: 北新地 THE BAR
+            - button "Google Maps で開く（モック）" [ref=e129] [cursor=pointer]
+  - generic [ref=e131]:
+    - paragraph [ref=e132]:
+      - text: 当サイトでは、サービス提供と利用分析のために Cookie（Firebase 認証・流入計測等）を使用しています。
+      - link "プライバシーポリシー" [ref=e133] [cursor=pointer]:
+        - /url: /legal/privacy
+    - generic [ref=e134]:
+      - button "拒否" [ref=e135]
+      - button "同意する" [ref=e136]
+  - region "Notifications alt+T"
+  - button "Open Next.js Dev Tools" [ref=e142] [cursor=pointer]:
+    - img [ref=e143]
+  - alert [ref=e146]
