@@ -224,9 +224,12 @@ export function useMenuStore(user: User): UseMenuStore {
         const pool = visiblePanels.filter((p) => p.kind !== 'info').map((p) => p.id);
         const nextEx = Array.from(new Set([...prevEx, ...pool.filter((id) => !ids.includes(id))])).filter((id) => !ids.includes(id));
         for (const id of ids) if (!starts[id]) starts[id] = now;
+        // 空席卓に指名が入ったら開卓（席回しが ACTIVE で表示され、残り時間カウントも開始）
+        const wasEmpty = !tdoc.status || tdoc.status === 'EMPTY';
         await setDoc(doc(db, `shop_shops/${shopId}/seating_tables/${table.id}`), {
           currentHostIds: nextCur, requestedHostIds: nextReq, excludedHostIds: nextEx,
           assignedHistory: nextHist, castStartTimes: starts, updatedAt: serverTimestamp(),
+          ...(wasEmpty ? { status: 'ACTIVE', startTime: now, entryTime: now } : {}),
         }, { merge: true });
       }
     }
