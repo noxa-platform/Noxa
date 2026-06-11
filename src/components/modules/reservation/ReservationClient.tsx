@@ -9,6 +9,7 @@ import {
 import type { User } from 'firebase/auth';
 import { db } from '@/lib/firebase/config';
 import { useShopId } from '@/lib/useShopId';
+import { useShopConfig } from '@/lib/shopConfig';
 
 /**
  * 予約モジュール（実データ）
@@ -96,6 +97,7 @@ const emptyForm = (): FormState => ({ date: todayStr(), time: '', customerName: 
 
 export function ReservationClient({ user }: { user: User }) {
   const shop = useShopId(user);
+  const { t } = useShopConfig(user);
   const [activeTab, setActiveTab] = useState<'timeline' | 'vip'>('timeline');
   const [reservations, setReservations] = useState<Reservation[]>([]);
   const [vips, setVips] = useState<VipGuest[]>([]);
@@ -425,7 +427,7 @@ export function ReservationClient({ user }: { user: User }) {
                       <FormInput label="日付" value={form.date} onChange={(v) => setF('date', v)} type="date" />
                       <FormInput label="時刻" value={form.time} onChange={(v) => setF('time', v)} type="time" />
                       <FormInput label="人数" value={form.guests} onChange={(v) => setF('guests', v)} type="number" />
-                      <FormInput label="担当" value={form.cast} onChange={(v) => setF('cast', v)} placeholder="指名キャスト" />
+                      <FormInput label="担当" value={form.cast} onChange={(v) => setF('cast', v)} placeholder={`${t('nomination')}${t('cast')}`} />
                       <FormInput label="席" value={form.seat} onChange={(v) => setF('seat', v)} placeholder="卓番号" />
                     </div>
                     <FormInput label="メモ" value={form.memo} onChange={(v) => setF('memo', v)} placeholder="誕生日サプライズ など" />
@@ -536,7 +538,7 @@ export function ReservationClient({ user }: { user: User }) {
                                   fontVariantNumeric: 'tabular-nums',
                                 }}
                               >
-                                {r.cast && <span>指名: {r.cast}</span>}
+                                {r.cast && <span>{t('nomination')}: {r.cast}</span>}
                                 {r.guests > 0 && <span>{r.guests}名</span>}
                                 {r.seat && <span>卓: {r.seat}</span>}
                               </div>

@@ -10,6 +10,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { User } from 'firebase/auth';
 import { useMenuStore } from '@/lib/menu/store';
+import { useShopConfig } from '@/lib/shopConfig';
 import { COLOR_HEX, COLOR_LABEL, COLOR_ORDER, type MenuColor, type MenuPanel } from '@/lib/menu/types';
 
 const mono = 'var(--noxa-font-mono)';
@@ -28,6 +29,7 @@ type Checked = Record<string, MenuColor[]>;
 export function FirstVisitClient({ user }: { user: User }) {
   const store = useMenuStore(user);
   const { visiblePanels, tables, config } = store;
+  const { t } = useShopConfig(user); // 用語: 指名/キャスト/お客様（業種で切替）
 
   const [pickColor, setPickColor] = useState<MenuColor>('yellow');
   const [checked, setChecked] = useState<Checked>({});
@@ -111,7 +113,7 @@ export function FirstVisitClient({ user }: { user: User }) {
       <header style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap', marginBottom: 16 }}>
         <div style={{ marginRight: 'auto' }}>
           <div className="noxa-eyebrow" style={{ fontSize: 11 }}>Noxa OS · First Visit</div>
-          <h1 className="noxa-display" style={{ fontSize: 'clamp(20px,3vw,30px)', margin: 0 }}>初回案内 <span style={{ fontFamily: mono, fontSize: 12, color: 'var(--noxa-text-faint)' }}>メニュー / 指名</span></h1>
+          <h1 className="noxa-display" style={{ fontSize: 'clamp(20px,3vw,30px)', margin: 0 }}>初回案内 <span style={{ fontFamily: mono, fontSize: 12, color: 'var(--noxa-text-faint)' }}>メニュー / {t('nomination')}</span></h1>
         </div>
         {/* 色ピッカー */}
         <div style={{ display: 'flex', gap: 6 }}>
@@ -129,7 +131,7 @@ export function FirstVisitClient({ user }: { user: User }) {
 
       {visiblePanels.length === 0 ? (
         <div style={{ padding: 40, textAlign: 'center', color: 'var(--noxa-text-muted)', fontSize: 14 }}>
-          パネルがありません。{store.canManage ? '「⚙ 設定」からキャストを追加してください。' : 'オーナーがメニューを設定すると表示されます。'}
+          パネルがありません。{store.canManage ? `「⚙ 設定」から${t('cast')}を追加してください。` : 'オーナーがメニューを設定すると表示されます。'}
         </div>
       ) : (
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(clamp(120px,18vw,180px), 1fr))', gap: 'clamp(8px,1.5vw,14px)' }}>
@@ -174,7 +176,7 @@ export function FirstVisitClient({ user }: { user: User }) {
       {totalSelections > 0 && (
         <button type="button" onClick={openConfirm} disabled={submitting}
           style={{ position: 'sticky', bottom: 16, marginTop: 20, marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 8, minHeight: 52, padding: '0 26px', borderRadius: 26, cursor: 'pointer', background: 'var(--noxa-accent-primary)', color: '#fff', border: 'none', fontSize: 16, fontWeight: 700, boxShadow: 'var(--noxa-glow-soft)' }}>
-          指名を確定 <span style={{ fontFamily: mono, background: 'rgba(255,255,255,0.25)', borderRadius: 12, padding: '2px 10px' }}>{totalSelections}</span>
+          {t('nomination')}を確定 <span style={{ fontFamily: mono, background: 'rgba(255,255,255,0.25)', borderRadius: 12, padding: '2px 10px' }}>{totalSelections}</span>
         </button>
       )}
 
@@ -233,7 +235,7 @@ export function FirstVisitClient({ user }: { user: User }) {
       {/* 指名確定モーダル */}
       {orderGroups && (
         <Overlay onClose={() => setOrderGroups(null)}>
-          <h3 style={{ margin: '0 0 12px', fontFamily: 'var(--noxa-font-display-jp)' }}>指名を確定</h3>
+          <h3 style={{ margin: '0 0 12px', fontFamily: 'var(--noxa-font-display-jp)' }}>{t('nomination')}を確定</h3>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 14, maxHeight: '60vh', overflowY: 'auto' }}>
             {orderGroups.map((g, gi) => (
               <div key={g.color} style={{ borderRadius: 12, border: `1px solid ${COLOR_HEX[g.color]}`, padding: 12 }}>
@@ -250,7 +252,7 @@ export function FirstVisitClient({ user }: { user: User }) {
                     {tables.map((t) => <option key={t.id} value={t.name}>{t.name}</option>)}
                     {g.seat && !tables.some((t) => t.name === g.seat) && <option value={g.seat}>{g.seat}</option>}
                   </select>
-                  <input value={g.customerName} onChange={(e) => setOrderGroups((p) => p && p.map((x, i) => i === gi ? { ...x, customerName: e.target.value } : x))} placeholder="お客様名" style={field} />
+                  <input value={g.customerName} onChange={(e) => setOrderGroups((p) => p && p.map((x, i) => i === gi ? { ...x, customerName: e.target.value } : x))} placeholder={`${t('customer')}名`} style={field} />
                   <textarea value={g.memo} onChange={(e) => setOrderGroups((p) => p && p.map((x, i) => i === gi ? { ...x, memo: e.target.value } : x))} placeholder="メモ（任意）" rows={2} style={{ ...field, resize: 'vertical' }} />
                 </div>
               </div>
