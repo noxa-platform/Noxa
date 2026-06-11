@@ -128,7 +128,7 @@ export function useSeatingStore(user: User): UseSeatingStore {
         const list: StoredCast[] = [];
         snap.forEach((d) => list.push({ id: d.id, ...(d.data() as Omit<StoredCast, 'id'>) }));
         setStored(list);
-      }),
+      }, (e) => console.warn('[noxa:seating] キャスト購読エラー', e?.message ?? e)),
       onSnapshot(collection(db, `shop_shops/${shopId}/seating_tables`), (snap) => {
         const list: FloorTable[] = [];
         snap.forEach((d) => list.push({ ...createEmptyTable(d.id, d.id), ...(d.data() as Partial<FloorTable>), id: d.id } as FloorTable));
@@ -141,7 +141,7 @@ export function useSeatingStore(user: User): UseSeatingStore {
         snap.forEach((d) => list.push({ id: d.id, ...(d.data() as Omit<QueueItem, 'id'>) }));
         list.sort((a, b) => a.joinedAt - b.joinedAt);
         setQueue(list);
-      }),
+      }, (e) => console.warn('[noxa:seating] 待ち組購読エラー', e?.message ?? e)),
     ];
     return () => unsubs.forEach((u) => u());
   }, [shopId]);

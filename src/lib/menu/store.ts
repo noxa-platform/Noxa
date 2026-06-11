@@ -86,19 +86,20 @@ export function useMenuStore(user: User): UseMenuStore {
   useEffect(() => {
     if (shop.loading || !shopId) return;
     const base = `shop_shops/${shopId}`;
+    const onErr = (label: string) => (e: Error) => console.warn(`[noxa:menu] ${label} 購読エラー`, e?.message ?? e);
     const unsubs = [
       onSnapshot(collection(db, `${base}/seating_casts`), (snap) => {
         const list: RawCast[] = []; snap.forEach((d) => list.push({ id: d.id, ...(d.data() as DocumentData) }));
         setCasts(list);
-      }),
+      }, onErr('casts')),
       onSnapshot(collection(db, `${base}/menu_info_cards`), (snap) => {
         const list: InfoCard[] = []; snap.forEach((d) => list.push({ id: d.id, ...(d.data() as Omit<InfoCard, 'id'>) }));
         setInfoCards(list);
-      }),
+      }, onErr('info_cards')),
       onSnapshot(collection(db, `${base}/menu_images`), (snap) => {
         const m: Record<string, string> = {}; snap.forEach((d) => { const v = d.data() as { dataUrl?: string }; if (v.dataUrl) m[d.id] = v.dataUrl; });
         setImages(m);
-      }),
+      }, onErr('images')),
       onSnapshot(collection(db, `${base}/menu_orders`), (snap) => {
         const list: MenuOrder[] = [];
         snap.forEach((d) => {
@@ -112,16 +113,16 @@ export function useMenuStore(user: User): UseMenuStore {
         });
         list.sort((a, b) => b.createdAtMs - a.createdAtMs);
         setOrders(list);
-      }),
+      }, onErr('orders')),
       onSnapshot(collection(db, `${base}/seating_tables`), (snap) => {
         const t: ShopTable[] = []; const docs: Record<string, DocumentData> = {};
         snap.forEach((d) => { const v = d.data() as DocumentData; t.push({ id: d.id, name: (v.name as string) ?? d.id }); docs[d.id] = v; });
         t.sort((a, b) => a.name.localeCompare(b.name, 'ja'));
         setTables(t); setTableDocs(docs);
-      }),
+      }, onErr('tables')),
       onSnapshot(doc(db, `${base}/menu_config/main`), (d) => {
         setConfig(d.exists() ? { ...DEFAULT_MENU_CONFIG, ...(d.data() as Partial<MenuConfig>) } : DEFAULT_MENU_CONFIG);
-      }),
+      }, onErr('config')),
     ];
     setSubsReady(true);
     return () => { unsubs.forEach((u) => u()); setSubsReady(false); };

@@ -179,7 +179,7 @@ export function TransportClient({ user }: { user: User }) {
       });
       list.sort((a, b) => a.time.localeCompare(b.time) || a.createdMs - b.createdMs);
       setRequests(list);
-    });
+    }, (e) => console.warn('[noxa:transport] リクエスト購読エラー', e?.message ?? e));
     return () => unsub();
   }, [reqPath]);
 
@@ -200,7 +200,7 @@ export function TransportClient({ user }: { user: User }) {
       });
       list.sort((a, b) => a.name.localeCompare(b.name, 'ja'));
       setVehicles(list);
-    });
+    }, (e) => console.warn('[noxa:transport] 車両購読エラー', e?.message ?? e));
     return () => unsub();
   }, [vehPath]);
 

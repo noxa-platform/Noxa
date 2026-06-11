@@ -162,7 +162,7 @@ export function InventoryClient({ user }: { user: User }) {
       snap.forEach((d) => list.push(mapItem(d.id, d.data())));
       list.sort((a, b) => a.name.localeCompare(b.name, 'ja'));
       setItems(list);
-    });
+    }, (e) => console.warn('[noxa:inventory] 在庫購読エラー', e?.message ?? e));
     return () => unsub();
   }, [invPath]);
 
@@ -174,7 +174,7 @@ export function InventoryClient({ user }: { user: User }) {
       snap.forEach((d) => list.push(mapKeep(d.id, d.data())));
       list.sort((a, b) => (b.openedAt || '').localeCompare(a.openedAt || ''));
       setKeeps(list);
-    });
+    }, (e) => console.warn('[noxa:inventory] ボトルキープ購読エラー', e?.message ?? e));
     return () => unsub();
   }, [keepPath]);
 

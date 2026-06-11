@@ -166,7 +166,7 @@ export function usePosStore(user: User): UsePosStore {
         list.push({ id: d.id, name: (x.name as string) ?? '?', rank: (x.rank as Cast['rank']) ?? '非役職', hourlyWage: (x.hourlyWage as number) ?? 0, isLocked: !!x.isLocked, status: 'Free', currentTableId: null, uid: (x.uid as string) ?? null });
       });
       setCasts(list);
-    });
+    }, (e) => console.warn('[noxa:pos] キャスト購読エラー', e?.message ?? e));
     const unsubCust = onSnapshot(collection(db, `shop_shops/${shopId}/customers`), (snap) => {
       const list: ShopCustomer[] = [];
       snap.forEach((d) => {
