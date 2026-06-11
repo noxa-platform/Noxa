@@ -57,13 +57,13 @@ async function verifyGooglePlayPurchase(
 ): Promise<VerifyResult> {
   const saKey = process.env.GOOGLE_PLAY_SERVICE_ACCOUNT_KEY;
   if (!saKey) {
-    if (process.env.NODE_ENV !== 'production') {
-      console.warn(
-        'verifyGooglePlayPurchase: GOOGLE_PLAY_SERVICE_ACCOUNT_KEY 未設定。dev mode のため検証 skip',
-      );
+    // 検証skipは明示フラグ(IAP_ALLOW_UNVERIFIED=true)が立っているときのみ許可。
+    // NODE_ENV依存だとPreview/staging環境で偽トークンによる不正付与を許してしまうため明示化。
+    if (process.env.IAP_ALLOW_UNVERIFIED === 'true') {
+      console.warn('verifyGooglePlayPurchase: IAP_ALLOW_UNVERIFIED=true のため検証skip（本番では絶対に設定しないこと）');
       return { ok: true, purchaseState: 0 };
     }
-    return { ok: false, reason: 'Service Account 未設定（本番）' };
+    return { ok: false, reason: 'Service Account 未設定（検証不可）' };
   }
 
   // TODO: googleapis SDK で実装
