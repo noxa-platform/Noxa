@@ -48,16 +48,18 @@ export async function POST(request: NextRequest) {
     const monthStart = Timestamp.fromDate(new Date(year, month - 1, 1));
     const monthEnd = Timestamp.fromDate(new Date(year, month, 1));
 
-    // メンバー一覧（owner が members サブコレクションに無い運用でも集計対象に含める）
+    // メンバー一覧（cast 系のみ集計。owner / accounting の個人台帳をお店に混ぜない。
+    // オーナーが実際に接客するなら cast ロールのメンバーとして登録する運用とする）
+    const CAST_ROLES = new Set(['cast', 'host', 'staff']);
     const memSnap = await db.collection(`shop_shops/${shopId}/members`).get();
     const targets = new Map<string, { role: string; name: string }>();
     for (const m of memSnap.docs) {
       const md = m.data() as { role?: string; castDisplayName?: string; castName?: string };
-      targets.set(m.id, { role: md.role || 'cast', name: md.castDisplayName || md.castName || '' });
+      const role = md.role || 'cast';
+      if (!CAST_ROLES.has(role)) continue; // owner / accounting を除外
+      targets.set(m.id, { role, name: md.castDisplayName || md.castName || '' });
     }
-    if (ownerUid && !targets.has(ownerUid)) {
-      targets.set(ownerUid, { role: 'owner', name: '' });
-    }
+    // ※ オーナー自動追加は廃止（オーナー個人台帳=個人副業データの混入防止）。
 
     // 当月の全ログを collectionGroup で 1 回だけ取得し castUid 別に集計する。
     // 旧実装はキャスト×顧客ごとにログをクエリしており（N×M）、店舗規模で
