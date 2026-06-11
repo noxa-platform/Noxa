@@ -143,7 +143,7 @@ export function AccountShell({ user, children }: { user: User; children: React.R
           gap: 28,
         }}
       >
-        <Link href="/" className="px-2" style={{ display: 'block' }}>
+        <Link href="/account" className="px-2" style={{ display: 'block' }}>
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img src="/noxa-logo-horizontal.png" alt="Noxa" style={{ height: 40, width: 'auto', display: 'block' }} />
         </Link>
@@ -277,7 +277,7 @@ export function AccountShell({ user, children }: { user: User; children: React.R
           borderBottom: '1px solid var(--noxa-border)',
         }}
       >
-        <Link href="/" style={{ display: 'block' }}>
+        <Link href="/account" style={{ display: 'block' }}>
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img src="/noxa-logo-horizontal.png" alt="Noxa" style={{ height: 28, width: 'auto', display: 'block' }} />
         </Link>
