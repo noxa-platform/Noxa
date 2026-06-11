@@ -15,8 +15,8 @@
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  collection, doc, getDoc, onSnapshot, setDoc, addDoc, serverTimestamp,
-  query, where, getDocs,
+  collection, doc, getDoc, onSnapshot, setDoc, serverTimestamp,
+  query, where, getDocs, runTransaction, type DocumentData,
 } from 'firebase/firestore';
 import type { User } from 'firebase/auth';
 import { db } from '@/lib/firebase/config';
@@ -180,7 +180,6 @@ export function usePosStore(user: User): UsePosStore {
   configRef.current = config;
 
   const tableRef = useCallback((id: string) => doc(db, `shop_shops/${shopId}/seating_tables/${id}`), [shopId]);
-  const getTable = useCallback((id: string) => tables.find((t) => t.id === id), [tables]);
 
   const seedTables = useCallback<UsePosStore['seedTables']>(async () => {
     if (!shopId) return;
@@ -194,53 +193,63 @@ export function usePosStore(user: User): UsePosStore {
   }, [shopId, configRef]);
 
   // Firestore は undefined を拒否するため、書込前に undefined を除去（JSON 往復）
-  const writeSlips = useCallback(async (tableId: string, slips: PosSlip[], extra?: Record<string, unknown>) => {
+  // 伝票の読み取り→変更→書き戻しをトランザクションで実行（複数端末の同時編集での消失を防ぐ）。
+  // transform はサーバ最新の slips と卓データを受け取り、新 slips と卓への追加更新(extra)を返す。
+  const txSlips = useCallback(async (
+    tableId: string,
+    transform: (slips: PosSlip[], data: DocumentData) => { slips: PosSlip[]; extra?: Record<string, unknown> } | null,
+  ) => {
     if (!shopId) return;
-    const clean = JSON.parse(JSON.stringify(slips));
-    await setDoc(tableRef(tableId), { slips: clean, updatedAt: serverTimestamp(), ...(extra ?? {}) }, { merge: true });
+    await runTransaction(db, async (tx) => {
+      const ref = tableRef(tableId);
+      const snap = await tx.get(ref);
+      if (!snap.exists()) return;
+      const data = snap.data();
+      const slips: PosSlip[] = Array.isArray(data.slips) ? (data.slips as PosSlip[]) : [];
+      const result = transform(slips, data);
+      if (!result) return;
+      const clean = JSON.parse(JSON.stringify(result.slips));
+      tx.set(ref, { slips: clean, updatedAt: serverTimestamp(), ...(result.extra ?? {}) }, { merge: true });
+    });
   }, [shopId, tableRef]);
 
   const addSlip = useCallback<UsePosStore['addSlip']>(async (tableId, init) => {
     const cfg = configRef.current;
-    const t = getTable(tableId);
     const base = createInitialState(cfg);
     const state: CalculatorState = init
       ? { ...base, customerType: init.customerType ?? base.customerType, initialSetPrice: init.initialSetPrice ?? base.initialSetPrice, entryTime: init.entryTime ?? base.entryTime, dohan: init.dohan ?? base.dohan, orders: createPinnedOrders(cfg, init.customerType ?? base.customerType) }
       : base;
-    const slips = t?.slips ?? [];
-    const newSlip: PosSlip = {
-      id: genSlipId(),
-      name: init?.customerName?.trim() ? init.customerName.trim() : nextSlipName(slips),
-      state,
-      ...(init?.castName ? { castName: init.castName } : {}),
-      ...(init?.castUid ? { castUid: init.castUid } : {}),
-      ...(init?.castId ? { castId: init.castId } : {}),
-      ...(init?.customerName?.trim() ? { customerName: init.customerName.trim() } : {}),
-      ...(init?.customerId ? { customerId: init.customerId } : {}),
-    };
-    const extra: Record<string, unknown> = {};
-    // 空卓なら開卓（席回しと同期：status ACTIVE / startTime）
-    if (!t || t.status === 'EMPTY') { extra.status = 'ACTIVE'; extra.startTime = Date.now(); extra.entryTime = Date.now(); }
-    // 担当（指名）キャストを席回しの卓にも反映（currentHostIds＋mainHostIds＝本指名★）
-    if (init?.castId) {
-      const cur = t?.currentHostIds ?? [];
-      const main = t?.mainHostIds ?? [];
-      extra.currentHostIds = cur.includes(init.castId) ? cur : [...cur, init.castId];
-      extra.mainHostIds = main.includes(init.castId) ? main : [...main, init.castId];
-      extra.castStartTimes = { ...(t?.castStartTimes ?? {}), [init.castId]: Date.now() };
-    }
-    await writeSlips(tableId, [...slips, newSlip], extra);
-  }, [configRef, getTable, writeSlips]);
+    await txSlips(tableId, (slips, data) => {
+      const newSlip: PosSlip = {
+        id: genSlipId(),
+        name: init?.customerName?.trim() ? init.customerName.trim() : nextSlipName(slips),
+        state,
+        ...(init?.castName ? { castName: init.castName } : {}),
+        ...(init?.castUid ? { castUid: init.castUid } : {}),
+        ...(init?.castId ? { castId: init.castId } : {}),
+        ...(init?.customerName?.trim() ? { customerName: init.customerName.trim() } : {}),
+        ...(init?.customerId ? { customerId: init.customerId } : {}),
+      };
+      const extra: Record<string, unknown> = {};
+      if (!data.status || data.status === 'EMPTY') { extra.status = 'ACTIVE'; extra.startTime = Date.now(); extra.entryTime = Date.now(); }
+      if (init?.castId) {
+        const cur: string[] = Array.isArray(data.currentHostIds) ? data.currentHostIds : [];
+        const main: string[] = Array.isArray(data.mainHostIds) ? data.mainHostIds : [];
+        extra.currentHostIds = cur.includes(init.castId) ? cur : [...cur, init.castId];
+        extra.mainHostIds = main.includes(init.castId) ? main : [...main, init.castId];
+        extra.castStartTimes = { ...(data.castStartTimes ?? {}), [init.castId]: Date.now() };
+      }
+      return { slips: [...slips, newSlip], extra };
+    });
+  }, [configRef, txSlips]);
 
   const mutateSlip = useCallback(async (tableId: string, slipId: string, fn: (s: PosSlip) => PosSlip | null) => {
-    const t = getTable(tableId);
-    if (!t) return;
-    const next: PosSlip[] = [];
-    for (const s of t.slips ?? []) {
-      if (s.id === slipId) { const r = fn(s); if (r) next.push(r); } else next.push(s);
-    }
-    await writeSlips(tableId, next);
-  }, [getTable, writeSlips]);
+    await txSlips(tableId, (slips) => {
+      const next: PosSlip[] = [];
+      for (const s of slips) { if (s.id === slipId) { const r = fn(s); if (r) next.push(r); } else next.push(s); }
+      return { slips: next };
+    });
+  }, [txSlips]);
 
   const dispatchSlip = useCallback<UsePosStore['dispatchSlip']>(async (tableId, slipId, action) => {
     await mutateSlip(tableId, slipId, (s) => ({ ...s, state: calculatorReducer(s.state, action, configRef.current) }));
@@ -256,21 +265,29 @@ export function usePosStore(user: User): UsePosStore {
 
   const checkoutSlip = useCallback<UsePosStore['checkoutSlip']>(async (tableId, slipId, opts) => {
     if (!shopId) return;
-    const t = getTable(tableId);
-    const slip = t?.slips?.find((s) => s.id === slipId);
-    if (!t || !slip) return;
-    await addDoc(collection(db, `shop_shops/${shopId}/sales`), {
-      source: 'pos', amount: opts.amount, tableId, tableName: t.name, slipName: slip.name,
-      customerType: slip.state.customerType, customerName: opts.customerName ?? slip.customerName ?? null,
-      castName: opts.castName ?? slip.castName ?? null,
-      // 売上の帰属は店舗設定に従う。mainCast=担当キャスト(無ければ操作者) / operator=レジ操作者。
-      castUid: attributionRef.current === 'operator' ? user.uid : (slip.castUid ?? user.uid),
-      operatorUid: user.uid,
-      guests: opts.guests ?? null,
-      entryTime: slip.state.entryTime, checkoutAt: serverTimestamp(), dayKey: dayKey(), createdAt: serverTimestamp(),
+    // 売上転記＋伝票削除を単一トランザクションで（二重計上/取りこぼし防止・同時編集に安全）
+    await runTransaction(db, async (tx) => {
+      const ref = tableRef(tableId);
+      const snap = await tx.get(ref);
+      if (!snap.exists()) return;
+      const data = snap.data();
+      const slips: PosSlip[] = Array.isArray(data.slips) ? (data.slips as PosSlip[]) : [];
+      const slip = slips.find((s) => s.id === slipId);
+      if (!slip) return; // 既に会計済み（他端末）等
+      const saleRef = doc(collection(db, `shop_shops/${shopId}/sales`));
+      tx.set(saleRef, {
+        source: 'pos', amount: opts.amount, tableId, tableName: (data.name as string) ?? '', slipName: slip.name,
+        customerType: slip.state.customerType, customerName: opts.customerName ?? slip.customerName ?? null,
+        castName: opts.castName ?? slip.castName ?? null,
+        castUid: attributionRef.current === 'operator' ? user.uid : (slip.castUid ?? user.uid),
+        operatorUid: user.uid,
+        guests: opts.guests ?? null,
+        entryTime: slip.state.entryTime, checkoutAt: serverTimestamp(), dayKey: dayKey(), createdAt: serverTimestamp(),
+      });
+      const nextSlips = JSON.parse(JSON.stringify(slips.filter((s) => s.id !== slipId)));
+      tx.set(ref, { slips: nextSlips, updatedAt: serverTimestamp() }, { merge: true });
     });
-    await mutateSlip(tableId, slipId, () => null);
-  }, [shopId, getTable, mutateSlip, user.uid]);
+  }, [shopId, tableRef, user.uid]);
 
   const resultFor = useCallback<UsePosStore['resultFor']>((slip) => {
     const live: CalculatorState = slip.state.isDebugMode ? slip.state : { ...slip.state, currentTime: nowHHMM() };
