@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { useEffect, useMemo, useState } from 'react';
 import type { User } from 'firebase/auth';
 import { useSeatingStore } from '@/lib/seating/store';
+import { useShopConfig } from '@/lib/shopConfig';
 import { generateAIProposals, getSourcingCandidates } from '@/lib/seating/ai';
 import type { Cast, FloorTable, TableType, Customer, CastStatus, Rank } from '@/lib/seating/types';
 
@@ -36,6 +37,8 @@ function fmtElapsed(start: number | null): string {
 
 export function SeatingClient({ user }: { user: User }) {
   const store = useSeatingStore(user);
+  const cfg = useShopConfig(user);
+  const wageFor = (rank: string): number | undefined => cfg.config.roles.find((r) => r.name === rank)?.wage;
   const { casts, tables, queue } = store;
   const [selectedTableId, setSelectedTableId] = useState<string | null>(null);
   const [side, setSide] = useState<'casts' | 'queue'>('casts');
@@ -122,7 +125,7 @@ export function SeatingClient({ user }: { user: User }) {
             <button type="button" role="tab" aria-selected={side === 'queue'} onClick={() => setSide('queue')} style={chipStyle(side === 'queue')}>待ち組 {queue.length > 0 ? `(${queue.length})` : ''}</button>
           </div>
           {side === 'casts'
-            ? <CastRoster casts={casts} store={store} />
+            ? <CastRoster casts={casts} store={store} wageFor={wageFor} />
             : <QueuePanel queue={queue} tables={tables} store={store} />}
         </div>
       </div>
@@ -274,11 +277,12 @@ function TableDetail({ table, casts, tables, castById, store }: {
 
 // ───────────────────────── キャスト名簿
 
-function CastRoster({ casts, store }: { casts: Cast[]; store: ReturnType<typeof useSeatingStore> }) {
+function CastRoster({ casts, store, wageFor }: { casts: Cast[]; store: ReturnType<typeof useSeatingStore>; wageFor?: (rank: string) => number | undefined }) {
   const [adding, setAdding] = useState(false);
   const [name, setName] = useState('');
   const [rank, setRank] = useState<Rank>('非役職');
   const [wage, setWage] = useState(5000);
+  const selectRank = (r: Rank) => { setRank(r); const w = wageFor?.(r); if (typeof w === 'number') setWage(w); };
 
   const cycleStatus = (c: Cast) => {
     // 在卓中は卓から外すまで変更不可。Free<->Break<->Absent を循環
@@ -307,7 +311,7 @@ function CastRoster({ casts, store }: { casts: Cast[]; store: ReturnType<typeof 
         <div style={{ display: 'flex', flexDirection: 'column', gap: 6, borderTop: '1px solid var(--noxa-divider)', paddingTop: 10 }}>
           <input value={name} onChange={(e) => setName(e.target.value)} placeholder="名前" style={fieldStyle} />
           <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
-            {RANKS.map((r) => <button key={r} type="button" onClick={() => setRank(r)} style={chipStyle(rank === r)}>{r}</button>)}
+            {RANKS.map((r) => <button key={r} type="button" onClick={() => selectRank(r)} style={chipStyle(rank === r)}>{r}</button>)}
           </div>
           <label style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <span style={miniLabel}>時給</span>

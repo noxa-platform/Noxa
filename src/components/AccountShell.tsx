@@ -8,6 +8,7 @@ import { signOut } from '@/lib/auth';
 import { db } from '@/lib/firebase/config';
 import { useShopContext, useDeviceClaims } from '@/lib/useShopContext';
 import { useTheme } from '@/lib/useTheme';
+import { useShopConfig, DEFAULT_MODULES } from '@/lib/shopConfig';
 
 // アカウント（OS 本体）。端末では非表示。
 const NAV_ACCOUNT: { label: string; href: string; icon: string }[] = [
@@ -62,8 +63,15 @@ export function AccountShell({ user, children }: { user: User; children: React.R
   const { hasShop } = useShopContext(user.uid);
   const device = useDeviceClaims(user);
   useTheme(user); // 業種テーマ（コンカフェ等）を <html data-theme> に適用
-  // 店舗デバイスログイン時は許可モジュールのみ（給与/売掛/リスク客は allow に含まれない）
-  const storeNav = device.isDevice ? NAV_STORE.filter((it) => device.allow.includes(it.href.slice(1))) : NAV_STORE;
+  const cfg = useShopConfig(user); // 店舗のモジュール構成（有効/並び/名称）
+
+  // 店舗デバイス＝許可モジュールのみ。オーナー＝店舗設定の構成（有効/並び/名称）に従う
+  const ownerNav = cfg.config.modules
+    .filter((m) => m.enabled)
+    .map((m) => ({ label: m.label?.trim() || (DEFAULT_MODULES.find((d) => d.key === m.key)?.label ?? m.key), href: `/${m.key}` }));
+  const storeNav = device.isDevice
+    ? NAV_STORE.filter((it) => device.allow.includes(it.href.slice(1)))
+    : (cfg.loading ? NAV_STORE : ownerNav);
 
   // ハンドル必須化: 個人ユーザーで handle 未設定なら オンボーディングへ誘導（店舗端末は除外）
   const [needsHandle, setNeedsHandle] = useState(false);
@@ -182,7 +190,10 @@ export function AccountShell({ user, children }: { user: User; children: React.R
             <div className="flex flex-col" style={{ gap: 2 }}>
               <SubLabel>店舗</SubLabel>
               {hasShop ? (
-                storeNav.map(navLink)
+                <>
+                  {storeNav.map(navLink)}
+                  {navLink({ label: '店舗設定', href: '/store/settings' })}
+                </>
               ) : (
                 <Link href="/store/new" style={{ display: 'block', padding: '12px', borderRadius: 10, border: '1px dashed var(--noxa-border-strong)', color: 'var(--noxa-text-muted)', fontSize: 12, textDecoration: 'none', lineHeight: 1.5 }}>
                   <span style={{ color: 'var(--noxa-accent-primary-ink)', fontWeight: 600 }}>＋ 店舗を登録</span>

@@ -318,10 +318,15 @@ service cloud.firestore {
       match /barapp_synced_sales/{id} { allow read: if isShopMember(shopId); allow write: if false; }
       match /barapp_sync_log/{id}     { allow read: if isShopOwnerLike(shopId); allow write: if false; }
 
+      // 店舗カスタム設定（用語/役職/モジュール構成/売上ルール 等）。メンバー閲覧・オーナー編集。
+      match /config/{docId} {
+        allow read: if isShopMember(shopId);
+        allow write: if isShopOwnerLike(shopId);
+      }
+
       // 店舗運営モジュール（メンバー read/write）
       match /inventory/{itemId}    { allow read, write: if isShopMember(shopId); }
       match /bottle_keeps/{id}     { allow read, write: if isShopMember(shopId); }
-      match /first_visits/{id}     { allow read, write: if isShopMember(shopId); }
       match /transport/{id}        { allow read, write: if isShopMember(shopId); }
       match /transport_vehicles/{id} { allow read, write: if isShopMember(shopId); }
       match /trials/{id}           { allow read, write: if isShopMember(shopId); }
