@@ -471,3 +471,31 @@ button:focus-visible,
 *::-webkit-scrollbar-track { background: transparent; }
 *::-webkit-scrollbar-thumb { background: var(--noxa-border); border-radius: 5px; }
 *::-webkit-scrollbar-thumb:hover { background: var(--noxa-border-strong); }
+
+/* ───────────────────────────────────────────────
+   かんたんモード（既定）— ネットに不慣れなスタッフ向け。
+   文字・タップ領域を大きく、押せる箇所を分かりやすく。
+   <html data-ui="pro"> のとき解除（＝従来のコンパクト表示）。
+   未設定（初期）は :not([data-ui="pro"]) に一致するので既定でかんたん。
+─────────────────────────────────────────────── */
+html:not([data-ui="pro"]) body { font-size: 16px; }
+
+html:not([data-ui="pro"]) .noxa-btn {
+  min-height: 54px;
+  font-size: 16px;
+  padding: 14px 24px;
+  border-radius: var(--noxa-radius-lg);
+}
+html:not([data-ui="pro"]) .noxa-btn-primary { box-shadow: var(--noxa-glow-soft); }
+
+html:not([data-ui="pro"]) .noxa-input {
+  min-height: 54px;
+  font-size: 17px;
+  padding: 14px 16px;
+}
+
+html:not([data-ui="pro"]) .noxa-label { font-size: 14px; }
+html:not([data-ui="pro"]) .noxa-card { padding: 20px; }
+
+/* かんたん時はネオングロー等の装飾を弱め、見やすさ優先 */
+html:not([data-ui="pro"]) .noxa-eyebrow { letter-spacing: 0.08em; font-size: 12px; }

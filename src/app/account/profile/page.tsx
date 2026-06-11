@@ -5,6 +5,7 @@ import { updateProfile } from 'firebase/auth';
 import { AuthGuard } from '@/components/AuthGuard';
 import { AccountShell } from '@/components/AccountShell';
 import { ThemeSwitcher } from '@/components/ThemeSwitcher';
+import { ProModeSwitcher } from '@/components/ProModeSwitcher';
 import { db } from '@/lib/firebase/config';
 import type { User } from 'firebase/auth';
 
@@ -75,6 +76,10 @@ function ProfileEditor({ user }: { user: User }) {
         >
           {saving ? '保存中…' : saved ? '保存しました ✓' : '保存'}
         </button>
+      </div>
+
+      <div className="noxa-card" style={{ maxWidth: 640, marginTop: 20 }}>
+        <ProModeSwitcher />
       </div>
 
       <div className="noxa-card" style={{ maxWidth: 640, marginTop: 20 }}>

@@ -8,6 +8,7 @@ import { signOut } from '@/lib/auth';
 import { db } from '@/lib/firebase/config';
 import { useShopContext, useDeviceClaims } from '@/lib/useShopContext';
 import { useTheme } from '@/lib/useTheme';
+import { useUiMode } from '@/lib/useUiMode';
 import { useShopConfig, DEFAULT_MODULES } from '@/lib/shopConfig';
 
 // アカウント（OS 本体）。端末では非表示。
@@ -63,6 +64,7 @@ export function AccountShell({ user, children }: { user: User; children: React.R
   const { hasShop } = useShopContext(user.uid);
   const device = useDeviceClaims(user);
   useTheme(user); // 業種テーマ（コンカフェ等）を <html data-theme> に適用
+  const easy = useUiMode() === 'easy'; // かんたんモード（既定）でナビを大きく
   const cfg = useShopConfig(user); // 店舗のモジュール構成（有効/並び/名称）
 
   // 店舗デバイス＝許可モジュールのみ。オーナー＝店舗設定の構成（有効/並び/名称）に従う
@@ -102,8 +104,8 @@ export function AccountShell({ user, children }: { user: User; children: React.R
     const active = pathname === it.href;
     return (
       <Link key={it.href + it.label} href={it.href} target={it.external ? '_blank' : undefined}
-        style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 10px', borderRadius: 8, background: active ? 'rgba(139, 92, 246, 0.12)' : 'transparent', color: active ? 'var(--noxa-text-primary)' : 'var(--noxa-text-muted)', fontSize: 13, fontWeight: active ? 500 : 400, textDecoration: 'none' }}>
-        <span aria-hidden style={{ width: 6, height: 6, borderRadius: 3, background: active ? 'var(--noxa-accent-primary-ink)' : (it.tint ?? 'var(--noxa-text-faint)') }} />
+        style={{ display: 'flex', alignItems: 'center', gap: 10, padding: easy ? '13px 12px' : '8px 10px', borderRadius: 10, background: active ? 'rgba(139, 92, 246, 0.12)' : 'transparent', color: active ? 'var(--noxa-text-primary)' : 'var(--noxa-text-muted)', fontSize: easy ? 16 : 13, fontWeight: active ? 600 : (easy ? 500 : 400), textDecoration: 'none' }}>
+        <span aria-hidden style={{ width: easy ? 8 : 6, height: easy ? 8 : 6, borderRadius: 4, background: active ? 'var(--noxa-accent-primary-ink)' : (it.tint ?? 'var(--noxa-text-faint)') }} />
         <span>{it.label}</span>
         {it.external && <span className="noxa-mono" style={{ marginLeft: 'auto', fontSize: 9, color: 'var(--noxa-text-faint)' }}>↗</span>}
       </Link>
