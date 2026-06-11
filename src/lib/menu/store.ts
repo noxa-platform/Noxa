@@ -207,22 +207,30 @@ export function useMenuStore(user: User): UseMenuStore {
         seat: g.seat, tableId: table?.id ?? null, customerName: g.customerName, memo: g.memo,
         color: g.color, casts: g.casts, source, createdAt: serverTimestamp(),
       });
-      // 席回し連携: 卓名一致なら現着キャストに加える（指名を席回しへ反映）
+      // 席回し連携: 選ばれたキャストを指名(requested)＋現着に反映。
+      // 表示パネルのうち選ばれなかったキャストはこの卓の除外(excluded)に入れ、ローテ／AI候補から外す。
       if (table) {
         const tdoc = tableDocs[table.id] ?? {};
         const cur: string[] = Array.isArray(tdoc.currentHostIds) ? tdoc.currentHostIds : [];
         const hist: string[] = Array.isArray(tdoc.assignedHistory) ? tdoc.assignedHistory : [];
+        const req: string[] = Array.isArray(tdoc.requestedHostIds) ? tdoc.requestedHostIds : [];
+        const prevEx: string[] = Array.isArray(tdoc.excludedHostIds) ? tdoc.excludedHostIds : [];
         const starts: Record<string, number> = (tdoc.castStartTimes as Record<string, number>) ?? {};
         const ids = g.casts.map((c) => c.id);
         const nextCur = Array.from(new Set([...cur, ...ids]));
         const nextHist = Array.from(new Set([...hist, ...ids]));
+        const nextReq = Array.from(new Set([...req, ...ids]));
+        // 候補プール（表示中のキャストパネル）から未選択を除外に追加。選択された人は除外から外す。
+        const pool = visiblePanels.filter((p) => p.kind !== 'info').map((p) => p.id);
+        const nextEx = Array.from(new Set([...prevEx, ...pool.filter((id) => !ids.includes(id))])).filter((id) => !ids.includes(id));
         for (const id of ids) if (!starts[id]) starts[id] = now;
         await setDoc(doc(db, `shop_shops/${shopId}/seating_tables/${table.id}`), {
-          currentHostIds: nextCur, assignedHistory: nextHist, castStartTimes: starts, updatedAt: serverTimestamp(),
+          currentHostIds: nextCur, requestedHostIds: nextReq, excludedHostIds: nextEx,
+          assignedHistory: nextHist, castStartTimes: starts, updatedAt: serverTimestamp(),
         }, { merge: true });
       }
     }
-  }, [shopId, tables, tableDocs]);
+  }, [shopId, tables, tableDocs, visiblePanels]);
 
   const updateOrder = useCallback<UseMenuStore['updateOrder']>(async (id, patch) => {
     if (!shopId) return;

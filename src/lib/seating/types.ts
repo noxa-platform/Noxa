@@ -45,6 +45,7 @@ export interface FloorTable {
   mainHostIds: string[];      // 本指名（複数可）
   currentHostIds: string[];   // 現在着席中
   requestedHostIds: string[]; // 指名待ち
+  excludedHostIds: string[];  // この卓で除外（初回案内で選ばれなかった＝回さない）
   assignedHistory: string[];  // この卓に着いた履歴（重複配置回避）
   castStartTimes: Record<string, number>; // castId -> 着席時刻
 
@@ -82,6 +83,7 @@ export function createEmptyTable(id: string, name: string): FloorTable {
     mainHostIds: [],
     currentHostIds: [],
     requestedHostIds: [],
+    excludedHostIds: [],
     assignedHistory: [],
     castStartTimes: {},
     startTime: null,

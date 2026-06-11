@@ -47,6 +47,15 @@ function setTimer(t: FloorTable): SetTimer | null {
   return { remainingMin, setNumber, setLen: len, warning: remainingMin <= 10, progress };
 }
 
+// 卓内ローテ通知：自動ローテON卓で次のローテまでの残分（残3分以下で督促）
+function rotationTimer(t: FloorTable): { remainingMin: number; due: boolean } | null {
+  if (t.status !== 'ACTIVE' || !t.innerRotationEnabled || !t.rotationTimeLength || (t.currentHostIds?.length ?? 0) < 2 || !t.startTime) return null;
+  const len = t.rotationTimeLength;
+  const elapsed = elapsedMin(t.startTime);
+  const remaining = Math.max(0, (Math.floor(elapsed / len) + 1) * len - elapsed);
+  return { remainingMin: remaining, due: remaining <= 3 };
+}
+
 export function SeatingClient({ user }: { user: User }) {
   const store = useSeatingStore(user);
   const cfg = useShopConfig(user);
@@ -107,23 +116,26 @@ export function SeatingClient({ user }: { user: User }) {
         </div>
       )}
 
-      {/* 要対応アラート（会計 / セット残り10分以下） */}
+      {/* 要対応アラート（会計 / セット残り10分以下 / ローテ督促） */}
       {(() => {
-        const alerts = tables.filter((t) => t.status === 'CHECK' || setTimer(t)?.warning);
+        const alerts = tables.filter((t) => t.status === 'CHECK' || setTimer(t)?.warning || rotationTimer(t)?.due);
         if (alerts.length === 0) return null;
         return (
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 14 }}>
             {alerts.map((t) => {
               const tm = setTimer(t);
+              const rot = rotationTimer(t);
               const check = t.status === 'CHECK';
+              const danger = check || tm?.warning;
+              const label = check ? '会計' : tm?.warning ? `残${tm.remainingMin}分` : `🔄ローテ`;
               return (
                 <button key={t.id} type="button" onClick={() => setSelectedTableId(t.id)}
                   style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '6px 12px', borderRadius: 9999, cursor: 'pointer', fontSize: 12, fontWeight: 600,
-                    background: check ? 'rgba(196,56,74,0.12)' : 'rgba(245,212,114,0.12)',
-                    border: `1px solid ${check ? 'var(--noxa-status-error)' : 'var(--noxa-status-warning)'}`,
-                    color: check ? 'var(--noxa-status-error)' : 'var(--noxa-status-warning)' }}>
+                    background: danger ? (check ? 'rgba(196,56,74,0.12)' : 'rgba(245,212,114,0.12)') : 'rgba(139,92,246,0.12)',
+                    border: `1px solid ${danger ? (check ? 'var(--noxa-status-error)' : 'var(--noxa-status-warning)') : 'var(--noxa-accent-primary)'}`,
+                    color: danger ? (check ? 'var(--noxa-status-error)' : 'var(--noxa-status-warning)') : 'var(--noxa-accent-primary-ink)' }}>
                   <span aria-hidden style={{ width: 7, height: 7, borderRadius: 4, background: 'currentColor' }} />
-                  {t.name}：{check ? '会計' : `残${tm?.remainingMin}分`}
+                  {t.name}：{label}{rot && !danger ? `（残${rot.remainingMin}分）` : ''}
                 </button>
               );
             })}
@@ -217,6 +229,8 @@ function TableCard({ table, castById, active, onSelect }: { table: FloorTable; c
               <div style={{ width: `${Math.round(timer.progress * 100)}%`, height: '100%', borderRadius: 9999, background: barColor, transition: 'width .4s var(--noxa-ease-natural)' }} />
             </div>
           )}
+          {/* 卓内ローテ残り（自動ローテON時） */}
+          {(() => { const r = rotationTimer(table); return r ? <span style={{ fontSize: 10, fontFamily: mono, color: r.due ? 'var(--noxa-accent-primary-ink)' : 'var(--noxa-text-faint)' }}>🔄 ローテ残{r.remainingMin}分{r.due ? '・そろそろ' : ''}</span> : null; })()}
           {/* キャスト chip（★本指名 / 現着）＋ 指名待ち */}
           <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
             {table.currentHostIds.map((cid) => {
@@ -320,6 +334,24 @@ function TableDetail({ table, casts, tables, castById, store }: {
             </div>
           )}
 
+          {/* 除外中（初回案内で非選択＝回さない。×で解除） */}
+          {(table.excludedHostIds?.length ?? 0) > 0 && (
+            <div>
+              <div style={{ ...miniLabel, marginBottom: 6 }}>除外中（初回案内で選ばれず・ローテ/AI候補から除外）</div>
+              <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                {(table.excludedHostIds ?? []).map((cid) => {
+                  const c = castById.get(cid);
+                  return c ? (
+                    <span key={cid} style={{ display: 'inline-flex', alignItems: 'center', gap: 4, padding: '3px 4px 3px 10px', borderRadius: 9999, background: 'transparent', border: '1px dashed var(--noxa-border-strong)', color: 'var(--noxa-text-faint)', fontSize: 11 }}>
+                      {c.name}
+                      <button type="button" title="除外を解除" onClick={() => store.setCastExcluded(table.id, cid, false)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--noxa-text-faint)', fontSize: 13 }}>×</button>
+                    </span>
+                  ) : null;
+                })}
+              </div>
+            </div>
+          )}
+
           {/* アクション */}
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', borderTop: '1px solid var(--noxa-divider)', paddingTop: 12 }}>
             <button type="button" onClick={() => store.rotateHosts(table.id)} style={chipStyle(false)} disabled={table.currentHostIds.length < 2}>席内ローテ</button>
@@ -400,6 +432,11 @@ function CastRoster({ casts, store, wageFor, castLabel = 'キャスト' }: { cas
             <button type="button"
               onClick={() => { if (window.confirm('テスト用のキャスト15名＋顧客24名（キャスト別売上付き）を投入しますか？')) store.seedTestData(); }}
               style={{ ...chipStyle(false), borderStyle: 'dashed', color: 'var(--noxa-text-faint)' }}>テストデータ投入</button>
+          )}
+          {store.canManage && (
+            <button type="button"
+              onClick={() => { if (window.confirm('シード（テスト）キャストを削除し、全卓を空席に戻します。よろしいですか？')) store.clearSeedData(); }}
+              style={{ ...chipStyle(false), borderStyle: 'dashed', color: 'var(--noxa-status-error)' }}>テストデータ削除</button>
           )}
         </div>
       )}

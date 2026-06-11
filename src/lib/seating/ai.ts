@@ -36,7 +36,8 @@ export function getSourcingCandidates(
   targetTable?: FloorTable,
 ): SourcingCandidate[] {
   const results: SourcingCandidate[] = [];
-  const validCasts = allCasts.filter((c) => c.rank !== 'BOSS' && !c.isLocked);
+  const excluded = new Set(targetTable?.excludedHostIds ?? []);
+  const validCasts = allCasts.filter((c) => c.rank !== 'BOSS' && !c.isLocked && !excluded.has(c.id));
   const isMainOnAnyTable = (castId: string) => allTables.some((t) => t.mainHostIds?.includes(castId));
 
   for (const cast of validCasts) {
@@ -142,7 +143,7 @@ export function generateAIProposals(allTables: FloorTable[], allCasts: Cast[]): 
     // B. 初回卓のペアリング（2名以上 かつ キャスト不足）
     if (table.type === '初回' && table.customers.length >= 2 && table.currentHostIds.length < 2) {
       const candidates = getSourcingCandidates(allCasts, allTables, table).filter((c) =>
-        !proposedCastIds.has(c.cast.id) && !table.assignedHistory?.includes(c.cast.id));
+        !proposedCastIds.has(c.cast.id) && !table.assignedHistory?.includes(c.cast.id) && !table.excludedHostIds?.includes(c.cast.id));
 
       const pairResult = findBestPairWithScore(candidates);
       if (pairResult) {
@@ -170,6 +171,25 @@ export function generateAIProposals(allTables: FloorTable[], allCasts: Cast[]): 
           castId: best.cast.id,
           castIds: [best.cast.id],
           score: best.priority === 'S' ? 90 : 40,
+          reason: `Priority: ${best.priority}`,
+        });
+        proposedCastIds.add(best.cast.id);
+      }
+    } else if (table.currentHostIds.length === 0) {
+      // C. 配置なしのACTIVE卓（type不問）に補充提案
+      const candidates = getSourcingCandidates(allCasts, allTables, table).filter((c) =>
+        !proposedCastIds.has(c.cast.id) && !table.assignedHistory?.includes(c.cast.id) && !table.excludedHostIds?.includes(c.cast.id));
+      if (candidates.length > 0) {
+        const best = candidates[0];
+        const prefix = best.priority === 'S' ? '🔥[指名]' : '[補充]';
+        proposals.push({
+          id: `fill-${table.id}`,
+          type: 'ASSIGN',
+          message: `${prefix} ${table.name}（配置なし）に ${best.cast.name}`,
+          targetTableId: table.id,
+          castId: best.cast.id,
+          castIds: [best.cast.id],
+          score: best.priority === 'S' ? 88 : 35,
           reason: `Priority: ${best.priority}`,
         });
         proposedCastIds.add(best.cast.id);

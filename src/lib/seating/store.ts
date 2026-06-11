@@ -100,6 +100,8 @@ export type UseSeatingStore = {
   extendTime: (tableId: string, minutes: number) => Promise<void>;
   toggleInnerRotation: (tableId: string) => Promise<void>;
   updateTableSettings: (tableId: string, patch: { setTimeLength?: number; rotationTimeLength?: number }) => Promise<void>;
+  setCastExcluded: (tableId: string, castId: string, excluded: boolean) => Promise<void>;
+  clearSeedData: () => Promise<void>;
   resetTable: (tableId: string) => Promise<void>;
   // queue
   addToQueue: (item: { name: string; groupSize: number; type: TableType; notes?: string }) => Promise<void>;
@@ -323,6 +325,26 @@ export function useSeatingStore(user: User): UseSeatingStore {
     await setDoc(doc(db, `shop_shops/${shopId}/seating_tables/${tableId}`), { ...clean, updatedAt: serverTimestamp() }, { merge: true });
   }, [shopId]);
 
+  const setCastExcluded = useCallback<UseSeatingStore['setCastExcluded']>(async (tableId, castId, excluded) => {
+    const t = getTable(tableId); if (!t) return;
+    const ex = new Set(t.excludedHostIds ?? []);
+    if (excluded) ex.add(castId); else ex.delete(castId);
+    await writeTable({ ...t, excludedHostIds: Array.from(ex) });
+  }, [getTable, writeTable]);
+
+  // テストデータ整理: seed キャスト削除＋全卓を空席リセット（owner 想定）
+  const clearSeedData = useCallback<UseSeatingStore['clearSeedData']>(async () => {
+    if (!shopId) return;
+    const [cs, ts] = await Promise.all([
+      getDocs(collection(db, `shop_shops/${shopId}/seating_casts`)),
+      getDocs(collection(db, `shop_shops/${shopId}/seating_tables`)),
+    ]);
+    const batch = writeBatch(db);
+    cs.forEach((d) => { if ((d.data() as { seed?: boolean }).seed === true) batch.delete(d.ref); });
+    ts.forEach((d) => { const name = (d.data() as { name?: string }).name ?? d.id; batch.set(d.ref, { ...createEmptyTable(d.id, name), slips: [], updatedAt: serverTimestamp() }); });
+    await batch.commit();
+  }, [shopId]);
+
   const setTableType = useCallback<UseSeatingStore['setTableType']>(async (tableId, type) => {
     const t = getTable(tableId); if (!t) return;
     await writeTable({ ...t, type });
@@ -373,13 +395,13 @@ export function useSeatingStore(user: User): UseSeatingStore {
     casts, tables, queue,
     addCast, updateCast, removeCast, toggleLock, setCastBaseStatus,
     seedTables, seedTestData, assignCast, removeCastFromTable, toggleMainHost, toggleRequested, rotateHosts,
-    startSet, setTableType, checkTable, extendTime, toggleInnerRotation, updateTableSettings, resetTable,
+    startSet, setTableType, checkTable, extendTime, toggleInnerRotation, updateTableSettings, setCastExcluded, clearSeedData, resetTable,
     addToQueue, removeFromQueue, seatQueueGroup,
   }), [
     shop.loading, loadingData, shopId, shop.canManage, shop.isDevice, shop.error, casts, tables, queue,
     addCast, updateCast, removeCast, toggleLock, setCastBaseStatus,
     seedTables, seedTestData, assignCast, removeCastFromTable, toggleMainHost, toggleRequested, rotateHosts,
-    startSet, setTableType, checkTable, extendTime, toggleInnerRotation, updateTableSettings, resetTable,
+    startSet, setTableType, checkTable, extendTime, toggleInnerRotation, updateTableSettings, setCastExcluded, clearSeedData, resetTable,
     addToQueue, removeFromQueue, seatQueueGroup,
   ]);
 }
