@@ -859,7 +859,7 @@ export function TrialClient({ user }: { user: User }) {
         >
           <div>
             <div className="noxa-eyebrow" style={{ marginBottom: 6 }}>
-              Noxa OS · Trial
+              ノクサ · 体験入店
             </div>
             <h1
               className="noxa-display"

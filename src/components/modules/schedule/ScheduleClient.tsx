@@ -55,7 +55,7 @@ export function ScheduleClient({ user }: { user: User }) {
   const remove = async (id: string) => { await deleteDoc(doc(db, `personal_reminders/${user.uid}/items/${id}`)); setItems((p) => p.filter((x) => x.id !== id)); };
 
   return (
-    <Shell title="スケジュール" eyebrow="Noxa OS · Schedule" crumb="schedule">
+    <Shell title="スケジュール" eyebrow="ノクサ · スケジュール" crumb="schedule">
       <div style={{ background: 'var(--noxa-surface-card)', border: '1px solid var(--noxa-border)', borderRadius: 14, padding: 14, display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'flex-end', marginBottom: 16 }}>
         <label style={{ display: 'flex', flexDirection: 'column', gap: 4, flex: '2 1 180px' }}>
           <span style={lbl}>予定</span>

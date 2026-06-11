@@ -364,7 +364,7 @@ export function TransportClient({ user }: { user: User }) {
           >
             <div>
               <div className="noxa-eyebrow" style={{ marginBottom: 6 }}>
-                Noxa OS · Module 07 · Transport
+                ノクサ · 送迎
               </div>
               <h1
                 className="noxa-display"

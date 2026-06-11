@@ -527,7 +527,7 @@ function Shell({ children, device }: { children: React.ReactNode; device?: boole
         </nav>
         <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', gap: 16, flexWrap: 'wrap', marginBottom: 20 }}>
           <div>
-            <div className="noxa-eyebrow" style={{ marginBottom: 6 }}>Noxa OS · Module 03 · Floor</div>
+            <div className="noxa-eyebrow" style={{ marginBottom: 6 }}>ノクサ · 席回し</div>
             <h1 className="noxa-display" style={{ fontSize: 'clamp(26px, 4vw, 38px)', margin: 0, display: 'flex', alignItems: 'baseline', gap: 10, flexWrap: 'wrap' }}>
               <span style={{ fontFamily: 'var(--noxa-font-display-en)', fontStyle: 'italic', color: 'var(--noxa-accent-primary-ink)', fontWeight: 400 }}>№ 03</span>
               <span style={{ fontFamily: 'var(--noxa-font-display-jp)', fontWeight: 500 }}>席回し</span>

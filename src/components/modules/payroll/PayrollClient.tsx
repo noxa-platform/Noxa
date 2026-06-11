@@ -65,7 +65,7 @@ export function PayrollClient({ user }: { user: User }) {
   }, [user.uid, device.loading, device.isDevice, device.shopId]);
 
   return (
-    <Shell title="給与" eyebrow="Noxa OS · Payroll" crumb="payroll">
+    <Shell title="給与" eyebrow="ノクサ · 給与" crumb="payroll">
       {loading ? <Eyebrow>読み込み中…</Eyebrow> : noShop ? (
         <Section label="給与"><Empty>所属店舗が見つかりません。店舗に所属すると給与明細が表示されます。</Empty></Section>
       ) : periods.length === 0 ? (

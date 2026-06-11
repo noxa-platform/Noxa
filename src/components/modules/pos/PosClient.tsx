@@ -562,7 +562,7 @@ function Shell({ children, device, configurable, embedded }: { children: React.R
         </nav>
         <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', gap: 16, flexWrap: 'wrap', marginBottom: 20 }}>
           <div>
-            <div className="noxa-eyebrow" style={{ marginBottom: 6 }}>Noxa OS · Module 01 · Order Entry</div>
+            <div className="noxa-eyebrow" style={{ marginBottom: 6 }}>ノクサ · POS（会計）</div>
             <h1 className="noxa-display" style={{ fontSize: 'clamp(26px, 4vw, 38px)', margin: 0, display: 'flex', alignItems: 'baseline', gap: 10, flexWrap: 'wrap' }}>
               <span style={{ fontFamily: 'var(--noxa-font-display-en)', fontStyle: 'italic', color: 'var(--noxa-accent-primary-ink)', fontWeight: 400 }}>№ 01</span>
               <span style={{ fontFamily: 'var(--noxa-font-display-jp)', fontWeight: 500 }}>POS · オーダー</span>

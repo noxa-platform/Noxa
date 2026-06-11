@@ -112,7 +112,7 @@ export function FirstVisitClient({ user }: { user: User }) {
       {/* ヘッダー: 色ピッカー + 席 + リセット */}
       <header style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap', marginBottom: 16 }}>
         <div style={{ marginRight: 'auto' }}>
-          <div className="noxa-eyebrow" style={{ fontSize: 11 }}>Noxa OS · First Visit</div>
+          <div className="noxa-eyebrow" style={{ fontSize: 11 }}>ノクサ · 初回案内</div>
           <h1 className="noxa-display" style={{ fontSize: 'clamp(20px,3vw,30px)', margin: 0 }}>初回案内 <span style={{ fontFamily: mono, fontSize: 12, color: 'var(--noxa-text-faint)' }}>メニュー / {t('nomination')}</span></h1>
         </div>
         {/* 色ピッカー */}

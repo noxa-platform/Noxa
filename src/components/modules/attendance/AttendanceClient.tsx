@@ -82,7 +82,7 @@ export function AttendanceClient({ user }: { user: User }) {
   };
 
   return (
-    <Shell title="勤怠" eyebrow="Noxa OS · Attendance" crumb="attendance" badge={device.isDevice ? '店舗端末 · 実データ' : '実データ'}>
+    <Shell title="勤怠" eyebrow="ノクサ · 勤怠" crumb="attendance" badge={device.isDevice ? '店舗端末 · 実データ' : '実データ'}>
       {loading ? <Eyebrow>読み込み中…</Eyebrow> : !shopId ? (
         <Section label="勤怠"><Empty>所属店舗が見つかりません。</Empty></Section>
       ) : (

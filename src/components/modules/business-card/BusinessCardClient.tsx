@@ -279,7 +279,7 @@ export function BusinessCardClient({ user }: { user: User }) {
           >
             <div>
               <div className="noxa-eyebrow" style={{ marginBottom: 6 }}>
-                Noxa OS · Module 09 · Business Card
+                ノクサ · 名刺発注
               </div>
               <h1
                 className="noxa-display"

@@ -327,7 +327,7 @@ export function InventoryClient({ user }: { user: User }) {
           >
             <div>
               <div className="noxa-eyebrow" style={{ marginBottom: 6 }}>
-                Noxa OS · Module 08 · Inventory
+                ノクサ · 在庫
               </div>
               <h1
                 className="noxa-display"

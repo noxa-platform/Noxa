@@ -325,7 +325,7 @@ export function RiskClient({ user }: { user: User }) {
             className="noxa-eyebrow"
             style={{ marginBottom: 6, fontFamily: mono, fontSize: 10, letterSpacing: '0.12em', textTransform: 'uppercase', color: 'var(--noxa-text-faint)' }}
           >
-            Noxa OS · Module · Risk
+            ノクサ · リスク客共有
           </div>
           <h1
             style={{

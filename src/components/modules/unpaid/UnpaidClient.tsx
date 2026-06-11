@@ -312,7 +312,7 @@ export function UnpaidClient({ user }: { user: User }) {
         >
           <div>
             <div className="noxa-eyebrow" style={{ marginBottom: 6 }}>
-              Noxa OS · Module · Unpaid
+              ノクサ · 売掛管理
             </div>
             <h1
               className="noxa-display"

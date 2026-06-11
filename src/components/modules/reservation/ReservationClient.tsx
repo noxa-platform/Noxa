@@ -278,7 +278,7 @@ export function ReservationClient({ user }: { user: User }) {
         >
           <div>
             <div className="noxa-eyebrow" style={{ marginBottom: 6 }}>
-              Noxa OS · Module 08 · Reservation & VIP
+              ノクサ · 予約
             </div>
             <h1
               className="noxa-display"

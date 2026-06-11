@@ -56,7 +56,7 @@ export function NotificationsClient({ user }: { user: User }) {
   const unread = list.filter((n) => !n.read);
 
   return (
-    <Shell title="通知センター" eyebrow="Noxa OS · Notifications" crumb="notifications">
+    <Shell title="通知センター" eyebrow="ノクサ · おしらせ" crumb="notifications">
       {loading ? <Eyebrow>読み込み中…</Eyebrow> : list.length === 0 ? (
         <Section label="通知">
           <Empty>通知はまだありません。誕生日リマインド・売上サマリ等がここに届きます。</Empty>
