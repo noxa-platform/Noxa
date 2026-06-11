@@ -33,10 +33,17 @@ export function PublicProfile({ handle, expectType }: { handle: string; expectTy
   return (
     <main className="noxa-zone" style={{ minHeight: '100dvh', display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '48px 20px 32px', position: 'relative', overflow: 'hidden' }}>
       <div aria-hidden style={{ position: 'absolute', top: '-15%', left: '50%', transform: 'translateX(-50%)', width: 700, height: 420, background: 'radial-gradient(ellipse, rgba(139,92,246,0.16) 0%, transparent 62%)', pointerEvents: 'none' }} />
+      <style>{`
+        .noxa-link-btn { transition: transform .16s var(--noxa-ease-natural,ease), border-color .16s, box-shadow .16s; }
+        .noxa-link-btn:hover { transform: translateY(-2px); box-shadow: 0 8px 24px rgba(0,0,0,0.28); }
+        .noxa-link-btn:active { transform: translateY(0); }
+      `}</style>
       <div style={{ position: 'relative', width: '100%', maxWidth: 460, display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
-        {/* アバター */}
-        <div style={{ width: 104, height: 104, borderRadius: '50%', overflow: 'hidden', background: 'var(--noxa-surface-muted)', display: 'flex', alignItems: 'center', justifyContent: 'center', border: '2px solid var(--noxa-border-strong)', boxShadow: 'var(--noxa-glow-soft)', marginBottom: 16 }}>
-          {page.avatar ? <img src={page.avatar} alt={page.displayName} style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : <span style={{ fontSize: 44, fontFamily: 'var(--noxa-font-display-jp)', color: 'var(--noxa-text-muted)' }}>{initial}</span>}
+        {/* アバター（リング演出） */}
+        <div style={{ padding: 3, borderRadius: '50%', background: 'linear-gradient(135deg, var(--noxa-accent-primary), var(--noxa-accent-primary-neon))', boxShadow: 'var(--noxa-glow-soft)', marginBottom: 16 }}>
+          <div style={{ width: 104, height: 104, borderRadius: '50%', overflow: 'hidden', background: 'var(--noxa-bg-base)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            {page.avatar ? <img src={page.avatar} alt={page.displayName} style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : <span style={{ fontSize: 44, fontFamily: 'var(--noxa-font-display-jp)', color: 'var(--noxa-text-muted)' }}>{initial}</span>}
+          </div>
         </div>
         <h1 style={{ fontFamily: 'var(--noxa-font-display-jp)', fontSize: 26, fontWeight: 500, margin: '0 0 4px', textAlign: 'center' }}>{page.displayName || page.handle}</h1>
         <div style={{ fontFamily: 'var(--noxa-font-mono)', fontSize: 12, color: 'var(--noxa-text-faint)', marginBottom: page.bio ? 12 : 20 }}>@{page.handle}</div>
@@ -47,14 +54,17 @@ export function PublicProfile({ handle, expectType }: { handle: string; expectTy
           {(page.sns ?? []).filter((s) => s.url).map((s, i) => {
             const meta = SNS_META[(s.platform || 'other').toLowerCase()] ?? SNS_META.other;
             return (
-              <a key={i} href={s.url} target="_blank" rel="noopener noreferrer"
-                style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '14px 18px', borderRadius: 14, background: 'var(--noxa-surface-card)', border: '1px solid var(--noxa-border)', color: 'var(--noxa-text-primary)', textDecoration: 'none', fontSize: 15, fontWeight: 600, transition: 'transform .15s' }}>
-                <span aria-hidden style={{ width: 28, height: 28, borderRadius: 8, background: meta.color, color: '#fff', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: 13, fontWeight: 700, flex: 'none' }}>{meta.label[0]}</span>
+              <a key={i} href={s.url} target="_blank" rel="noopener noreferrer" className="noxa-link-btn"
+                style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '14px 18px', borderRadius: 14, background: 'var(--noxa-surface-card)', borderLeft: `3px solid ${meta.color}`, borderTop: '1px solid var(--noxa-border)', borderRight: '1px solid var(--noxa-border)', borderBottom: '1px solid var(--noxa-border)', color: 'var(--noxa-text-primary)', textDecoration: 'none', fontSize: 15, fontWeight: 600 }}>
+                <span aria-hidden style={{ width: 30, height: 30, borderRadius: 8, background: meta.color, color: '#fff', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: 14, fontWeight: 800, flex: 'none' }}>{meta.label[0]}</span>
                 {meta.label}
                 <span aria-hidden style={{ marginLeft: 'auto', color: 'var(--noxa-text-faint)' }}>↗</span>
               </a>
             );
           })}
+          {(page.sns ?? []).filter((s) => s.url).length === 0 && (
+            <p style={{ textAlign: 'center', color: 'var(--noxa-text-faint)', fontSize: 13, padding: '12px 0' }}>リンクは準備中です。</p>
+          )}
         </div>
 
         <Link href="/" style={{ marginTop: 36, fontSize: 11, color: 'var(--noxa-text-faint)', textDecoration: 'none' }}>

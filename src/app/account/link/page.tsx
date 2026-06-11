@@ -7,7 +7,7 @@ import { doc, getDoc } from 'firebase/firestore';
 import { AuthGuard } from '@/components/AuthGuard';
 import { AccountShell } from '@/components/AccountShell';
 import { db } from '@/lib/firebase/config';
-import { getProfilePage, updateProfilePage, type ProfilePage, type SnsLink } from '@/lib/handle';
+import { getProfilePage, updateProfilePage, changeUserHandle, validateHandle, isHandleAvailable, type ProfilePage, type SnsLink } from '@/lib/handle';
 import { compressImage } from '@/lib/menu/imageCompress';
 
 const PLATFORMS = ['instagram', 'x', 'tiktok', 'line', 'youtube', 'other'];
@@ -24,6 +24,11 @@ function ProfileLinkClient({ user }: { user: User }) {
   const [avatar, setAvatar] = useState('');
   const [sns, setSns] = useState<SnsLink[]>([]);
   const [published, setPublished] = useState(false);
+  // ハンドル変更
+  const [editingHandle, setEditingHandle] = useState(false);
+  const [newHandle, setNewHandle] = useState('');
+  const [hStatus, setHStatus] = useState<'idle' | 'ok' | 'taken' | 'invalid'>('idle');
+  const [hBusy, setHBusy] = useState(false);
 
   useEffect(() => {
     let alive = true;
@@ -53,6 +58,25 @@ function ProfileLinkClient({ user }: { user: User }) {
     try { const d = await compressImage(file, { maxSize: 512 }); setAvatar(d); } catch { /* skip */ }
   };
 
+  useEffect(() => {
+    if (!editingHandle) return;
+    const h = validateHandle(newHandle);
+    if (!h) { setHStatus(newHandle ? 'invalid' : 'idle'); return; }
+    if (h === handle) { setHStatus('idle'); return; }
+    let alive = true;
+    const t = setTimeout(async () => { const ok = await isHandleAvailable(h); if (alive) setHStatus(ok ? 'ok' : 'taken'); }, 400);
+    return () => { alive = false; clearTimeout(t); };
+  }, [newHandle, editingHandle, handle]);
+
+  const doChangeHandle = async () => {
+    if (!handle) return;
+    const h = validateHandle(newHandle); if (!h) return;
+    setHBusy(true);
+    try { const nh = await changeUserHandle(user.uid, handle, h); setHandle(nh); setEditingHandle(false); setNewHandle(''); }
+    catch { setHStatus('taken'); }
+    finally { setHBusy(false); }
+  };
+
   const save = async () => {
     if (!handle) return;
     setSaving(true); setSaved(false);
@@ -74,11 +98,27 @@ function ProfileLinkClient({ user }: { user: User }) {
       <p style={{ color: 'var(--noxa-text-muted)', fontSize: 13, lineHeight: 1.7, margin: '0 0 8px' }}>
         SNS をまとめた公開ページを作れます。本名・所在地は載せず、源氏名でどうぞ。
       </p>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 20, flexWrap: 'wrap' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: editingHandle ? 8 : 20, flexWrap: 'wrap' }}>
         <code style={{ fontFamily: 'var(--noxa-font-mono)', fontSize: 12, background: 'var(--noxa-surface-muted)', padding: '4px 8px', borderRadius: 6 }}>{publicUrl}</code>
         <button type="button" onClick={() => navigator.clipboard?.writeText(publicUrl)} style={miniBtn}>コピー</button>
         <Link href={`/u/${handle}`} target="_blank" style={miniBtn}>開く ↗</Link>
+        <button type="button" onClick={() => { setEditingHandle((v) => !v); setNewHandle(handle ?? ''); }} style={miniBtn}>ID変更</button>
       </div>
+      {editingHandle && (
+        <div style={{ padding: '12px 14px', borderRadius: 12, background: 'var(--noxa-surface-card)', border: '1px solid var(--noxa-border)', marginBottom: 20 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <span style={{ fontFamily: 'var(--noxa-font-mono)', fontSize: 12, color: 'var(--noxa-text-faint)' }}>/u/</span>
+            <input value={newHandle} onChange={(e) => setNewHandle(e.target.value.toLowerCase().replace(/[^a-z0-9_]/g, '').slice(0, 20))} className="noxa-input" style={{ flex: 1 }} />
+            <button type="button" onClick={doChangeHandle} disabled={hBusy || hStatus !== 'ok'} className="noxa-btn noxa-btn-primary" style={{ padding: '0 16px' }}>{hBusy ? '変更中…' : '変更'}</button>
+          </div>
+          <div style={{ minHeight: 18, marginTop: 6, fontSize: 12 }}>
+            {hStatus === 'ok' && <span style={{ color: 'var(--noxa-status-success)' }}>✓ 使用できます</span>}
+            {hStatus === 'taken' && <span style={{ color: 'var(--noxa-accent-destructive)' }}>このIDは使用済みです</span>}
+            {hStatus === 'invalid' && <span style={{ color: 'var(--noxa-accent-destructive)' }}>英数字と「_」3〜20文字</span>}
+          </div>
+          <p style={{ margin: '4px 0 0', fontSize: 11, color: 'var(--noxa-text-faint)' }}>※ 変更すると以前のURL（/u/{handle}）は無効になります。</p>
+        </div>
+      )}
 
       {/* 公開トグル */}
       <label style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '12px 14px', borderRadius: 12, background: published ? 'rgba(123,232,161,0.10)' : 'var(--noxa-surface-card)', border: '1px solid var(--noxa-border)', marginBottom: 16, cursor: 'pointer' }}>

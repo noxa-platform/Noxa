@@ -107,6 +107,29 @@ export async function updateProfilePage(handle: string, patch: Partial<Omit<Prof
   });
 }
 
+/**
+ * 個人ハンドルを変更（旧 profile_pages の内容を新 handle へ移し、account_users.handle を更新）。
+ * 旧 /u/<oldHandle> は404になる点に注意（呼び出し側で警告）。
+ */
+export async function changeUserHandle(uid: string, oldHandle: string, newHandleRaw: string): Promise<string> {
+  const newH = validateHandle(newHandleRaw);
+  if (!newH) throw new Error('INVALID_HANDLE');
+  if (newH === oldHandle) return newH;
+  const oldRef = doc(db, `profile_pages/${oldHandle}`);
+  const newRef = doc(db, `profile_pages/${newH}`);
+  const userRef = doc(db, `account_users/${uid}`);
+  await runTransaction(db, async (tx) => {
+    const newExisting = await tx.get(newRef);
+    if (newExisting.exists()) throw new Error('HANDLE_TAKEN');
+    const old = await tx.get(oldRef);
+    const data = old.exists() ? old.data() : {};
+    tx.set(newRef, { ...data, handle: newH, ownerUid: uid, type: 'user', refId: uid, updatedAt: serverTimestamp() });
+    tx.set(userRef, { handle: newH, updatedAt: serverTimestamp() }, { merge: true });
+    if (old.exists()) tx.delete(oldRef);
+  });
+  return newH;
+}
+
 export async function getProfilePage(handle: string): Promise<ProfilePage | null> {
   const h = (handle ?? '').toLowerCase();
   const snap = await getDoc(doc(db, `profile_pages/${h}`));
