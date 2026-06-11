@@ -59,6 +59,36 @@ export async function POST(request: NextRequest) {
       targets.set(ownerUid, { role: 'owner', name: '' });
     }
 
+    // 当月の全ログを collectionGroup で 1 回だけ取得し castUid 別に集計する。
+    // 旧実装はキャスト×顧客ごとにログをクエリしており（N×M）、店舗規模で
+    // 数百〜千クエリに膨れて事業WSの読み込みが重かった。ログの doc パス
+    // personal_customers/{castUid}/items/{cid}/logs/{lid} から castUid を取り出す。
+    // ※ collectionGroup は全テナントのログを月レンジで舐めるため、将来規模が
+    //   大きくなったら logs に castUid フィールドを持たせた per-cast 集計へ移行する。
+    const logsAgg = new Map<string, { s: number; g: number }>();
+    const logsSnap = await db
+      .collectionGroup('logs')
+      .where('datetime', '>=', monthStart)
+      .where('datetime', '<', monthEnd)
+      .get()
+      .catch((e) => {
+        console.error('[api/team/member-stats] collectionGroup(logs) failed:', e);
+        return null;
+      });
+    for (const l of logsSnap?.docs ?? []) {
+      const segs = l.ref.path.split('/');
+      // personal_customers/{castUid}/items/{cid}/logs/{lid} 以外（他モデルの logs）は除外
+      if (segs[0] !== 'personal_customers') continue;
+      const castUid = segs[1];
+      if (!targets.has(castUid)) continue;
+      const d = l.data() as { salesAmount?: number; countAsGroup?: boolean; type?: string };
+      const cur = logsAgg.get(castUid) ?? { s: 0, g: 0 };
+      cur.s += d.salesAmount || 0;
+      const counted = typeof d.countAsGroup === 'boolean' ? d.countAsGroup : d.type === 'visit';
+      if (counted) cur.g += 1;
+      logsAgg.set(castUid, cur);
+    }
+
     const members = await Promise.all([...targets.entries()].map(async ([castUid, info]) => {
       // 表示名: members の castDisplayName → account_users.displayName → uid 先頭
       let name = info.name;
@@ -67,30 +97,21 @@ export async function POST(request: NextRequest) {
         name = (acc?.data() as { displayName?: string } | undefined)?.displayName || castUid.slice(0, 8);
       }
 
-      const custSnap = await db.collection(`personal_customers/${castUid}/items`).get().catch(() => null);
-      const customerCount = custSnap?.size ?? 0;
+      // 顧客数は count() 集計（全 doc 読み込みを避ける）
+      let customerCount = 0;
+      try {
+        const cnt = await db.collection(`personal_customers/${castUid}/items`).count().get();
+        customerCount = cnt.data().count;
+      } catch {
+        // 集計失敗時は 0（致命的でない）
+      }
 
-      // 顧客ごとの当月ログを並列取得（N+1 の直列待ちでタイムアウトするのを回避）
-      const perCustomer = await Promise.all((custSnap?.docs ?? []).map(async (c) => {
-        const logsSnap = await db
-          .collection(`personal_customers/${castUid}/items/${c.id}/logs`)
-          .where('datetime', '>=', monthStart)
-          .where('datetime', '<', monthEnd)
-          .get()
-          .catch(() => null);
-        let s = 0, g = 0;
-        for (const l of logsSnap?.docs ?? []) {
-          const d = l.data() as { salesAmount?: number; countAsGroup?: boolean; type?: string };
-          s += d.salesAmount || 0;
-          const counted = typeof d.countAsGroup === 'boolean' ? d.countAsGroup : d.type === 'visit';
-          if (counted) g += 1;
-        }
-        return { s, g };
-      }));
-      let monthSales = perCustomer.reduce((acc, x) => acc + x.s, 0);
-      let monthGroupCount = perCustomer.reduce((acc, x) => acc + x.g, 0);
+      const base = logsAgg.get(castUid) ?? { s: 0, g: 0 };
+      let monthSales = base.s;
+      let monthGroupCount = base.g;
 
-      // 顧客なし日売
+      // 顧客なし日売（collectionGroup 名 items は personal_customers/items と衝突するため
+      //              従来どおり cast 単位で読む。1 キャスト 1 クエリで軽い）
       const ssSnap = await db.collection(`personal_sales/${castUid}/items`)
         .where('datetime', '>=', monthStart)
         .where('datetime', '<', monthEnd)
