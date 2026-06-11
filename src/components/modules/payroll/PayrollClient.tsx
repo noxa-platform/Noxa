@@ -18,6 +18,25 @@ const yen = (n: number) => `¥${Math.round(n).toLocaleString('ja-JP')}`;
 
 type Period = { id: string; label: string; total: number; breakdown: { label: string; amount: number }[]; status: string };
 
+function toMs(v: unknown): number { if (v && typeof v === 'object' && 'seconds' in (v as Record<string, unknown>)) return (v as { seconds: number }).seconds * 1000; if (typeof v === 'number') return v; return 0; }
+
+// 当月の勤務(shifts)×自分の時給(seating_casts.hourlyWage)から見込み給与(基本給)を算出
+async function computeDraft(shopId: string, uid: string): Promise<Period | null> {
+  const d = new Date();
+  const ym = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+  try {
+    const sh = await getDocs(query(collection(db, `shop_shops/${shopId}/shifts`), where('castUid', '==', uid)));
+    let mins = 0;
+    sh.forEach((doc) => { const x = doc.data(); const date = (x.date as string) ?? ''; if (!date.startsWith(ym)) return; const s = toMs(x.startAt), e = toMs(x.endAt); if (s && e && e > s) mins += (e - s) / 60000; });
+    if (mins <= 0) return null;
+    const cw = await getDocs(query(collection(db, `shop_shops/${shopId}/seating_casts`), where('uid', '==', uid)));
+    const wage = cw.empty ? 0 : ((cw.docs[0].data().hourlyWage as number) ?? 0);
+    const hours = mins / 60;
+    const base = Math.round(hours * wage);
+    return { id: `draft-${ym}`, label: `${ym.replace('-', '年')}月（見込み）`, total: base, status: '見込み', breakdown: [{ label: `基本給（勤務 ${hours.toFixed(1)}h × 時給 ¥${wage.toLocaleString('ja-JP')}）`, amount: base }] };
+  } catch { return null; }
+}
+
 function mapPeriod(id: string, d: DocumentData): Period {
   const bd: { label: string; amount: number }[] = [];
   if (Array.isArray(d.breakdown)) for (const b of d.breakdown) bd.push({ label: (b.label as string) ?? '', amount: typeof b.amount === 'number' ? b.amount : 0 });
@@ -57,7 +76,10 @@ export function PayrollClient({ user }: { user: User }) {
         const snap = await getDocs(collection(db, `shop_shops/${shopId}/payrolls/${user.uid}/items`));
         const list: Period[] = []; snap.forEach((d) => list.push(mapPeriod(d.id, d.data())));
         list.sort((a, b) => b.label.localeCompare(a.label));
-        if (alive) setPeriods(list);
+        // 当月の確定明細が無ければ、勤務実績からの見込みを先頭に表示
+        const draft = await computeDraft(shopId, user.uid);
+        const merged = draft && !list.some((p) => p.id === draft.id) ? [draft, ...list] : list;
+        if (alive) setPeriods(merged);
       } catch { /* skip */ }
       if (alive) setLoading(false);
     })();
