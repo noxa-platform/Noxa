@@ -7,6 +7,7 @@ import type { User } from 'firebase/auth';
 import { signOut } from '@/lib/auth';
 import { db } from '@/lib/firebase/config';
 import { useShopContext, useDeviceClaims } from '@/lib/useShopContext';
+import { useTheme } from '@/lib/useTheme';
 
 // アカウント（OS 本体）。端末では非表示。
 const NAV_ACCOUNT: { label: string; href: string; icon: string }[] = [
@@ -60,6 +61,7 @@ export function AccountShell({ user, children }: { user: User; children: React.R
   const router = useRouter();
   const { hasShop } = useShopContext(user.uid);
   const device = useDeviceClaims(user);
+  useTheme(user); // 業種テーマ（コンカフェ等）を <html data-theme> に適用
   // 店舗デバイスログイン時は許可モジュールのみ（給与/売掛/リスク客は allow に含まれない）
   const storeNav = device.isDevice ? NAV_STORE.filter((it) => device.allow.includes(it.href.slice(1))) : NAV_STORE;
 

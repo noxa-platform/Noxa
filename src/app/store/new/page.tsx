@@ -18,7 +18,7 @@ const mono = 'var(--noxa-font-mono)';
 const labelStyle: React.CSSProperties = { fontFamily: mono, fontSize: 11, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--noxa-text-muted)' };
 const inputStyle: React.CSSProperties = { width: '100%', minHeight: 46, padding: '10px 14px', borderRadius: 10, background: 'var(--noxa-surface-card)', border: '1px solid var(--noxa-border)', color: 'var(--noxa-text-primary)', fontSize: 16 };
 
-const BIZ = ['キャバクラ', 'ホストクラブ', 'ラウンジ', 'ガールズバー', 'スナック', 'その他'];
+const BIZ = ['キャバクラ', 'ホストクラブ', 'ラウンジ', 'ガールズバー', 'スナック', 'コンカフェ', 'その他'];
 
 // 店舗デバイス PIN を SHA-256(shopId:pin) でハッシュ（Cloud Function 側と一致）。
 async function hashPin(shopId: string, pin: string): Promise<string> {

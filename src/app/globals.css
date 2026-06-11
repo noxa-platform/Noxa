@@ -126,6 +126,76 @@
 }
 
 /* ──────────────────────────────────────────────
+   業種テーマ: コンカフェ（明るい・ピンク・ポップ / kawaii）
+   全UIは var(--noxa-*) 参照のため、ここを上書きするだけで全画面が切替わる。
+   data-theme="concafe" を <html> に付与して有効化。
+   ────────────────────────────────────────────── */
+[data-theme="concafe"] {
+  /* Background — ライトなミルキーピンク */
+  --noxa-bg-base:      #FFF2F8;
+  --noxa-bg-elevated:  #FFFFFF;
+  --noxa-bg-overlay:   rgba(255, 242, 248, 0.78);
+
+  /* Surface — 白＋淡ピンク */
+  --noxa-surface-card:  #FFFFFF;
+  --noxa-surface-muted: #FFE8F2;
+  --noxa-surface-hover: #FFDBEC;
+
+  /* Accent — ホットピンク（単色ヒエラルキー） */
+  --noxa-accent-primary:       #FF5FA2;
+  --noxa-accent-primary-ink:   #D6357E;   /* ライト背景での可読色 */
+  --noxa-accent-primary-faint: #FFB3D4;
+  --noxa-accent-primary-press: #C72E72;
+  --noxa-accent-primary-deep:  #A61E5C;
+  --noxa-accent-primary-neon:  #FF8AC2;
+  --noxa-accent-destructive:   #E5484D;
+
+  /* Text — 濃いプラムで温かみ */
+  --noxa-text-primary: #3A1F2E;
+  --noxa-text-muted:   #8A6275;
+  --noxa-text-faint:   #BD96A8;
+  --noxa-text-inverse: #FFFFFF;
+
+  /* Border / Divider */
+  --noxa-border:        #FAD3E4;
+  --noxa-border-strong: #F4B2D0;
+  --noxa-divider:       rgba(255, 95, 162, 0.20);
+
+  /* Sub-brand tints */
+  --noxa-tint-yorulog:    #FF5FA2;
+  --noxa-tint-nomishugy:  #FF8AC2;
+  --noxa-tint-community:  #E5484D;
+
+  /* Status（ライト背景向けに少し濃く） */
+  --noxa-status-success: #2FB873;
+  --noxa-status-warning: #E8A93B;
+  --noxa-status-error:   #E5484D;
+  --noxa-status-info:    #2BB3C7;
+  --noxa-status-soon:    #BD96A8;
+  --noxa-status-success-glow: 0 0 8px rgba(47, 184, 115, 0.35);
+  --noxa-status-info-glow:    0 0 8px rgba(43, 179, 199, 0.35);
+
+  /* Type — ポップ/丸ゴシック寄り（追加フォント不要、丸ゴシック→Noto にフォールバック） */
+  --noxa-font-display-en: 'Geist', 'Noto Sans JP', system-ui, sans-serif;
+  --noxa-font-display-jp: 'Hiragino Maru Gothic ProN', 'Rounded Mplus 1c', 'Noto Sans JP', system-ui, sans-serif;
+
+  /* Radius — まるく */
+  --noxa-radius-sm:   8px;
+  --noxa-radius-md:  14px;
+  --noxa-radius-lg:  24px;
+
+  /* Elevation — ライト背景用のやわらかいピンク影 */
+  --noxa-shadow-sm: 0 1px 3px rgba(214, 53, 126, 0.10);
+  --noxa-shadow-md: 0 6px 20px rgba(214, 53, 126, 0.12), 0 1px 2px rgba(214, 53, 126, 0.08);
+  --noxa-shadow-lg: 0 18px 48px rgba(214, 53, 126, 0.16), 0 2px 6px rgba(214, 53, 126, 0.10);
+
+  /* Glow — ネオンではなくふんわりピンク */
+  --noxa-glow-soft:   0 4px 16px rgba(255, 95, 162, 0.28);
+  --noxa-glow-strong: 0 8px 28px rgba(255, 138, 194, 0.42), 0 0 48px rgba(255, 95, 162, 0.22);
+  --noxa-glow-ring:   0 0 0 1px rgba(255, 95, 162, 0.40), 0 4px 16px rgba(255, 95, 162, 0.22);
+}
+
+/* ──────────────────────────────────────────────
    v1.1: Tailwind 4 @theme — bg-noxa-* / text-noxa-* / shadow-noxa-* で utility 利用可
    ────────────────────────────────────────────── */
 @theme {
