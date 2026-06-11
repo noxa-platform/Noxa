@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { useEffect, useMemo, useState } from 'react';
-import { collection, onSnapshot, addDoc, doc, updateDoc, serverTimestamp, Timestamp, type DocumentData } from 'firebase/firestore';
+import { collection, onSnapshot, addDoc, doc, updateDoc, serverTimestamp, increment, Timestamp, type DocumentData } from 'firebase/firestore';
 import { db } from '@/lib/firebase/config';
 import { useShopId } from '@/lib/useShopId';
 import type { User } from 'firebase/auth';
@@ -20,7 +20,7 @@ const yen = (n: number) => `¥${Math.round(n).toLocaleString('ja-JP')}`;
 function todayKey(): string { const d = new Date(); if (d.getHours() < 6) d.setDate(d.getDate() - 1); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; }
 function toMs(v: unknown): number | null { if (v instanceof Timestamp) return v.toMillis(); if (v && typeof v === 'object' && 'seconds' in (v as Record<string, unknown>)) return (v as { seconds: number }).seconds * 1000; return null; }
 
-type Sale = { id: string; amount: number; customerName: string | null; castName: string | null; dayKey: string; atMs: number | null; voided: boolean; source: string };
+type Sale = { id: string; amount: number; customerName: string | null; customerId: string | null; castName: string | null; dayKey: string; atMs: number | null; voided: boolean; source: string };
 
 export function SalesClient({ user }: { user: User }) {
   const shop = useShopId(user);
@@ -34,7 +34,7 @@ export function SalesClient({ user }: { user: User }) {
     setLoading(true);
     const unsub = onSnapshot(collection(db, colPath), (snap) => {
       const list: Sale[] = [];
-      snap.forEach((d) => { const x = d.data() as DocumentData; list.push({ id: d.id, amount: typeof x.amount === 'number' ? x.amount : 0, customerName: x.customerName ?? null, castName: x.castName ?? null, dayKey: x.dayKey ?? '', atMs: toMs(x.checkoutAt) ?? toMs(x.createdAt), voided: x.voided === true, source: x.source ?? 'manual' }); });
+      snap.forEach((d) => { const x = d.data() as DocumentData; list.push({ id: d.id, amount: typeof x.amount === 'number' ? x.amount : 0, customerName: x.customerName ?? null, customerId: x.customerId ?? null, castName: x.castName ?? null, dayKey: x.dayKey ?? '', atMs: toMs(x.checkoutAt) ?? toMs(x.createdAt), voided: x.voided === true, source: x.source ?? 'manual' }); });
       setSales(list); setLoading(false);
     }, () => setLoading(false));
     return () => unsub();
@@ -54,8 +54,19 @@ export function SalesClient({ user }: { user: User }) {
     // castUid=記録者（店舗ルールの create 条件を満たし、個人売上の帰属にもなる）
     await addDoc(collection(db, colPath), { source: 'manual', amount, customerName: customerName.trim() || null, castName: castName.trim() || null, castUid: user.uid, operatorUid: user.uid, dayKey: tk, checkoutAt: serverTimestamp(), createdAt: serverTimestamp() });
   };
-  const voidSale = async (s: Sale) => { const r = window.prompt('取消理由（任意）'); if (r === null) return; await updateDoc(doc(db, `${colPath}/${s.id}`), { voided: true, voidedAt: serverTimestamp(), voidReason: r }); };
-  const editSale = async (s: Sale) => { const v = window.prompt('金額（円）', String(s.amount)); if (v === null) return; const a = Number(v); if (!Number.isFinite(a) || a < 0) return; await updateDoc(doc(db, `${colPath}/${s.id}`), { amount: a, correctedAt: serverTimestamp() }); };
+  const custRef = (cid: string) => shop.shopId ? doc(db, `shop_shops/${shop.shopId}/customers/${cid}`) : null;
+  const voidSale = async (s: Sale) => {
+    const r = window.prompt('取消理由（任意）'); if (r === null) return;
+    await updateDoc(doc(db, `${colPath}/${s.id}`), { voided: true, voidedAt: serverTimestamp(), voidReason: r });
+    // 顧客実績から減算（取消＝集計から外す）
+    if (s.customerId && !s.voided) { const ref = custRef(s.customerId); if (ref) await updateDoc(ref, { totalSales: increment(-s.amount), visitCount: increment(-1) }).catch(() => {}); }
+  };
+  const editSale = async (s: Sale) => {
+    const v = window.prompt('金額（円）', String(s.amount)); if (v === null) return; const a = Number(v); if (!Number.isFinite(a) || a < 0) return;
+    await updateDoc(doc(db, `${colPath}/${s.id}`), { amount: a, correctedAt: serverTimestamp() });
+    // 顧客の累計売上も差額で補正
+    if (s.customerId && !s.voided && a !== s.amount) { const ref = custRef(s.customerId); if (ref) await updateDoc(ref, { totalSales: increment(a - s.amount) }).catch(() => {}); }
+  };
 
   return (
     <div style={{ color: 'var(--noxa-text-primary)', fontFamily: 'var(--noxa-font-sans-jp)', borderRadius: 16, border: '1px solid var(--noxa-border)', padding: 'clamp(16px, 3vw, 28px)' }}>

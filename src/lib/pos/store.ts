@@ -15,7 +15,7 @@
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  collection, doc, getDoc, onSnapshot, setDoc, serverTimestamp,
+  collection, doc, getDoc, onSnapshot, setDoc, serverTimestamp, increment,
   query, where, getDocs, runTransaction, type DocumentData,
 } from 'firebase/firestore';
 import type { User } from 'firebase/auth';
@@ -281,12 +281,19 @@ export function usePosStore(user: User): UsePosStore {
       tx.set(saleRef, {
         source: 'pos', amount: opts.amount, tableId, tableName: (data.name as string) ?? '', slipName: slip.name,
         customerType: slip.state.customerType, customerName: opts.customerName ?? slip.customerName ?? null,
+        customerId: slip.customerId ?? null,
         castName: opts.castName ?? slip.castName ?? null,
         castUid: attributionRef.current === 'operator' ? user.uid : (slip.castUid ?? user.uid),
         operatorUid: user.uid,
         guests: opts.guests ?? null,
         entryTime: slip.state.entryTime, checkoutAt: serverTimestamp(), dayKey: dayKey(), createdAt: serverTimestamp(),
       });
+      // 会計→顧客実績を同一トランザクションで更新（紐付け顧客がいれば累計売上・来店・最終接触を反映）
+      if (slip.customerId) {
+        tx.set(doc(db, `shop_shops/${shopId}/customers/${slip.customerId}`),
+          { totalSales: increment(opts.amount), visitCount: increment(1), lastContactAt: serverTimestamp(), updatedAt: serverTimestamp() },
+          { merge: true });
+      }
       const nextSlips = JSON.parse(JSON.stringify(slips.filter((s) => s.id !== slipId)));
       tx.set(ref, { slips: nextSlips, updatedAt: serverTimestamp() }, { merge: true });
     });
