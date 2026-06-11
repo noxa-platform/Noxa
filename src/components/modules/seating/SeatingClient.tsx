@@ -328,6 +328,17 @@ function TableDetail({ table, casts, tables, castById, store }: {
             <button type="button" onClick={() => store.checkTable(table.id)} style={chipStyle(table.status === 'CHECK')}>会計</button>
             <button type="button" onClick={() => { if (window.confirm(`${table.name} を退店処理（リセット）しますか？`)) store.resetTable(table.id); }} style={{ ...chipStyle(false), color: 'var(--noxa-status-error)', borderColor: 'rgba(229,115,115,0.4)', marginLeft: 'auto' }}>退店</button>
           </div>
+
+          {/* この卓のセット設定（オーナー） */}
+          {store.canManage && (
+            <div style={{ display: 'flex', gap: 10, alignItems: 'flex-end', flexWrap: 'wrap', borderTop: '1px solid var(--noxa-divider)', paddingTop: 10 }}>
+              <label style={{ display: 'flex', flexDirection: 'column', gap: 4 }}><span style={miniLabel}>セット長(分)</span>
+                <input key={`s-${table.id}`} type="number" defaultValue={table.setTimeLength} onBlur={(e) => store.updateTableSettings(table.id, { setTimeLength: Number(e.target.value) })} style={{ ...fieldStyle, width: 90 }} inputMode="numeric" /></label>
+              <label style={{ display: 'flex', flexDirection: 'column', gap: 4 }}><span style={miniLabel}>ローテ間隔(分)</span>
+                <input key={`r-${table.id}`} type="number" defaultValue={table.rotationTimeLength} onBlur={(e) => store.updateTableSettings(table.id, { rotationTimeLength: Number(e.target.value) })} style={{ ...fieldStyle, width: 90 }} inputMode="numeric" /></label>
+              <span style={{ fontSize: 10, color: 'var(--noxa-text-faint)' }}>この卓の設定（入力後フォーカスを外すと保存）</span>
+            </div>
+          )}
         </>
       )}
     </section>

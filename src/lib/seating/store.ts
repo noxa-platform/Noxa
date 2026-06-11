@@ -99,6 +99,7 @@ export type UseSeatingStore = {
   checkTable: (tableId: string) => Promise<void>;
   extendTime: (tableId: string, minutes: number) => Promise<void>;
   toggleInnerRotation: (tableId: string) => Promise<void>;
+  updateTableSettings: (tableId: string, patch: { setTimeLength?: number; rotationTimeLength?: number }) => Promise<void>;
   resetTable: (tableId: string) => Promise<void>;
   // queue
   addToQueue: (item: { name: string; groupSize: number; type: TableType; notes?: string }) => Promise<void>;
@@ -186,10 +187,18 @@ export function useSeatingStore(user: User): UseSeatingStore {
       const tn = cfg.exists() ? (cfg.data().tableNames as string[] | undefined) : undefined;
       if (Array.isArray(tn) && tn.length) names = tn;
     } catch { /* ignore */ }
+    // 店舗設定の既定セット長/ローテ間隔を新規卓に反映
+    let setLen = 60; let rotLen = 15;
+    try {
+      const s = await getDoc(doc(db, `shop_shops/${shopId}/config/settings`));
+      const sd = s.data() as { setTimeLength?: number; rotationTimeLength?: number } | undefined;
+      if (sd?.setTimeLength && sd.setTimeLength > 0) setLen = sd.setTimeLength;
+      if (sd?.rotationTimeLength && sd.rotationTimeLength > 0) rotLen = sd.rotationTimeLength;
+    } catch { /* ignore */ }
     const batch = writeBatch(db);
     names.forEach((name, i) => {
       const id = `tbl_${i + 1}`;
-      batch.set(doc(db, `shop_shops/${shopId}/seating_tables/${id}`), { ...createEmptyTable(id, name), updatedAt: serverTimestamp() });
+      batch.set(doc(db, `shop_shops/${shopId}/seating_tables/${id}`), { ...createEmptyTable(id, name), setTimeLength: setLen, rotationTimeLength: rotLen, updatedAt: serverTimestamp() });
     });
     await batch.commit();
   }, [shopId]);
@@ -305,6 +314,15 @@ export function useSeatingStore(user: User): UseSeatingStore {
     });
   }, [shopId, getTable, tableRef]);
 
+  const updateTableSettings = useCallback<UseSeatingStore['updateTableSettings']>(async (tableId, patch) => {
+    if (!shopId) return;
+    const clean: Record<string, number> = {};
+    if (typeof patch.setTimeLength === 'number' && patch.setTimeLength > 0) clean.setTimeLength = patch.setTimeLength;
+    if (typeof patch.rotationTimeLength === 'number' && patch.rotationTimeLength > 0) clean.rotationTimeLength = patch.rotationTimeLength;
+    if (Object.keys(clean).length === 0) return;
+    await setDoc(doc(db, `shop_shops/${shopId}/seating_tables/${tableId}`), { ...clean, updatedAt: serverTimestamp() }, { merge: true });
+  }, [shopId]);
+
   const setTableType = useCallback<UseSeatingStore['setTableType']>(async (tableId, type) => {
     const t = getTable(tableId); if (!t) return;
     await writeTable({ ...t, type });
@@ -355,13 +373,13 @@ export function useSeatingStore(user: User): UseSeatingStore {
     casts, tables, queue,
     addCast, updateCast, removeCast, toggleLock, setCastBaseStatus,
     seedTables, seedTestData, assignCast, removeCastFromTable, toggleMainHost, toggleRequested, rotateHosts,
-    startSet, setTableType, checkTable, extendTime, toggleInnerRotation, resetTable,
+    startSet, setTableType, checkTable, extendTime, toggleInnerRotation, updateTableSettings, resetTable,
     addToQueue, removeFromQueue, seatQueueGroup,
   }), [
     shop.loading, loadingData, shopId, shop.canManage, shop.isDevice, shop.error, casts, tables, queue,
     addCast, updateCast, removeCast, toggleLock, setCastBaseStatus,
     seedTables, seedTestData, assignCast, removeCastFromTable, toggleMainHost, toggleRequested, rotateHosts,
-    startSet, setTableType, checkTable, extendTime, toggleInnerRotation, resetTable,
+    startSet, setTableType, checkTable, extendTime, toggleInnerRotation, updateTableSettings, resetTable,
     addToQueue, removeFromQueue, seatQueueGroup,
   ]);
 }

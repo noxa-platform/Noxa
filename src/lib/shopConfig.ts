@@ -24,6 +24,8 @@ export type ShopConfig = {
   roles: RoleWage[];
   modules: ModuleCfg[];
   salesAttribution: SalesAttribution;
+  setTimeLength: number;       // 席回し: 1セット長（分）既定
+  rotationTimeLength: number;  // 席回し: 卓内ローテ間隔（分）既定
 };
 
 /** モジュール既定（key は route の slug。NAV_STORE と一致させる） */
@@ -71,6 +73,8 @@ export const DEFAULT_CONFIG: ShopConfig = {
   roles: DEFAULT_ROLES,
   modules: DEFAULT_MODULES.map((m) => ({ key: m.key, enabled: true })),
   salesAttribution: 'mainCast',
+  setTimeLength: 60,
+  rotationTimeLength: 15,
 };
 
 /** 用語解決: 店舗上書き → 業種プリセット → 既定 → key */
@@ -126,6 +130,8 @@ export function useShopConfig(user: User): UseShopConfig {
         roles: d.roles?.length ? d.roles : DEFAULT_ROLES,
         modules: mergeModules(d.modules),
         salesAttribution: d.salesAttribution ?? 'mainCast',
+        setTimeLength: typeof d.setTimeLength === 'number' && d.setTimeLength > 0 ? d.setTimeLength : 60,
+        rotationTimeLength: typeof d.rotationTimeLength === 'number' && d.rotationTimeLength > 0 ? d.rotationTimeLength : 15,
       });
       setLoaded(true);
     }, () => setLoaded(true));

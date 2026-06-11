@@ -23,6 +23,8 @@ function SettingsClient({ user }: { user: User }) {
   const [roles, setRoles] = useState<RoleWage[]>([]);
   const [modules, setModules] = useState<ModuleCfg[]>([]);
   const [attr, setAttr] = useState<SalesAttribution>('mainCast');
+  const [setLen, setSetLen] = useState(60);
+  const [rotLen, setRotLen] = useState(15);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
 
@@ -32,6 +34,8 @@ function SettingsClient({ user }: { user: User }) {
     setRoles(config.roles);
     setModules(config.modules);
     setAttr(config.salesAttribution);
+    setSetLen(config.setTimeLength);
+    setRotLen(config.rotationTimeLength);
   }, [loading]); // eslint-disable-line react-hooks/exhaustive-deps
 
   if (loading) return <P>読み込み中…</P>;
@@ -46,7 +50,7 @@ function SettingsClient({ user }: { user: User }) {
   const onSave = async () => {
     setSaving(true); setSaved(false);
     try {
-      await save({ terminology: terms, roles: roles.filter((r) => r.name.trim()), modules, salesAttribution: attr });
+      await save({ terminology: terms, roles: roles.filter((r) => r.name.trim()), modules, salesAttribution: attr, setTimeLength: Math.max(1, setLen), rotationTimeLength: Math.max(1, rotLen) });
       setSaved(true); setTimeout(() => setSaved(false), 2000);
     } finally { setSaving(false); }
   };
@@ -110,6 +114,17 @@ function SettingsClient({ user }: { user: User }) {
             <button key={v} type="button" onClick={() => setAttr(v)} style={{ flex: 1, padding: '10px 14px', borderRadius: 12, cursor: 'pointer', background: attr === v ? 'var(--noxa-accent-primary)' : 'var(--noxa-surface-card)', color: attr === v ? '#fff' : 'var(--noxa-text-primary)', border: `1px solid ${attr === v ? 'var(--noxa-accent-primary)' : 'var(--noxa-border)'}`, fontSize: 13 }}>{label}</button>
           ))}
         </div>
+      </Section>
+
+      {/* 席回し既定 */}
+      <Section title="席回し（既定セット長・ローテ間隔）">
+        <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap' }}>
+          <label style={{ display: 'flex', flexDirection: 'column', gap: 4 }}><span style={{ fontSize: 12, color: 'var(--noxa-text-muted)' }}>1セット長（分）</span>
+            <input type="number" value={setLen} onChange={(e) => setSetLen(Number(e.target.value))} className="noxa-input" style={{ width: 140 }} /></label>
+          <label style={{ display: 'flex', flexDirection: 'column', gap: 4 }}><span style={{ fontSize: 12, color: 'var(--noxa-text-muted)' }}>卓内ローテ間隔（分）</span>
+            <input type="number" value={rotLen} onChange={(e) => setRotLen(Number(e.target.value))} className="noxa-input" style={{ width: 140 }} /></label>
+        </div>
+        <p style={{ fontSize: 11, color: 'var(--noxa-text-faint)', margin: '8px 0 0' }}>新規に作成する卓の既定値。各卓の個別設定は席回し画面の卓詳細から変更できます。</p>
       </Section>
 
       <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 8 }}>
