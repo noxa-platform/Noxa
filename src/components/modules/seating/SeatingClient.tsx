@@ -125,7 +125,7 @@ export function SeatingClient({ user }: { user: User }) {
             <button type="button" role="tab" aria-selected={side === 'queue'} onClick={() => setSide('queue')} style={chipStyle(side === 'queue')}>待ち組 {queue.length > 0 ? `(${queue.length})` : ''}</button>
           </div>
           {side === 'casts'
-            ? <CastRoster casts={casts} store={store} wageFor={wageFor} />
+            ? <CastRoster casts={casts} store={store} wageFor={wageFor} castLabel={cfg.t('cast')} />
             : <QueuePanel queue={queue} tables={tables} store={store} />}
         </div>
       </div>
@@ -277,7 +277,7 @@ function TableDetail({ table, casts, tables, castById, store }: {
 
 // ───────────────────────── キャスト名簿
 
-function CastRoster({ casts, store, wageFor }: { casts: Cast[]; store: ReturnType<typeof useSeatingStore>; wageFor?: (rank: string) => number | undefined }) {
+function CastRoster({ casts, store, wageFor, castLabel = 'キャスト' }: { casts: Cast[]; store: ReturnType<typeof useSeatingStore>; wageFor?: (rank: string) => number | undefined; castLabel?: string }) {
   const [adding, setAdding] = useState(false);
   const [name, setName] = useState('');
   const [rank, setRank] = useState<Rank>('非役職');
@@ -294,9 +294,9 @@ function CastRoster({ casts, store, wageFor }: { casts: Cast[]; store: ReturnTyp
   const sorted = [...casts].sort((a, b) => RANKS.indexOf(a.rank) - RANKS.indexOf(b.rank));
 
   return (
-    <section aria-label="在籍キャスト" style={{ background: 'var(--noxa-surface-card)', border: '1px solid var(--noxa-border)', borderRadius: 16, padding: 14, display: 'flex', flexDirection: 'column', gap: 8 }}>
+    <section aria-label={`在籍${castLabel}`} style={{ background: 'var(--noxa-surface-card)', border: '1px solid var(--noxa-border)', borderRadius: 16, padding: 14, display: 'flex', flexDirection: 'column', gap: 8 }}>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 6, maxHeight: 420, overflowY: 'auto' }}>
-        {sorted.length === 0 && <span style={{ fontSize: 12, color: 'var(--noxa-text-faint)' }}>キャストが未登録です。</span>}
+        {sorted.length === 0 && <span style={{ fontSize: 12, color: 'var(--noxa-text-faint)' }}>{castLabel}が未登録です。</span>}
         {sorted.map((c) => (
           <div key={c.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '7px 8px', borderRadius: 10, background: 'var(--noxa-bg-base)', border: '1px solid var(--noxa-border)', opacity: c.status === 'Absent' ? 0.5 : 1 }}>
             <span aria-hidden style={{ width: 8, height: 8, borderRadius: 4, background: RANK_TINT[c.rank], flex: 'none' }} />

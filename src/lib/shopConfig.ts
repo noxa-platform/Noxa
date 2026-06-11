@@ -10,7 +10,7 @@
  * 料金/税/メニュー/卓名は既存の pos_config（POS設定）で編集（卓は seating_tables 単一の正）。
  */
 import { useCallback, useEffect, useState } from 'react';
-import { doc, onSnapshot, setDoc, serverTimestamp } from 'firebase/firestore';
+import { doc, getDoc, onSnapshot, setDoc, serverTimestamp } from 'firebase/firestore';
 import type { User } from 'firebase/auth';
 import { db } from '@/lib/firebase/config';
 import { useShopId } from '@/lib/useShopId';
@@ -96,14 +96,25 @@ export type UseShopConfig = {
   loading: boolean;
   shopId: string | null;
   canManage: boolean;
+  industry: string | undefined;
   config: ShopConfig;
+  /** 用語解決（店舗上書き → 業種プリセット → 既定） */
+  t: (key: string) => string;
   save: (patch: Partial<ShopConfig>) => Promise<void>;
 };
 
 export function useShopConfig(user: User): UseShopConfig {
   const shop = useShopId(user);
   const [config, setConfig] = useState<ShopConfig>(DEFAULT_CONFIG);
+  const [industry, setIndustry] = useState<string | undefined>(undefined);
   const [loaded, setLoaded] = useState(false);
+
+  useEffect(() => {
+    if (!shop.shopId) return;
+    getDoc(doc(db, `shop_shops/${shop.shopId}`)).then((s) => {
+      setIndustry((s.data() as { storeTypeName?: string } | undefined)?.storeTypeName);
+    }).catch(() => { /* skip */ });
+  }, [shop.shopId]);
 
   useEffect(() => {
     if (shop.loading || !shop.shopId) { if (!shop.loading) setLoaded(true); return; }
@@ -126,5 +137,7 @@ export function useShopConfig(user: User): UseShopConfig {
     await setDoc(doc(db, `shop_shops/${shop.shopId}/config/settings`), { ...patch, updatedAt: serverTimestamp() }, { merge: true });
   }, [shop.shopId]);
 
-  return { loading: shop.loading || !loaded, shopId: shop.shopId, canManage: shop.canManage, config, save };
+  const t = useCallback((key: string) => resolveTerm(config, industry, key), [config, industry]);
+
+  return { loading: shop.loading || !loaded, shopId: shop.shopId, canManage: shop.canManage, industry, config, t, save };
 }

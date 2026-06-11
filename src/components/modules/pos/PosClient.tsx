@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { useEffect, useMemo, useState } from 'react';
 import type { User } from 'firebase/auth';
 import { usePosStore, type ShopCustomer } from '@/lib/pos/store';
+import { useShopConfig } from '@/lib/shopConfig';
 import type { CustomerType, OrderItem, BreakdownItem, PosSlip, Action, CalculationResult } from '@/lib/pos/engine';
 import type { FloorTable, Cast } from '@/lib/seating/types';
 
@@ -27,6 +28,7 @@ const CUSTOMER_TYPES: { id: CustomerType; label: string }[] = [
 export function PosClient({ user }: { user: User }) {
   const store = usePosStore(user);
   const { config, tables, casts } = store;
+  const checkoutLabel = useShopConfig(user).t('checkout');
 
   const [selectedTableId, setSelectedTableId] = useState<string | null>(null);
   const [selectedSlipId, setSelectedSlipId] = useState<string | null>(null);
@@ -198,8 +200,8 @@ export function PosClient({ user }: { user: User }) {
         </section>
 
         {/* 右：会計 */}
-        <section aria-label="会計">
-          <PaneTitle>会計</PaneTitle>
+        <section aria-label={checkoutLabel}>
+          <PaneTitle>{checkoutLabel}</PaneTitle>
           {selectedSlip && result && selectedTableId ? (
             <BillPanel
               key={selectedSlip.id}

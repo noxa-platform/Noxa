@@ -22,13 +22,12 @@ import { db } from '@/lib/firebase/config';
 import { useDeviceClaims } from '@/lib/useShopContext';
 import type { Cast, CastStatus, FloorTable, QueueItem, TableType, Customer, Rank } from './types';
 import { createEmptyTable } from './types';
+import { DEFAULT_TABLE_NAMES } from './tables';
 
 type StoredCast = {
   id: string; name: string; rank: Rank; hourlyWage: number; isLocked: boolean;
   baseStatus: Extract<CastStatus, 'Free' | 'Break' | 'Absent'>; imageUrl?: string;
 };
-
-const DEFAULT_TABLE_NAMES = ['A', 'B-1', 'B-2', 'C-1', 'C-2', 'D', 'E-1', 'E-2', 'E-3'];
 
 // ───────────────────────── shop 解決（POS と同様：デバイス優先 / オーナー shop）
 

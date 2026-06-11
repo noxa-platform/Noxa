@@ -35,7 +35,7 @@ function nextSlipName(slips: PosSlip[]): string {
   return SLIP_NAMES[slips.length] ?? `⑪+${slips.length - 10}`;
 }
 
-const DEFAULT_TABLE_NAMES = ['A', 'B-1', 'B-2', 'C-1', 'C-2', 'D', 'E-1', 'E-2', 'E-3'];
+import { DEFAULT_TABLE_NAMES } from '@/lib/seating/tables';
 
 export function nowHHMM(): string {
   const d = new Date();
@@ -109,6 +109,18 @@ export function usePosStore(user: User): UsePosStore {
   const [customers, setCustomers] = useState<ShopCustomer[]>([]);
   const [loadingData, setLoadingData] = useState(true);
   const configRef = useRef(config);
+  // 売上の付け方（店舗設定 config/settings.salesAttribution）。会計時の帰属に使用
+  const attributionRef = useRef<'mainCast' | 'operator'>('mainCast');
+
+  // 店舗設定（売上の付け方）を購読
+  useEffect(() => {
+    if (!shopId) return;
+    const unsub = onSnapshot(doc(db, `shop_shops/${shopId}/config/settings`), (snap) => {
+      const a = snap.exists() ? (snap.data() as { salesAttribution?: string }).salesAttribution : undefined;
+      attributionRef.current = a === 'operator' ? 'operator' : 'mainCast';
+    }, () => { /* 既定 mainCast */ });
+    return () => unsub();
+  }, [shopId]);
 
   // pos_config（無ければ owner のみ seed）
   useEffect(() => {
@@ -251,8 +263,8 @@ export function usePosStore(user: User): UsePosStore {
       source: 'pos', amount: opts.amount, tableId, tableName: t.name, slipName: slip.name,
       customerType: slip.state.customerType, customerName: opts.customerName ?? slip.customerName ?? null,
       castName: opts.castName ?? slip.castName ?? null,
-      // 個人売上の帰属は担当キャストの uid（無ければ操作者）。operatorUid は実際にレジ操作した人。
-      castUid: slip.castUid ?? user.uid,
+      // 売上の帰属は店舗設定に従う。mainCast=担当キャスト(無ければ操作者) / operator=レジ操作者。
+      castUid: attributionRef.current === 'operator' ? user.uid : (slip.castUid ?? user.uid),
       operatorUid: user.uid,
       guests: opts.guests ?? null,
       entryTime: slip.state.entryTime, checkoutAt: serverTimestamp(), dayKey: dayKey(), createdAt: serverTimestamp(),
