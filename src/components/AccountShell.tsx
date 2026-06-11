@@ -12,26 +12,40 @@ import { useUiMode } from '@/lib/useUiMode';
 import { useShopConfig, DEFAULT_MODULES } from '@/lib/shopConfig';
 import { WorkspaceSwitcher } from '@/components/WorkspaceSwitcher';
 
-// アカウント（OS 本体）。端末では非表示。
-const NAV_ACCOUNT: { label: string; href: string; icon: string }[] = [
-  { label: 'ダッシュボード', href: '/account',         icon: '◇' },
-  { label: 'プロフィール',   href: '/account/profile', icon: '◇' },
-  { label: '公開プロフィール', href: '/account/link', icon: '◇' },
-  { label: 'ログイン方法・連携', href: '/account/connections', icon: '◇' },
-  { label: '退会',           href: '/account/delete',  icon: '◇' },
+// メニューのアイコン（href→絵文字）。非tech層に分かりやすいよう視覚記号を付与。
+const ICONS: Record<string, string> = {
+  '/account': '🏠', '/account/profile': '👤', '/account/link': '🔗', '/account/connections': '🔐', '/account/delete': '🚪',
+  '/sales': '💰', '/customers': '📒', '/goals': '🎯', '/calc': '🧮',
+  '/pos': '🧾', '/seating': '🪑', '/attendance': '⏰', '/payroll': '💴', '/first-visit': '✨', '/store/settings': '⚙️',
+  '/transport': '🚗', '/inventory': '📦', '/trial': '🌱', '/reservation': '📅', '/unpaid': '📌', '/risk': '⚠️',
+  '/business-card': '💳', '/schedule': '🗓️',
+  '/community': '💬', '/notifications': '🔔',
+  'https://nomishugy.vercel.app': '🍶', '/account/subscription': '💎', '/account/credits': '🪙', '/store/new': '🏪',
+};
+
+// マイページ（OS 本体）。端末では非表示。
+const NAV_ACCOUNT: { label: string; href: string }[] = [
+  { label: 'ホーム',         href: '/account' },
+  { label: 'プロフィール',   href: '/account/profile' },
+  { label: '公開プロフィール', href: '/account/link' },
+  { label: 'ログイン・連携', href: '/account/connections' },
 ];
 
-// CORE · 店舗管理 > 個人サブ
-const NAV_PERSONAL: { label: string; href: string }[] = [
-  { label: '売上管理',  href: '/sales' },
+// 売上・顧客（個人/店舗どちらのワークスペースでも使う）
+const NAV_MONEY: { label: string; href: string }[] = [
+  { label: '売上',      href: '/sales' },
   { label: '顧客台帳',  href: '/customers' },
-  { label: '伝票計算',  href: '/calc' },
-  { label: '名刺発注',  href: '/business-card' },
-  { label: 'スケジュール', href: '/schedule' },
   { label: '目標',      href: '/goals' },
 ];
 
-// CORE · 店舗管理 > 店舗サブ（オーナー / 店舗端末のみ）
+// 個人ツール
+const NAV_TOOLS: { label: string; href: string }[] = [
+  { label: '伝票計算',  href: '/calc' },
+  { label: '名刺発注',  href: '/business-card' },
+  { label: 'スケジュール', href: '/schedule' },
+];
+
+// お店の運営（店舗ワークスペース選択中 / 店舗端末のみ）
 const NAV_STORE: { label: string; href: string }[] = [
   { label: 'POS',         href: '/pos' },
   { label: '席回し',      href: '/seating' },
@@ -46,17 +60,18 @@ const NAV_STORE: { label: string; href: string }[] = [
   { label: 'リスク客共有', href: '/risk' },
 ];
 
-// CHANNEL（NOXA Channel = community / 通知）
+// NOXA / おしらせ
 const NAV_CHANNEL: { label: string; href: string; tint?: string }[] = [
-  { label: 'community', href: '/community', tint: '#C4384A' },
-  { label: '通知センター', href: '/notifications', tint: '#B89CFB' },
+  { label: 'コミュニティ', href: '/community', tint: '#C4384A' },
+  { label: 'おしらせ', href: '/notifications', tint: '#B89CFB' },
 ];
 
-// SERVICE（連携・契約）
+// 連携・契約
 const NAV_SERVICE: { label: string; href: string; external?: boolean; tint?: string }[] = [
-  { label: 'nomishugy', href: 'https://nomishugy.vercel.app', external: true, tint: '#B89CFB' },
+  { label: 'のみしゅぎ', href: 'https://nomishugy.vercel.app', external: true, tint: '#B89CFB' },
   { label: 'プラン',     href: '/account/subscription' },
   { label: 'クレジット', href: '/account/credits' },
+  { label: '退会',       href: '/account/delete' },
 ];
 
 export function AccountShell({ user, children }: { user: User; children: React.ReactNode }) {
@@ -75,6 +90,8 @@ export function AccountShell({ user, children }: { user: User; children: React.R
   const storeNav = device.isDevice
     ? NAV_STORE.filter((it) => device.allow.includes(it.href.slice(1)))
     : (cfg.loading ? NAV_STORE : ownerNav);
+  // 「お店の運営」を出すのは店舗ワークスペース選択中（cfg.shopId あり）or 店舗端末。個人選択中は隠す
+  const storeActive = device.isDevice || (!cfg.loading && !!cfg.shopId);
 
   // ハンドル必須化: 個人ユーザーで handle 未設定なら オンボーディングへ誘導（店舗端末は除外）
   const [needsHandle, setNeedsHandle] = useState(false);
@@ -100,17 +117,14 @@ export function AccountShell({ user, children }: { user: User; children: React.R
       ? { fontSize: 13, color: 'var(--noxa-text-muted)', fontWeight: 700, fontFamily: 'var(--noxa-font-display-jp)' }
       : { fontSize: 10, color: 'var(--noxa-text-faint)', letterSpacing: '0.12em', textTransform: 'uppercase' }}>{children}</div>
   );
-  const SubLabel = ({ children }: { children: React.ReactNode }) => (
-    <div className="px-2.5 pb-1" style={{ fontSize: easy ? 13 : 10, color: 'var(--noxa-text-muted)', fontWeight: 600 }}>{children}</div>
-  );
   const navLink = (it: { label: string; href: string; external?: boolean; tint?: string }) => {
     const active = pathname === it.href;
     return (
       <Link key={it.href + it.label} href={it.href} target={it.external ? '_blank' : undefined}
-        style={{ display: 'flex', alignItems: 'center', gap: 10, padding: easy ? '13px 12px' : '8px 10px', borderRadius: 10, background: active ? 'rgba(139, 92, 246, 0.12)' : 'transparent', color: active ? 'var(--noxa-text-primary)' : 'var(--noxa-text-muted)', fontSize: easy ? 16 : 13, fontWeight: active ? 600 : (easy ? 500 : 400), textDecoration: 'none' }}>
-        <span aria-hidden style={{ width: easy ? 8 : 6, height: easy ? 8 : 6, borderRadius: 4, background: active ? 'var(--noxa-accent-primary-ink)' : (it.tint ?? 'var(--noxa-text-faint)') }} />
+        style={{ display: 'flex', alignItems: 'center', gap: 10, padding: easy ? '12px 12px' : '8px 10px', borderRadius: 10, background: active ? 'rgba(139, 92, 246, 0.14)' : 'transparent', color: active ? 'var(--noxa-text-primary)' : 'var(--noxa-text-muted)', fontSize: easy ? 16 : 13, fontWeight: active ? 600 : (easy ? 500 : 400), textDecoration: 'none' }}>
+        <span aria-hidden style={{ width: easy ? 26 : 22, fontSize: easy ? 18 : 15, textAlign: 'center', flex: 'none', filter: active ? 'none' : 'grayscale(0.2)' }}>{ICONS[it.href] ?? '•'}</span>
         <span>{it.label}</span>
-        {it.external && <span className="noxa-mono" style={{ marginLeft: 'auto', fontSize: 9, color: 'var(--noxa-text-faint)' }}>↗</span>}
+        {it.external && <span style={{ marginLeft: 'auto', fontSize: 11, color: 'var(--noxa-text-faint)' }}>↗</span>}
       </Link>
     );
   };
@@ -144,88 +158,58 @@ export function AccountShell({ user, children }: { user: User; children: React.R
         {/* ワークスペース切替（個人 / 各店舗）。端末は固定なので非表示 */}
         {!device.isDevice && <WorkspaceSwitcher user={user} />}
 
-        <div className="flex flex-col" style={{ gap: 2, display: device.isDevice ? 'none' : undefined }}>
-          <div
-            className="noxa-mono px-2.5 pb-2"
-            style={{
-              fontSize: 10,
-              color: 'var(--noxa-text-faint)',
-              letterSpacing: '0.1em',
-              textTransform: 'uppercase',
-            }}
-          >
-            Account
-          </div>
-          {NAV_ACCOUNT.map((it) => {
-            const active = pathname === it.href;
-            return (
-              <Link
-                key={it.href}
-                href={it.href}
-                style={{
-                  display: 'flex', alignItems: 'center', gap: 10,
-                  padding: '8px 10px',
-                  borderRadius: 8,
-                  background: active ? 'rgba(139, 92, 246, 0.12)' : 'transparent',
-                  color: active ? 'var(--noxa-text-primary)' : 'var(--noxa-text-muted)',
-                  fontSize: 13,
-                  fontWeight: active ? 500 : 400,
-                  textDecoration: 'none',
-                }}
-              >
-                <span style={{ width: 14, color: active ? 'var(--noxa-accent-primary-ink)' : 'var(--noxa-text-faint)' }}>
-                  {it.icon}
-                </span>
-                <span>{it.label}</span>
-              </Link>
-            );
-          })}
-        </div>
-
-        {/* CORE · 店舗管理（個人 / 店舗 サブ。端末は許可された店舗モジュールのみ） */}
         {device.isDevice ? (
+          /* 店舗端末: 許可された店舗モジュールのみ */
           <div className="flex flex-col" style={{ gap: 2 }}>
-            <SectionLabel>{easy ? '店舗の端末' : 'Core · 店舗端末'}{device.label ? ` · ${device.label}` : ''}</SectionLabel>
+            <SectionLabel>店舗の端末{device.label ? ` · ${device.label}` : ''}</SectionLabel>
             {storeNav.map(navLink)}
           </div>
         ) : (
-          <div className="flex flex-col" style={{ gap: 12 }}>
-            <SectionLabel>{easy ? 'お店の管理' : 'Core · 店舗管理'}</SectionLabel>
-            <div className="flex flex-col" style={{ gap: 2 }}>
-              <SubLabel>個人</SubLabel>
-              {NAV_PERSONAL.map(navLink)}
-            </div>
-            <div className="flex flex-col" style={{ gap: 2 }}>
-              <SubLabel>店舗</SubLabel>
-              {hasShop ? (
-                <>
-                  {storeNav.map(navLink)}
-                  {navLink({ label: '店舗設定', href: '/store/settings' })}
-                </>
-              ) : (
-                <Link href="/store/new" style={{ display: 'block', padding: '12px', borderRadius: 10, border: '1px dashed var(--noxa-border-strong)', color: 'var(--noxa-text-muted)', fontSize: 12, textDecoration: 'none', lineHeight: 1.5 }}>
-                  <span style={{ color: 'var(--noxa-accent-primary-ink)', fontWeight: 600 }}>＋ 店舗を登録</span>
-                  <br />店舗運営モジュール（POS / 勤怠 / 給与…）が解放されます
-                </Link>
-              )}
-            </div>
-          </div>
-        )}
+          <>
+            {/* お店の運営（店舗を選択中のみ表示。個人選択中は隠す） */}
+            {storeActive ? (
+              <div className="flex flex-col" style={{ gap: 2 }}>
+                <SectionLabel>お店の運営</SectionLabel>
+                {storeNav.map(navLink)}
+                {navLink({ label: '店舗設定', href: '/store/settings' })}
+              </div>
+            ) : !hasShop ? (
+              <Link href="/store/new" style={{ display: 'flex', alignItems: 'center', gap: 10, padding: 14, borderRadius: 12, border: '1px dashed var(--noxa-border-strong)', color: 'var(--noxa-text-muted)', fontSize: 13, textDecoration: 'none', lineHeight: 1.5 }}>
+                <span aria-hidden style={{ fontSize: 18 }}>🏪</span>
+                <span><span style={{ color: 'var(--noxa-accent-primary-ink)', fontWeight: 700 }}>＋ お店を登録</span><br />席回し・POS・勤怠などが使えます</span>
+              </Link>
+            ) : null}
 
-        {/* CHANNEL · NOXA Channel（community / 通知）。端末では非表示 */}
-        {!device.isDevice && (
-          <div className="flex flex-col" style={{ gap: 2 }}>
-            <SectionLabel>{easy ? 'おしらせ・つながり' : 'Channel'}</SectionLabel>
-            {NAV_CHANNEL.map(navLink)}
-          </div>
-        )}
+            {/* 売上・顧客（個人/店舗どちらでも） */}
+            <div className="flex flex-col" style={{ gap: 2 }}>
+              <SectionLabel>売上・顧客</SectionLabel>
+              {NAV_MONEY.map(navLink)}
+            </div>
 
-        {/* SERVICE · 連携 / 契約。端末では非表示 */}
-        {!device.isDevice && (
-          <div className="flex flex-col" style={{ gap: 2 }}>
-            <SectionLabel>{easy ? '連携・契約' : 'Service'}</SectionLabel>
-            {NAV_SERVICE.map(navLink)}
-          </div>
+            {/* マイページ */}
+            <div className="flex flex-col" style={{ gap: 2 }}>
+              <SectionLabel>マイページ</SectionLabel>
+              {NAV_ACCOUNT.map(navLink)}
+            </div>
+
+            {/* 個人ツール */}
+            <div className="flex flex-col" style={{ gap: 2 }}>
+              <SectionLabel>個人ツール</SectionLabel>
+              {NAV_TOOLS.map(navLink)}
+            </div>
+
+            {/* NOXA / おしらせ */}
+            <div className="flex flex-col" style={{ gap: 2 }}>
+              <SectionLabel>NOXA・おしらせ</SectionLabel>
+              {NAV_CHANNEL.map(navLink)}
+            </div>
+
+            {/* 連携・契約 */}
+            <div className="flex flex-col" style={{ gap: 2 }}>
+              <SectionLabel>連携・契約</SectionLabel>
+              {NAV_SERVICE.map(navLink)}
+            </div>
+          </>
         )}
 
         {/* User card */}
