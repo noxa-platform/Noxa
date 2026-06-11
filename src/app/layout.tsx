@@ -1,5 +1,6 @@
 import './globals.css';
 import type { Metadata, Viewport } from 'next';
+import { ServiceWorkerRegister } from '@/components/ServiceWorkerRegister';
 
 export const viewport: Viewport = {
   themeColor: [
@@ -85,6 +86,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           メインコンテンツへスキップ
         </a>
         <main id="main">{children}</main>
+        <ServiceWorkerRegister />
       </body>
     </html>
   );

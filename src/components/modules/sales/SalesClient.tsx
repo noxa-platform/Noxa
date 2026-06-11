@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { useEffect, useState } from 'react';
 import { collection, getDocs, query, where, Timestamp, type DocumentData } from 'firebase/firestore';
 import { db } from '@/lib/firebase/config';
+import { voidSale, editSale } from '@/lib/sales';
 import type { User } from 'firebase/auth';
 
 /**
@@ -62,6 +63,11 @@ function todayKey(): string {
 
 type PosSalesSummary = { total: number; today: number; count: number; todayCount: number };
 type Mode = 'owner' | 'cast' | 'personal';
+type PosSale = {
+  id: string; shopId: string; amount: number; tableName: string; slipName: string;
+  castName: string | null; customerName: string | null; checkoutAtMs: number | null; dayKey: string;
+  voided: boolean; voidReason: string;
+};
 
 /**
  * ロール対応の読み込み:
@@ -69,12 +75,20 @@ type Mode = 'owner' | 'cast' | 'personal';
  *  - cast（所属メンバー）: 自分が担当の顧客（mainCastUid==uid）・自分の売上（castUid==uid）だけ
  *  - personal: MyDeck のみ
  */
-async function loadAll(uid: string): Promise<{ mode: Mode; custs: Cust[]; pos: PosSalesSummary }> {
+async function loadAll(uid: string): Promise<{ mode: Mode; custs: Cust[]; pos: PosSalesSummary; sales: PosSale[] }> {
   const tk = todayKey();
   const pos: PosSalesSummary = { total: 0, today: 0, count: 0, todayCount: 0 };
   const custs: Cust[] = [];
-  const addSale = (d: DocumentData) => {
+  const sales: PosSale[] = [];
+  const addSale = (shopId: string, id: string, d: DocumentData) => {
     const a = typeof d.amount === 'number' ? d.amount : 0;
+    const voided = d.voided === true;
+    sales.push({
+      id, shopId, amount: a, tableName: (d.tableName as string) ?? '', slipName: (d.slipName as string) ?? '',
+      castName: (d.castName as string) ?? null, customerName: (d.customerName as string) ?? null,
+      checkoutAtMs: toMs(d.checkoutAt), dayKey: (d.dayKey as string) ?? '', voided, voidReason: (d.voidReason as string) ?? '',
+    });
+    if (voided) return; // 取消は集計から除外
     pos.total += a; pos.count += 1;
     if (d.dayKey === tk) { pos.today += a; pos.todayCount += 1; }
   };
@@ -88,10 +102,10 @@ async function loadAll(uid: string): Promise<{ mode: Mode; custs: Cust[]; pos: P
   if (ownerShops.length > 0) {
     for (const shop of ownerShops) {
       try { const cs = await getDocs(collection(db, `shop_shops/${shop.id}/customers`)); cs.forEach((d) => custs.push(mapCust(d.id, d.data()))); } catch { /* skip */ }
-      try { const ss = await getDocs(collection(db, `shop_shops/${shop.id}/sales`)); ss.forEach((d) => addSale(d.data())); } catch { /* skip */ }
+      try { const ss = await getDocs(collection(db, `shop_shops/${shop.id}/sales`)); ss.forEach((d) => addSale(shop.id, d.id, d.data())); } catch { /* skip */ }
     }
     await addMyDeck();
-    return { mode: 'owner', custs, pos };
+    return { mode: 'owner', custs, pos, sales };
   }
 
   // member shops（キャスト）
@@ -100,30 +114,41 @@ async function loadAll(uid: string): Promise<{ mode: Mode; custs: Cust[]; pos: P
   if (memberShopIds.length > 0) {
     for (const shopId of memberShopIds) {
       try { const cs = await getDocs(query(collection(db, `shop_shops/${shopId}/customers`), where('mainCastUid', '==', uid))); cs.forEach((d) => custs.push(mapCust(d.id, d.data()))); } catch { /* skip */ }
-      try { const ss = await getDocs(query(collection(db, `shop_shops/${shopId}/sales`), where('castUid', '==', uid))); ss.forEach((d) => addSale(d.data())); } catch { /* skip */ }
+      try { const ss = await getDocs(query(collection(db, `shop_shops/${shopId}/sales`), where('castUid', '==', uid))); ss.forEach((d) => addSale(shopId, d.id, d.data())); } catch { /* skip */ }
     }
     await addMyDeck();
-    return { mode: 'cast', custs, pos };
+    return { mode: 'cast', custs, pos, sales };
   }
 
   await addMyDeck();
-  return { mode: 'personal', custs, pos };
+  return { mode: 'personal', custs, pos, sales };
 }
 
 export function SalesClient({ user }: { user: User }) {
   const [loading, setLoading] = useState(true);
   const [custs, setCusts] = useState<Cust[]>([]);
   const [pos, setPos] = useState<PosSalesSummary>({ total: 0, today: 0, count: 0, todayCount: 0 });
+  const [sales, setSales] = useState<PosSale[]>([]);
   const [mode, setMode] = useState<Mode>('personal');
   const [err, setErr] = useState<string | null>(null);
 
-  useEffect(() => {
-    let alive = true;
+  const reload = () => {
     loadAll(user.uid)
-      .then((r) => { if (alive) { setCusts(r.custs); setPos(r.pos); setMode(r.mode); setLoading(false); } })
-      .catch((e) => { if (alive) { setErr(String(e?.message ?? e)); setLoading(false); } });
-    return () => { alive = false; };
-  }, [user.uid]);
+      .then((r) => { setCusts(r.custs); setPos(r.pos); setSales(r.sales); setMode(r.mode); setLoading(false); })
+      .catch((e) => { setErr(String(e?.message ?? e)); setLoading(false); });
+  };
+  useEffect(() => { reload(); /* eslint-disable-line react-hooks/exhaustive-deps */ }, [user.uid]);
+
+  const doVoid = async (s: PosSale) => {
+    const reason = window.prompt('取消理由（任意）'); if (reason === null) return;
+    await voidSale(s.shopId, s.id, reason, user.uid); reload();
+  };
+  const doEdit = async (s: PosSale) => {
+    const v = window.prompt('修正後の金額（円）', String(s.amount)); if (v === null) return;
+    const amount = Number(v); if (!Number.isFinite(amount) || amount < 0) return;
+    await editSale(s.shopId, s.id, { amount }, user.uid); reload();
+  };
+  const recentSales = [...sales].sort((a, b) => (b.checkoutAtMs ?? 0) - (a.checkoutAtMs ?? 0)).slice(0, 30);
 
   const total = custs.reduce((s, c) => s + c.totalSales, 0);
   const count = custs.length;
@@ -179,6 +204,32 @@ export function SalesClient({ user }: { user: User }) {
               <Kpi label="累計売上(POS)" value={yen(pos.total)} />
               <Kpi label="累計会計数" value={`${pos.count} 件`} />
             </div>
+          </section>
+        )}
+
+        {/* 会計履歴（取消/修正） */}
+        {recentSales.length > 0 && (
+          <section aria-label="会計履歴" style={{ marginBottom: 20 }}>
+            <h2 className="noxa-eyebrow" style={{ fontSize: 11, marginBottom: 12 }}>会計履歴（取消・修正）</h2>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+              {recentSales.map((s) => (
+                <div key={s.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 12px', borderRadius: 10, background: 'var(--noxa-bg-base)', border: '1px solid var(--noxa-border)', opacity: s.voided ? 0.55 : 1 }}>
+                  <span style={{ fontFamily: mono, fontSize: 11, color: 'var(--noxa-text-faint)', minWidth: 92 }}>{s.checkoutAtMs ? new Date(s.checkoutAtMs).toLocaleString('ja-JP', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '—'}</span>
+                  <span style={{ fontSize: 12, minWidth: 0, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {s.tableName && <b>{s.tableName}</b>} {s.customerName && <span>· {s.customerName}</span>} {s.castName && <span style={{ color: 'var(--noxa-text-muted)' }}>/ {s.castName}</span>}
+                    {s.voided && <span style={{ color: 'var(--noxa-status-error)', marginLeft: 8, fontSize: 11 }}>取消{s.voidReason ? `（${s.voidReason}）` : ''}</span>}
+                  </span>
+                  <span style={{ fontFamily: mono, fontSize: 13, fontVariantNumeric: 'tabular-nums', textDecoration: s.voided ? 'line-through' : 'none' }}>{yen(s.amount)}</span>
+                  {!s.voided && (
+                    <>
+                      <button type="button" onClick={() => doEdit(s)} style={histBtn}>修正</button>
+                      <button type="button" onClick={() => doVoid(s)} style={{ ...histBtn, color: 'var(--noxa-status-error)' }}>取消</button>
+                    </>
+                  )}
+                </div>
+              ))}
+            </div>
+            <p style={{ margin: '8px 0 0', fontSize: 11, color: 'var(--noxa-text-faint)' }}>取消は削除せず無効化し集計から除外（監査ログ保持）。修正は金額を訂正します。</p>
           </section>
         )}
 
@@ -261,6 +312,8 @@ export function SalesClient({ user }: { user: User }) {
     </div>
   );
 }
+
+const histBtn: React.CSSProperties = { padding: '4px 10px', borderRadius: 8, background: 'transparent', border: '1px solid var(--noxa-border)', color: 'var(--noxa-text-muted)', fontSize: 11, cursor: 'pointer', flex: 'none' };
 
 function Kpi({ label, value, accent }: { label: string; value: string; accent?: boolean }) {
   return (

@@ -42,6 +42,7 @@ async function loadPerf(uid: string): Promise<Perf> {
   const currentTypes: Record<string, number> = {};
   const cur = ymOf();
   const add = (d: DocumentData) => {
+    if (d.voided === true) return; // 取消は集計から除外
     const ym = saleYm(d);
     const amt = typeof d.amount === 'number' ? d.amount : 0;
     if (ym) byMonth[ym] = (byMonth[ym] ?? 0) + amt;

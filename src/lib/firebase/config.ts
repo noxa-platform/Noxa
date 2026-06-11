@@ -1,6 +1,6 @@
 import { initializeApp, getApps, type FirebaseApp } from 'firebase/app';
 import { getAuth, GoogleAuthProvider, connectAuthEmulator, type Auth } from 'firebase/auth';
-import { getFirestore, connectFirestoreEmulator, type Firestore } from 'firebase/firestore';
+import { getFirestore, initializeFirestore, persistentLocalCache, persistentMultipleTabManager, connectFirestoreEmulator, type Firestore } from 'firebase/firestore';
 
 // Noxa は yorulog / nomishugy と同じ Firebase プロジェクト (noxa-platform) を共有。
 // すべてのプロダクトが同一 Firebase Auth + Firestore を使うため、
@@ -22,7 +22,17 @@ const app: FirebaseApp | null = isServerBuildWithoutEnv
     ? initializeApp(firebaseConfig)
     : getApps()[0];
 
-export const db = (app ? getFirestore(app) : null) as unknown as Firestore;
+// オフライン永続化（IndexedDB キャッシュ＋複数タブ対応）。回線断でも会計/伝票はローカルに
+// 貯まり、復帰時に自動同期。ブラウザのみ。emulator/HMR/既初期化時は getFirestore にフォールバック。
+function initDb(a: FirebaseApp): Firestore {
+  if (typeof window === 'undefined' || process.env.NEXT_PUBLIC_USE_EMULATOR === 'true') return getFirestore(a);
+  try {
+    return initializeFirestore(a, { localCache: persistentLocalCache({ tabManager: persistentMultipleTabManager() }) });
+  } catch {
+    return getFirestore(a); // 既に initializeFirestore/getFirestore 済み（HMR 等）
+  }
+}
+export const db = (app ? initDb(app) : null) as unknown as Firestore;
 export const auth = (app ? getAuth(app) : null) as unknown as Auth;
 export const googleProvider = new GoogleAuthProvider();
 
