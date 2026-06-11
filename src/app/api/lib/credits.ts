@@ -24,7 +24,7 @@ export async function logAiLedger(
     const db = getAdminDb();
     const ref = db.collection(`account_credit_ledger/${uid}/entries`).doc();
     await ref.set({
-      service: 'yorulog',
+      service: 'noxa',
       feature,
       amount: Math.max(1, Math.floor(amount)),
       createdAt: FieldValue.serverTimestamp(),

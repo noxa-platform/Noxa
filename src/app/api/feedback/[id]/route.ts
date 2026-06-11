@@ -33,7 +33,7 @@ export async function PATCH(
     }
 
     const db = getAdminDb();
-    const ref = db.collection('crm_testimonials').doc(id);
+    const ref = db.collection('audit_testimonials').doc(id);
     const snap = await ref.get();
     if (!snap.exists) {
       return NextResponse.json({ error: '対象が見つかりません' }, { status: 404 });

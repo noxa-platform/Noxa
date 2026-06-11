@@ -16,7 +16,7 @@ export async function GET(request: NextRequest) {
   if (scope === 'public') {
     // LP 用: 承認 + 公開許諾 + publishedAt 降順
     const snap = await db
-      .collection('crm_testimonials')
+      .collection('audit_testimonials')
       .where('status', '==', 'approved')
       .where('allowPublish', '==', true)
       .orderBy('publishedAt', 'desc')
@@ -50,7 +50,7 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: '管理者権限が必要です' }, { status: 403 });
     }
     const snap = await db
-      .collection('crm_testimonials')
+      .collection('audit_testimonials')
       .orderBy('createdAt', 'desc')
       .limit(ADMIN_LIST_LIMIT)
       .get();
