@@ -5,6 +5,7 @@ import { doc, getDoc } from 'firebase/firestore';
 import { AuthGuard } from '@/components/AuthGuard';
 import { AccountShell } from '@/components/AccountShell';
 import { useShopContext } from '@/lib/useShopContext';
+import { useUiMode } from '@/lib/useUiMode';
 import { db } from '@/lib/firebase/config';
 import type { User } from 'firebase/auth';
 
@@ -76,10 +77,11 @@ function AccountDashboard({ user }: { user: User }) {
   const remainingCredits = totalCredits - usedCredits;
   const usagePct = totalCredits > 0 ? Math.min(100, Math.max(0, (remainingCredits / totalCredits) * 100)) : 0;
   const displayName = user.displayName ?? (user.email?.split('@')[0] ?? 'Noxa ユーザー');
+  const easy = useUiMode() === 'easy';
 
   return (
     <AccountShell user={user}>
-      <div className="noxa-eyebrow" style={{ marginBottom: 10 }}>Account</div>
+      <div className="noxa-eyebrow" style={{ marginBottom: 10 }}>{easy ? 'マイページ' : 'Account'}</div>
       <div className="flex items-baseline justify-between flex-wrap gap-3" style={{ marginBottom: 32 }}>
         <h1
           className="noxa-h1"
@@ -232,10 +234,10 @@ function AccountDashboard({ user }: { user: User }) {
       </div>
       <div className="grid gap-3" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', marginBottom: 32 }}>
         {PERSONAL_MODULES.map((m) => (
-          <Link key={m.href} href={m.href} className="flex flex-col" style={{ background: 'var(--noxa-surface-card)', border: `1px solid ${m.real ? 'var(--noxa-border-strong)' : 'var(--noxa-border)'}`, borderRadius: 14, padding: 18, gap: 8, textDecoration: 'none', boxShadow: m.real ? 'var(--noxa-glow-soft)' : 'none' }}>
-            <span style={{ fontFamily: 'var(--noxa-font-display-jp)', fontSize: 18, fontWeight: 500, color: 'var(--noxa-text-primary)' }}>{m.label}</span>
-            <span style={{ color: 'var(--noxa-text-muted)', fontSize: 12 }}>{m.tag}</span>
-            <span className="noxa-mono" style={{ color: m.real ? 'var(--noxa-status-success)' : 'var(--noxa-accent-primary-ink)', fontSize: 12, marginTop: 'auto' }}>{m.real ? '実データ · 開く →' : '開く →'}</span>
+          <Link key={m.href} href={m.href} className="flex flex-col" style={{ background: 'var(--noxa-surface-card)', border: `1px solid ${m.real ? 'var(--noxa-border-strong)' : 'var(--noxa-border)'}`, borderRadius: 14, padding: easy ? 22 : 18, gap: 8, textDecoration: 'none', boxShadow: m.real ? 'var(--noxa-glow-soft)' : 'none' }}>
+            <span style={{ fontFamily: 'var(--noxa-font-display-jp)', fontSize: easy ? 21 : 18, fontWeight: easy ? 700 : 500, color: 'var(--noxa-text-primary)' }}>{m.label}</span>
+            <span style={{ color: 'var(--noxa-text-muted)', fontSize: easy ? 13 : 12 }}>{m.tag}</span>
+            <span className={easy ? undefined : 'noxa-mono'} style={{ color: m.real ? 'var(--noxa-status-success)' : 'var(--noxa-accent-primary-ink)', fontSize: easy ? 15 : 12, fontWeight: easy ? 700 : 400, marginTop: 'auto' }}>{easy ? 'ひらく →' : (m.real ? '実データ · 開く →' : '開く →')}</span>
           </Link>
         ))}
       </div>
@@ -249,10 +251,10 @@ function AccountDashboard({ user }: { user: User }) {
           </div>
           <div className="grid gap-3" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))', marginBottom: 32 }}>
             {STORE_MODULES.map((m) => (
-              <Link key={m.href} href={m.href} className="flex flex-col" style={{ background: 'var(--noxa-surface-card)', border: '1px solid var(--noxa-border)', borderRadius: 14, padding: 16, gap: 6, textDecoration: 'none' }}>
-                <span style={{ fontFamily: 'var(--noxa-font-display-jp)', fontSize: 16, fontWeight: 500, color: 'var(--noxa-text-primary)' }}>{m.label}</span>
-                <span style={{ color: 'var(--noxa-text-muted)', fontSize: 11 }}>{m.tag}</span>
-                <span className="noxa-mono" style={{ color: '#8B5CF6', fontSize: 11, marginTop: 'auto' }}>開く →</span>
+              <Link key={m.href} href={m.href} className="flex flex-col" style={{ background: 'var(--noxa-surface-card)', border: '1px solid var(--noxa-border)', borderRadius: 14, padding: easy ? 20 : 16, gap: 6, textDecoration: 'none' }}>
+                <span style={{ fontFamily: 'var(--noxa-font-display-jp)', fontSize: easy ? 20 : 16, fontWeight: easy ? 700 : 500, color: 'var(--noxa-text-primary)' }}>{m.label}</span>
+                <span style={{ color: 'var(--noxa-text-muted)', fontSize: easy ? 13 : 11 }}>{m.tag}</span>
+                <span className={easy ? undefined : 'noxa-mono'} style={{ color: '#8B5CF6', fontSize: easy ? 15 : 11, fontWeight: easy ? 700 : 400, marginTop: 'auto' }}>{easy ? 'ひらく →' : '開く →'}</span>
               </Link>
             ))}
           </div>

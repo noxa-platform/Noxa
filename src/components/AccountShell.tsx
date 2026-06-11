@@ -95,10 +95,12 @@ export function AccountShell({ user, children }: { user: User; children: React.R
 
   // ── 描画ヘルパー ──
   const SectionLabel = ({ children }: { children: React.ReactNode }) => (
-    <div className="noxa-mono px-2.5 pb-2" style={{ fontSize: 10, color: 'var(--noxa-text-faint)', letterSpacing: '0.12em', textTransform: 'uppercase' }}>{children}</div>
+    <div className={easy ? 'px-2.5 pb-2' : 'noxa-mono px-2.5 pb-2'} style={easy
+      ? { fontSize: 13, color: 'var(--noxa-text-muted)', fontWeight: 700, fontFamily: 'var(--noxa-font-display-jp)' }
+      : { fontSize: 10, color: 'var(--noxa-text-faint)', letterSpacing: '0.12em', textTransform: 'uppercase' }}>{children}</div>
   );
   const SubLabel = ({ children }: { children: React.ReactNode }) => (
-    <div className="px-2.5 pb-1" style={{ fontSize: 10, color: 'var(--noxa-text-muted)', fontWeight: 600 }}>{children}</div>
+    <div className="px-2.5 pb-1" style={{ fontSize: easy ? 13 : 10, color: 'var(--noxa-text-muted)', fontWeight: 600 }}>{children}</div>
   );
   const navLink = (it: { label: string; href: string; external?: boolean; tint?: string }) => {
     const active = pathname === it.href;
@@ -179,12 +181,12 @@ export function AccountShell({ user, children }: { user: User; children: React.R
         {/* CORE · 店舗管理（個人 / 店舗 サブ。端末は許可された店舗モジュールのみ） */}
         {device.isDevice ? (
           <div className="flex flex-col" style={{ gap: 2 }}>
-            <SectionLabel>Core · 店舗端末{device.label ? ` · ${device.label}` : ''}</SectionLabel>
+            <SectionLabel>{easy ? '店舗の端末' : 'Core · 店舗端末'}{device.label ? ` · ${device.label}` : ''}</SectionLabel>
             {storeNav.map(navLink)}
           </div>
         ) : (
           <div className="flex flex-col" style={{ gap: 12 }}>
-            <SectionLabel>Core · 店舗管理</SectionLabel>
+            <SectionLabel>{easy ? 'お店の管理' : 'Core · 店舗管理'}</SectionLabel>
             <div className="flex flex-col" style={{ gap: 2 }}>
               <SubLabel>個人</SubLabel>
               {NAV_PERSONAL.map(navLink)}
@@ -209,7 +211,7 @@ export function AccountShell({ user, children }: { user: User; children: React.R
         {/* CHANNEL · NOXA Channel（community / 通知）。端末では非表示 */}
         {!device.isDevice && (
           <div className="flex flex-col" style={{ gap: 2 }}>
-            <SectionLabel>Channel</SectionLabel>
+            <SectionLabel>{easy ? 'おしらせ・つながり' : 'Channel'}</SectionLabel>
             {NAV_CHANNEL.map(navLink)}
           </div>
         )}
@@ -217,7 +219,7 @@ export function AccountShell({ user, children }: { user: User; children: React.R
         {/* SERVICE · 連携 / 契約。端末では非表示 */}
         {!device.isDevice && (
           <div className="flex flex-col" style={{ gap: 2 }}>
-            <SectionLabel>Service</SectionLabel>
+            <SectionLabel>{easy ? '連携・契約' : 'Service'}</SectionLabel>
             {NAV_SERVICE.map(navLink)}
           </div>
         )}
