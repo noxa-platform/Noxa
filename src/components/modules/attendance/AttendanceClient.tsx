@@ -5,6 +5,7 @@ import { addDoc, collection, deleteDoc, doc, getDocs, query, where, serverTimest
 import type { User } from 'firebase/auth';
 import { db } from '@/lib/firebase/config';
 import { useDeviceClaims } from '@/lib/useShopContext';
+import { getActiveShop, pickShopId } from '@/lib/workspace';
 import { Shell, Section, Empty, Eyebrow, chip } from '@/components/modules/schedule/ScheduleClient';
 
 /**
@@ -51,8 +52,11 @@ export function AttendanceClient({ user }: { user: User }) {
     (async () => {
       let sid: string | null = device.isDevice ? device.shopId || null : null;
       try {
-        if (!sid) { const o = await getDocs(query(collection(db, 'shop_shops'), where('ownerUid', '==', user.uid))); if (!o.empty) sid = o.docs[0].id; }
-        if (!sid) { const ms = await getDocs(collection(db, `account_users/${user.uid}/memberships`)); if (!ms.empty) sid = ms.docs[0].id; }
+        if (!sid) {
+          const o = await getDocs(query(collection(db, 'shop_shops'), where('ownerUid', '==', user.uid)));
+          const ms = await getDocs(collection(db, `account_users/${user.uid}/memberships`));
+          sid = pickShopId(o.docs.map((d) => d.id), ms.docs.map((d) => d.id), getActiveShop()).shopId;
+        }
       } catch { /* skip */ }
       if (!alive) return;
       setShopId(sid);

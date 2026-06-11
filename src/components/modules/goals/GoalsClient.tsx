@@ -5,6 +5,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { collection, doc, getDoc, getDocs, query, where, serverTimestamp, setDoc, type DocumentData } from 'firebase/firestore';
 import type { User } from 'firebase/auth';
 import { db } from '@/lib/firebase/config';
+import { getActiveShop, pickShopId } from '@/lib/workspace';
 
 /**
  * 目標管理 — Noxa OS（実データ）
@@ -51,24 +52,17 @@ async function loadPerf(uid: string): Promise<Perf> {
       currentTypes[t] = (currentTypes[t] ?? 0) + amt;
     }
   };
-  // owner shops（全 sales）
-  let ownerShops: string[] = [];
+  // アクティブ店舗にスコープ（WorkspaceSwitcher 尊重）。オーナー=全売上 / スタッフ=自分の売上
   try {
-    const s = await getDocs(query(collection(db, 'shop_shops'), where('ownerUid', '==', uid)));
-    ownerShops = s.docs.map((x) => x.id);
-    for (const id of ownerShops) {
-      try { const ss = await getDocs(collection(db, `shop_shops/${id}/sales`)); ss.forEach((x) => add(x.data())); } catch { /* skip */ }
+    const owned = await getDocs(query(collection(db, 'shop_shops'), where('ownerUid', '==', uid)));
+    const ms = await getDocs(collection(db, `account_users/${uid}/memberships`));
+    const { shopId, isOwner } = pickShopId(owned.docs.map((d) => d.id), ms.docs.map((d) => d.id), getActiveShop());
+    if (shopId) {
+      const col = collection(db, `shop_shops/${shopId}/sales`);
+      const ss = isOwner ? await getDocs(col) : await getDocs(query(col, where('castUid', '==', uid)));
+      ss.forEach((x) => add(x.data()));
     }
   } catch { /* skip */ }
-  // owner でなければ所属店舗で自分の売上のみ
-  if (ownerShops.length === 0) {
-    try {
-      const ms = await getDocs(collection(db, `account_users/${uid}/memberships`));
-      for (const m of ms.docs) {
-        try { const ss = await getDocs(query(collection(db, `shop_shops/${m.id}/sales`), where('castUid', '==', uid))); ss.forEach((x) => add(x.data())); } catch { /* skip */ }
-      }
-    } catch { /* skip */ }
-  }
   return { byMonth, currentTypes };
 }
 

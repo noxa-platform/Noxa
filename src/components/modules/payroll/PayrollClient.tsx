@@ -5,6 +5,7 @@ import { collection, getDocs, query, where, type DocumentData } from 'firebase/f
 import type { User } from 'firebase/auth';
 import { db } from '@/lib/firebase/config';
 import { useDeviceClaims } from '@/lib/useShopContext';
+import { getActiveShop, pickShopId } from '@/lib/workspace';
 import { Shell, Section, Empty, Eyebrow } from '@/components/modules/schedule/ScheduleClient';
 
 /**
@@ -44,16 +45,13 @@ export function PayrollClient({ user }: { user: User }) {
     if (device.loading) return;
     let alive = true;
     (async () => {
-      // shopId 解決: device claims → owner shop → membership
+      // shopId 解決: device claims → アクティブ店舗（WorkspaceSwitcher 尊重）
       let shopId: string | null = device.isDevice ? device.shopId || null : null;
       try {
         if (!shopId) {
           const owned = await getDocs(query(collection(db, 'shop_shops'), where('ownerUid', '==', user.uid)));
-          if (!owned.empty) shopId = owned.docs[0].id;
-        }
-        if (!shopId) {
           const ms = await getDocs(collection(db, `account_users/${user.uid}/memberships`));
-          if (!ms.empty) shopId = ms.docs[0].id;
+          shopId = pickShopId(owned.docs.map((d) => d.id), ms.docs.map((d) => d.id), getActiveShop()).shopId;
         }
         if (!shopId) { if (alive) { setNoShop(true); setLoading(false); } return; }
         const snap = await getDocs(collection(db, `shop_shops/${shopId}/payrolls/${user.uid}/items`));
