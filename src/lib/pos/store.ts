@@ -219,6 +219,8 @@ export function usePosStore(user: User): UsePosStore {
     const state: CalculatorState = init
       ? { ...base, customerType: init.customerType ?? base.customerType, initialSetPrice: init.initialSetPrice ?? base.initialSetPrice, entryTime: init.entryTime ?? base.entryTime, dohan: init.dohan ?? base.dohan, orders: createPinnedOrders(cfg, init.customerType ?? base.customerType) }
       : base;
+    // 整合: castId 未指定でも castName から席回しキャストを解決し、必ず卓に配置する
+    const resolvedCastId = init?.castId ?? (init?.castName ? casts.find((c) => c.name === init.castName)?.id : undefined);
     await txSlips(tableId, (slips, data) => {
       const newSlip: PosSlip = {
         id: genSlipId(),
@@ -226,22 +228,22 @@ export function usePosStore(user: User): UsePosStore {
         state,
         ...(init?.castName ? { castName: init.castName } : {}),
         ...(init?.castUid ? { castUid: init.castUid } : {}),
-        ...(init?.castId ? { castId: init.castId } : {}),
+        ...(resolvedCastId ? { castId: resolvedCastId } : {}),
         ...(init?.customerName?.trim() ? { customerName: init.customerName.trim() } : {}),
         ...(init?.customerId ? { customerId: init.customerId } : {}),
       };
       const extra: Record<string, unknown> = {};
       if (!data.status || data.status === 'EMPTY') { extra.status = 'ACTIVE'; extra.startTime = Date.now(); extra.entryTime = Date.now(); }
-      if (init?.castId) {
+      if (resolvedCastId) {
         const cur: string[] = Array.isArray(data.currentHostIds) ? data.currentHostIds : [];
         const main: string[] = Array.isArray(data.mainHostIds) ? data.mainHostIds : [];
-        extra.currentHostIds = cur.includes(init.castId) ? cur : [...cur, init.castId];
-        extra.mainHostIds = main.includes(init.castId) ? main : [...main, init.castId];
-        extra.castStartTimes = { ...(data.castStartTimes ?? {}), [init.castId]: Date.now() };
+        extra.currentHostIds = cur.includes(resolvedCastId) ? cur : [...cur, resolvedCastId];
+        extra.mainHostIds = main.includes(resolvedCastId) ? main : [...main, resolvedCastId];
+        extra.castStartTimes = { ...(data.castStartTimes ?? {}), [resolvedCastId]: Date.now() };
       }
       return { slips: [...slips, newSlip], extra };
     });
-  }, [configRef, txSlips]);
+  }, [configRef, txSlips, casts]);
 
   const mutateSlip = useCallback(async (tableId: string, slipId: string, fn: (s: PosSlip) => PosSlip | null) => {
     await txSlips(tableId, (slips) => {
