@@ -25,12 +25,12 @@ const CUSTOMER_TYPES: { id: CustomerType; label: string }[] = [
   { id: 'r_after', label: 'R後' },
 ];
 
-export function PosClient({ user }: { user: User }) {
+export function PosClient({ user, focusTableId, embedded }: { user: User; focusTableId?: string; embedded?: boolean }) {
   const store = usePosStore(user);
   const { config, tables, casts } = store;
   const checkoutLabel = useShopConfig(user).t('checkout');
 
-  const [selectedTableId, setSelectedTableId] = useState<string | null>(null);
+  const [selectedTableId, setSelectedTableId] = useState<string | null>(focusTableId ?? null);
   const [selectedSlipId, setSelectedSlipId] = useState<string | null>(null);
   const [activeCategory, setActiveCategory] = useState<string>(config.menuCategories[0]?.id ?? '');
   const [customItem, setCustomItem] = useState<{ name: string } | null>(null);
@@ -51,17 +51,17 @@ export function PosClient({ user }: { user: User }) {
 
   const result = selectedSlip ? store.resultFor(selectedSlip) : null;
 
-  if (store.loading) return <Shell><div className="noxa-eyebrow" style={{ padding: '40px 0' }}>読み込み中…</div></Shell>;
+  if (store.loading) return <Shell embedded={embedded}><div className="noxa-eyebrow" style={{ padding: '40px 0' }}>読み込み中…</div></Shell>;
   if (!store.shopId) {
     return (
-      <Shell>
+      <Shell embedded={embedded}>
         <Empty>POS は店舗運営機能です。<Link href="/store/new" style={{ color: 'var(--noxa-accent-primary-ink)' }}>店舗を登録</Link> すると解放されます。</Empty>
       </Shell>
     );
   }
   if (store.needsSeed) {
     return (
-      <Shell device={store.isDevice}>
+      <Shell device={store.isDevice} embedded={embedded}>
         <Empty>
           <p style={{ margin: '0 0 12px' }}>フロアの卓が未設定です（POS と席回しで共有）。</p>
           {store.canConfig
@@ -95,9 +95,10 @@ export function PosClient({ user }: { user: User }) {
   };
 
   return (
-    <Shell device={store.isDevice} configurable={store.canConfig}>
-      <div className="grid grid-cols-1 lg:grid-cols-[200px_1fr_340px]" style={{ gap: 'clamp(12px, 1.6vw, 18px)', alignItems: 'start' }}>
-        {/* 左：卓（席回しと共有） */}
+    <Shell device={store.isDevice} configurable={store.canConfig} embedded={embedded}>
+      <div className={embedded ? 'grid grid-cols-1 lg:grid-cols-[1fr_340px]' : 'grid grid-cols-1 lg:grid-cols-[200px_1fr_340px]'} style={{ gap: 'clamp(12px, 1.6vw, 18px)', alignItems: 'start' }}>
+        {/* 左：卓（席回しと共有）。埋め込み（席回しから単一卓）では非表示 */}
+        {!embedded && (
         <section aria-label="卓選択">
           <PaneTitle>卓 <span style={{ color: 'var(--noxa-text-faint)', fontWeight: 400 }}>（席回しと同期）</span></PaneTitle>
           <div className="grid grid-cols-4 lg:grid-cols-2" style={{ gap: 8 }}>
@@ -138,6 +139,7 @@ export function PosClient({ user }: { user: User }) {
             })}
           </div>
         </section>
+        )}
 
         {/* 中央：伝票操作 + メニュー */}
         <section aria-label="オーダー" style={{ minWidth: 0 }}>
@@ -546,7 +548,8 @@ function CountStepper({ label, value, onChange }: { label: string; value: number
 
 // ───────────────────────── レイアウト・スタイル
 
-function Shell({ children, device, configurable }: { children: React.ReactNode; device?: boolean; configurable?: boolean }) {
+function Shell({ children, device, configurable, embedded }: { children: React.ReactNode; device?: boolean; configurable?: boolean; embedded?: boolean }) {
+  if (embedded) return <div style={{ color: 'var(--noxa-text-primary)', fontFamily: 'var(--noxa-font-sans-jp)' }}>{children}</div>;
   return (
     <div style={{ color: 'var(--noxa-text-primary)', fontFamily: 'var(--noxa-font-sans-jp)', borderRadius: 16, border: '1px solid var(--noxa-border)', padding: 'clamp(16px, 3vw, 28px)', position: 'relative', overflow: 'hidden' }}>
       <div aria-hidden style={{ position: 'absolute', top: '-30%', right: '-10%', width: 700, height: 420, background: 'radial-gradient(ellipse, rgba(139, 92, 246, 0.12) 0%, transparent 65%)', pointerEvents: 'none' }} />

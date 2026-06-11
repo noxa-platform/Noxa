@@ -5,6 +5,7 @@ import { useEffect, useMemo, useState } from 'react';
 import type { User } from 'firebase/auth';
 import { useSeatingStore } from '@/lib/seating/store';
 import { useShopConfig } from '@/lib/shopConfig';
+import { PosClient } from '@/components/modules/pos/PosClient';
 import { generateAIProposals, getSourcingCandidates } from '@/lib/seating/ai';
 import type { Cast, FloorTable, TableType, Customer, CastStatus, Rank } from '@/lib/seating/types';
 
@@ -162,6 +163,7 @@ export function SeatingClient({ user }: { user: User }) {
               tables={tables}
               castById={castById}
               store={store}
+              user={user}
             />
           )}
         </div>
@@ -254,13 +256,15 @@ function TableCard({ table, castById, active, onSelect }: { table: FloorTable; c
 
 // ───────────────────────── 卓詳細
 
-function TableDetail({ table, casts, tables, castById, store }: {
+function TableDetail({ table, casts, tables, castById, store, user }: {
   table: FloorTable; casts: Cast[]; tables: FloorTable[]; castById: Map<string, Cast>;
   store: ReturnType<typeof useSeatingStore>;
+  user: User;
 }) {
   const [showPicker, setShowPicker] = useState(false);
   const [openGuests, setOpenGuests] = useState(2);
   const [openType, setOpenType] = useState<TableType>('正規');
+  const [posOpen, setPosOpen] = useState(false);
 
   const candidates = useMemo(() => getSourcingCandidates(casts, tables, table)
     .filter((c) => !table.currentHostIds.includes(c.cast.id)), [casts, tables, table]);
@@ -354,7 +358,7 @@ function TableDetail({ table, casts, tables, castById, store }: {
 
           {/* アクション */}
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', borderTop: '1px solid var(--noxa-divider)', paddingTop: 12 }}>
-            <Link href="/pos" style={{ ...chipStyle(true), textDecoration: 'none', display: 'inline-flex', alignItems: 'center' }}>🧾 伝票・会計を開く</Link>
+            <button type="button" onClick={() => setPosOpen(true)} style={chipStyle(true)}>🧾 伝票・会計を開く</button>
             <button type="button" onClick={() => store.rotateHosts(table.id)} style={chipStyle(false)} disabled={table.currentHostIds.length < 2}>席内ローテ</button>
             <button type="button" onClick={() => store.toggleInnerRotation(table.id)} style={chipStyle(table.innerRotationEnabled)}>自動ローテ提案</button>
             <button type="button" onClick={() => store.extendTime(table.id, 30)} style={chipStyle(false)}>＋30分延長</button>
@@ -373,6 +377,20 @@ function TableDetail({ table, casts, tables, castById, store }: {
             </div>
           )}
         </>
+      )}
+
+      {/* 伝票・会計（POSをこの卓に絞って埋め込み＝フロアから会計まで1画面で完結） */}
+      {posOpen && (
+        <div role="dialog" aria-label="伝票・会計" onClick={() => setPosOpen(false)}
+          style={{ position: 'fixed', inset: 0, zIndex: 60, background: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'flex-start', justifyContent: 'center', overflowY: 'auto', padding: 16 }}>
+          <div onClick={(e) => e.stopPropagation()} style={{ width: 'min(1100px, 96vw)', marginTop: 8, marginBottom: 24, background: 'var(--noxa-bg-base)', border: '1px solid var(--noxa-border-strong)', borderRadius: 16, padding: '14px 16px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
+              <span style={{ fontFamily: 'var(--noxa-font-display-jp)', fontSize: 18, fontWeight: 700 }}>{table.name} の伝票・会計</span>
+              <button type="button" onClick={() => setPosOpen(false)} style={chipStyle(false)}>閉じる ✕</button>
+            </div>
+            <PosClient user={user} focusTableId={table.id} embedded />
+          </div>
+        </div>
       )}
     </section>
   );
