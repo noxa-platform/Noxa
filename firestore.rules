@@ -165,6 +165,10 @@ service cloud.firestore {
         allow delete: if isShopOwnerLike(shopId);
       }
 
+      // 2026-06 売上モデル統一: ここは「未担当(その他)」バケット。
+      // 担当付き客の正本は personal_customers/{castUid}/items（担当キャストの台帳）。
+      // 担当が付いたら assign-customer API (Admin SDK) で担当台帳へ移動する。
+      // メンバー全員 read/write 可の既存挙動を維持（縮小しない）。
       match /customers/{cid} {
         allow read: if isShopMember(shopId);
         allow write: if isShopMember(shopId);
