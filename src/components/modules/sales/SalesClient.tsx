@@ -28,6 +28,7 @@ export function SalesClient({ user }: { user: User }) {
   const [sales, setSales] = useState<Sale[]>([]);
   const [loading, setLoading] = useState(true);
   const [adding, setAdding] = useState(false);
+  const [opBusy, setOpBusy] = useState(false); // 取消/修正の二重実行防止
 
   useEffect(() => {
     if (shop.loading) return;
@@ -56,16 +57,24 @@ export function SalesClient({ user }: { user: User }) {
   };
   const custRef = (cid: string) => shop.shopId ? doc(db, `shop_shops/${shop.shopId}/customers/${cid}`) : null;
   const voidSale = async (s: Sale) => {
+    if (opBusy || s.voided) return;
     const r = window.prompt('取消理由（任意）'); if (r === null) return;
-    await updateDoc(doc(db, `${colPath}/${s.id}`), { voided: true, voidedAt: serverTimestamp(), voidReason: r });
-    // 顧客実績から減算（取消＝集計から外す）
-    if (s.customerId && !s.voided) { const ref = custRef(s.customerId); if (ref) await updateDoc(ref, { totalSales: increment(-s.amount), visitCount: increment(-1) }).catch(() => {}); }
+    setOpBusy(true);
+    try {
+      await updateDoc(doc(db, `${colPath}/${s.id}`), { voided: true, voidedAt: serverTimestamp(), voidReason: r });
+      // 顧客実績から減算（取消＝集計から外す）
+      if (s.customerId) { const ref = custRef(s.customerId); if (ref) await updateDoc(ref, { totalSales: increment(-s.amount), visitCount: increment(-1) }).catch(() => {}); }
+    } finally { setOpBusy(false); }
   };
   const editSale = async (s: Sale) => {
+    if (opBusy || s.voided) return;
     const v = window.prompt('金額（円）', String(s.amount)); if (v === null) return; const a = Number(v); if (!Number.isFinite(a) || a < 0) return;
-    await updateDoc(doc(db, `${colPath}/${s.id}`), { amount: a, correctedAt: serverTimestamp() });
-    // 顧客の累計売上も差額で補正
-    if (s.customerId && !s.voided && a !== s.amount) { const ref = custRef(s.customerId); if (ref) await updateDoc(ref, { totalSales: increment(a - s.amount) }).catch(() => {}); }
+    setOpBusy(true);
+    try {
+      await updateDoc(doc(db, `${colPath}/${s.id}`), { amount: a, correctedAt: serverTimestamp() });
+      // 顧客の累計売上も差額で補正
+      if (s.customerId && a !== s.amount) { const ref = custRef(s.customerId); if (ref) await updateDoc(ref, { totalSales: increment(a - s.amount) }).catch(() => {}); }
+    } finally { setOpBusy(false); }
   };
 
   return (
@@ -104,8 +113,8 @@ export function SalesClient({ user }: { user: User }) {
               </span>
               <span style={{ fontFamily: mono, fontSize: 14, fontVariantNumeric: 'tabular-nums', textDecoration: s.voided ? 'line-through' : 'none' }}>{yen(s.amount)}</span>
               {!s.voided && <>
-                <button type="button" onClick={() => editSale(s)} style={miniBtn}>修正</button>
-                <button type="button" onClick={() => voidSale(s)} style={{ ...miniBtn, color: 'var(--noxa-status-error)' }}>取消</button>
+                <button type="button" disabled={opBusy} onClick={() => editSale(s)} style={{ ...miniBtn, opacity: opBusy ? 0.5 : 1 }}>修正</button>
+                <button type="button" disabled={opBusy} onClick={() => voidSale(s)} style={{ ...miniBtn, color: 'var(--noxa-status-error)', opacity: opBusy ? 0.5 : 1 }}>取消</button>
               </>}
             </div>
           ))}

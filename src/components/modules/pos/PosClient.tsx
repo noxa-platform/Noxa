@@ -494,7 +494,7 @@ function BillPanel({ tableName, casts, slip, result, onDispatch, onRename, onRem
           </label>
           <div style={{ display: 'flex', gap: 8 }}>
             <button type="button" disabled={busy} className="noxa-btn noxa-btn-primary" style={{ ...primaryBtn, flex: 1, opacity: busy ? 0.7 : 1 }}
-              onClick={async () => { setBusy(true); try { await onCheckout({ amount, castName: castName || undefined, customerName: customerName || undefined, guests }); } finally { setBusy(false); setCheckingOut(false); } }}>
+              onClick={async () => { setBusy(true); try { await onCheckout({ amount, castName: castName || undefined, customerName: customerName || undefined, guests }); setCheckingOut(false); } catch (e) { window.alert('会計に失敗しました（通信状態をご確認ください）。\n' + ((e as Error)?.message ?? String(e))); } finally { setBusy(false); } }}>
               {busy ? '計上中…' : `${yen(amount)} で確定`}
             </button>
             <button type="button" onClick={() => setCheckingOut(false)} className="noxa-btn noxa-btn-ghost" style={{ ...ghostBtn, width: 80 }}>戻る</button>

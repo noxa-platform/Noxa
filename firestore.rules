@@ -327,6 +327,8 @@ service cloud.firestore {
       // 店舗運営モジュール（メンバー read/write）
       match /inventory/{itemId}    { allow read, write: if isShopMember(shopId); }
       match /bottle_keeps/{id}     { allow read, write: if isShopMember(shopId); }
+      // first_visits: NOXA は menu_orders を使うが iOS/旧クライアントが書く可能性があるため温存
+      match /first_visits/{id}     { allow read, write: if isShopMember(shopId); }
       match /transport/{id}        { allow read, write: if isShopMember(shopId); }
       match /transport_vehicles/{id} { allow read, write: if isShopMember(shopId); }
       match /trials/{id}           { allow read, write: if isShopMember(shopId); }

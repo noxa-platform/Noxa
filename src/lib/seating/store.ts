@@ -47,8 +47,9 @@ function useShopTarget(user: User): ShopTarget {
       }
       try {
         const snap = await getDocs(query(collection(db, 'shop_shops'), where('ownerUid', '==', user.uid)));
+        const ms = await getDocs(collection(db, `account_users/${user.uid}/memberships`));
         if (!alive) return;
-        const { shopId, isOwner } = pickShopId(snap.docs.map((d) => d.id), [], getActiveShop());
+        const { shopId, isOwner } = pickShopId(snap.docs.map((d) => d.id), ms.docs.map((d) => d.id), getActiveShop());
         setCtx({ loading: false, shopId, canManage: isOwner, isDevice: false, error: null });
       } catch (e) {
         if (alive) setCtx({ loading: false, shopId: null, canManage: false, isDevice: false, error: String((e as Error)?.message ?? e) });
