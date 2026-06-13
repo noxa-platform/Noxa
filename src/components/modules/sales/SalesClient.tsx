@@ -26,9 +26,22 @@ export function SalesClient({ user }: { user: User }) {
   const shop = useShopId(user);
   const colPath = shop.shopId ? `shop_shops/${shop.shopId}/sales` : `personal_sales/${user.uid}/items`;
   const [sales, setSales] = useState<Sale[]>([]);
+  const [customers, setCustomers] = useState<{ id: string; name: string }[]>([]);
   const [loading, setLoading] = useState(true);
   const [adding, setAdding] = useState(false);
   const [opBusy, setOpBusy] = useState(false); // 取消/修正の二重実行防止
+
+  // 店舗ワークスペース時のみ顧客台帳を購読（手入力売上の顧客紐付け用）
+  useEffect(() => {
+    if (!shop.shopId) { setCustomers([]); return; }
+    const unsub = onSnapshot(collection(db, `shop_shops/${shop.shopId}/customers`), (snap) => {
+      const list: { id: string; name: string }[] = [];
+      snap.forEach((d) => { const x = d.data() as DocumentData; list.push({ id: d.id, name: (x.name as string) ?? '（無名）' }); });
+      list.sort((a, b) => a.name.localeCompare(b.name, 'ja'));
+      setCustomers(list);
+    }, () => setCustomers([]));
+    return () => unsub();
+  }, [shop.shopId]);
 
   useEffect(() => {
     if (shop.loading) return;
@@ -51,11 +64,13 @@ export function SalesClient({ user }: { user: User }) {
   const recent = useMemo(() => [...sales].sort((a, b) => (b.atMs ?? 0) - (a.atMs ?? 0)).slice(0, 40), [sales]);
   const place = shop.shopId ? '店舗' : '個人';
 
-  const addSale = async (amount: number, customerName: string, castName: string) => {
-    // castUid=記録者（店舗ルールの create 条件を満たし、個人売上の帰属にもなる）
-    await addDoc(collection(db, colPath), { source: 'manual', amount, customerName: customerName.trim() || null, castName: castName.trim() || null, castUid: user.uid, operatorUid: user.uid, dayKey: tk, checkoutAt: serverTimestamp(), createdAt: serverTimestamp() });
-  };
   const custRef = (cid: string) => shop.shopId ? doc(db, `shop_shops/${shop.shopId}/customers/${cid}`) : null;
+  const addSale = async (amount: number, customerName: string, castName: string, customerId: string | null) => {
+    // castUid=記録者（店舗ルールの create 条件を満たし、個人売上の帰属にもなる）
+    await addDoc(collection(db, colPath), { source: 'manual', entryMode: 'amount', amount, customerName: customerName.trim() || null, customerId: customerId || null, castName: castName.trim() || null, castUid: user.uid, operatorUid: user.uid, dayKey: tk, checkoutAt: serverTimestamp(), createdAt: serverTimestamp() });
+    // 顧客紐付け時は POS会計と同様に顧客実績へ反映（店舗ワークスペースのみ）
+    if (customerId) { const cr = custRef(customerId); if (cr) await updateDoc(cr, { totalSales: increment(amount), visitCount: increment(1), lastContactAt: serverTimestamp() }).catch(() => {}); }
+  };
   const voidSale = async (s: Sale) => {
     if (opBusy || s.voided) return;
     const r = window.prompt('取消理由（任意）'); if (r === null) return;
@@ -121,7 +136,7 @@ export function SalesClient({ user }: { user: User }) {
         </div>
       )}
 
-      {adding && <SaleDialog onClose={() => setAdding(false)} onSave={async (a, c, k) => { await addSale(a, c, k); setAdding(false); }} />}
+      {adding && <SaleDialog customers={customers} onClose={() => setAdding(false)} onSave={async (a, c, k, cid) => { await addSale(a, c, k, cid); setAdding(false); }} />}
 
       <p style={{ margin: '16px 0 0', fontSize: 11, color: 'var(--noxa-text-faint)' }}>
         ※ {place}の売上（noxa-platform 共有）。取消は無効化＝集計から除外。
@@ -131,9 +146,10 @@ export function SalesClient({ user }: { user: User }) {
   );
 }
 
-function SaleDialog({ onClose, onSave }: { onClose: () => void; onSave: (amount: number, customer: string, cast: string) => Promise<void> }) {
+function SaleDialog({ customers, onClose, onSave }: { customers: { id: string; name: string }[]; onClose: () => void; onSave: (amount: number, customer: string, cast: string, customerId: string | null) => Promise<void> }) {
   const [amount, setAmount] = useState<number>(0);
   const [customer, setCustomer] = useState('');
+  const [customerId, setCustomerId] = useState<string>('');
   const [cast, setCast] = useState('');
   const [busy, setBusy] = useState(false);
   return (
@@ -142,12 +158,20 @@ function SaleDialog({ onClose, onSave }: { onClose: () => void; onSave: (amount:
         <h2 style={{ margin: 0, fontSize: 18, fontFamily: 'var(--noxa-font-display-jp)', fontWeight: 700 }}>売上を記録</h2>
         <label style={{ display: 'flex', flexDirection: 'column', gap: 6 }}><span className="noxa-label" style={{ margin: 0 }}>金額（円）</span>
           <input type="number" inputMode="numeric" value={amount} onChange={(e) => setAmount(Math.max(0, Number(e.target.value)))} className="noxa-input" autoFocus /></label>
+        {customers.length > 0 && (
+          <label style={{ display: 'flex', flexDirection: 'column', gap: 6 }}><span className="noxa-label" style={{ margin: 0 }}>既存の顧客から選ぶ（任意）</span>
+            <select value={customerId} onChange={(e) => { const id = e.target.value; setCustomerId(id); const c = customers.find((x) => x.id === id); if (c) setCustomer(c.name); }} className="noxa-input">
+              <option value="">— 選択しない —</option>
+              {customers.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+            </select></label>
+        )}
         <label style={{ display: 'flex', flexDirection: 'column', gap: 6 }}><span className="noxa-label" style={{ margin: 0 }}>お客様名（任意）</span>
-          <input value={customer} onChange={(e) => setCustomer(e.target.value)} placeholder="例：田中様" className="noxa-input" /></label>
+          <input value={customer} onChange={(e) => { setCustomer(e.target.value); }} placeholder="例：田中様" className="noxa-input" /></label>
         <label style={{ display: 'flex', flexDirection: 'column', gap: 6 }}><span className="noxa-label" style={{ margin: 0 }}>担当（任意）</span>
           <input value={cast} onChange={(e) => setCast(e.target.value)} className="noxa-input" /></label>
+        {customerId && <p style={{ margin: 0, fontSize: 11, color: 'var(--noxa-text-faint)' }}>※ 選択した顧客の累計売上・来店回数に反映されます。</p>}
         <div style={{ display: 'flex', gap: 10 }}>
-          <button type="button" disabled={amount <= 0 || busy} onClick={async () => { setBusy(true); try { await onSave(amount, customer, cast); } finally { setBusy(false); } }} className="noxa-btn noxa-btn-primary" style={{ flex: 1 }}>{busy ? '保存中…' : '記録する'}</button>
+          <button type="button" disabled={amount <= 0 || busy} onClick={async () => { setBusy(true); try { await onSave(amount, customer, cast, customerId || null); } finally { setBusy(false); } }} className="noxa-btn noxa-btn-primary" style={{ flex: 1 }}>{busy ? '保存中…' : '記録する'}</button>
           <button type="button" onClick={onClose} className="noxa-btn noxa-btn-secondary" style={{ width: 90 }}>閉じる</button>
         </div>
       </div>

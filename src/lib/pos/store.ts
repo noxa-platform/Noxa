@@ -274,15 +274,21 @@ export function usePosStore(user: User): UsePosStore {
       const slips: PosSlip[] = Array.isArray(data.slips) ? (data.slips as PosSlip[]) : [];
       const slip = slips.find((s) => s.id === slipId);
       if (!slip) return; // 既に会計済み（他端末）等
+      // 内訳（注文品目）のスナップショット。会計後も「何を何本」を残すため sales に保存する。
+      // count>0 の品目のみ。合計 amount は set/税/指名等を含むため lineItems の和とは一致しない（注文明細のみ）。
+      const lineItems = (Array.isArray(slip.state.orders) ? slip.state.orders : [])
+        .filter((o) => (o?.count ?? 0) > 0)
+        .map((o) => ({ name: o.name, baseName: o.baseName, unitPrice: o.price, count: o.count, amount: o.price * o.count }));
       const saleRef = doc(collection(db, `shop_shops/${shopId}/sales`));
       tx.set(saleRef, {
-        source: 'pos', amount: opts.amount, tableId, tableName: (data.name as string) ?? '', slipName: slip.name,
+        source: 'pos', entryMode: 'breakdown', amount: opts.amount, tableId, tableName: (data.name as string) ?? '', slipName: slip.name,
         customerType: slip.state.customerType, customerName: opts.customerName ?? slip.customerName ?? null,
         customerId: slip.customerId ?? null,
         castName: opts.castName ?? slip.castName ?? null,
         castUid: attributionRef.current === 'operator' ? user.uid : (slip.castUid ?? user.uid),
         operatorUid: user.uid,
         guests: opts.guests ?? null,
+        lineItems,
         entryTime: slip.state.entryTime, checkoutAt: serverTimestamp(), dayKey: dayKey(), createdAt: serverTimestamp(),
       });
       // 会計→顧客実績を同一トランザクションで更新（紐付け顧客がいれば累計売上・来店・最終接触を反映）

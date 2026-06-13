@@ -79,6 +79,9 @@ export {
   syncShopNameToMemberships,
 } from './v2-sync';
 
+// 店舗売上 → キャスト個人売上の控え同期（冪等・退店後も個人履歴が残る）
+export { syncShopSaleToPersonal } from './sales-sync';
+
 // AI クレジット ledger（消費を account_credit_ledger に記録）
 export { consumeAiCredit } from './credits';
 
