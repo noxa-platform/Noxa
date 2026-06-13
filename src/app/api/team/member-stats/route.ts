@@ -14,6 +14,13 @@ import { verifyRequest, getAdminDb, AuthError } from '../../lib/firebase-admin';
 // キャスト×顧客の集計は読み取り回数が多いので関数タイムアウトを延長。
 export const maxDuration = 60;
 
+// JST 暦日キー（YYYY-MM-DD）。サーバは UTC 動作のため +9h してから日付を取る。
+// 営業日切替は iOS 側で再フィルタするため、ここでは datetime ベースの暦日で返す。
+function jstDateKey(ts: Timestamp | undefined | null): string | null {
+  if (!ts || typeof ts.toMillis !== 'function') return null;
+  return new Date(ts.toMillis() + 9 * 60 * 60 * 1000).toISOString().slice(0, 10);
+}
+
 export async function POST(request: NextRequest) {
   try {
     const uid = await verifyRequest(request);
@@ -68,6 +75,15 @@ export async function POST(request: NextRequest) {
     // ※ collectionGroup は全テナントのログを月レンジで舐めるため、将来規模が
     //   大きくなったら logs に castUid フィールドを持たせた per-cast 集計へ移行する。
     const logsAgg = new Map<string, { s: number; g: number }>();
+    // 日次内訳（全キャスト合算）。dateKey(JST暦日) -> { amount, count }
+    const dailyMap = new Map<string, { amount: number; count: number }>();
+    const addDaily = (dateKey: string | null, amount: number, count: number) => {
+      if (!dateKey) return;
+      const cur = dailyMap.get(dateKey) ?? { amount: 0, count: 0 };
+      cur.amount += amount;
+      cur.count += count;
+      dailyMap.set(dateKey, cur);
+    };
     const logsSnap = await db
       .collectionGroup('logs')
       .where('datetime', '>=', monthStart)
@@ -83,12 +99,15 @@ export async function POST(request: NextRequest) {
       if (segs[0] !== 'personal_customers') continue;
       const castUid = segs[1];
       if (!targets.has(castUid)) continue;
-      const d = l.data() as { salesAmount?: number; countAsGroup?: boolean; type?: string };
+      const d = l.data() as { salesAmount?: number; countAsGroup?: boolean; type?: string; datetime?: Timestamp };
       const cur = logsAgg.get(castUid) ?? { s: 0, g: 0 };
-      cur.s += d.salesAmount || 0;
+      const amount = d.salesAmount || 0;
+      cur.s += amount;
       const counted = typeof d.countAsGroup === 'boolean' ? d.countAsGroup : d.type === 'visit';
       if (counted) cur.g += 1;
       logsAgg.set(castUid, cur);
+      // 日次内訳にも反映（count は countAsGroup 準拠）
+      addDaily(jstDateKey(d.datetime), amount, counted ? 1 : 0);
     }
 
     const members = await Promise.all([...targets.entries()].map(async ([castUid, info]) => {
@@ -120,16 +139,26 @@ export async function POST(request: NextRequest) {
         .get()
         .catch(() => null);
       for (const s of ssSnap?.docs ?? []) {
-        const d = s.data() as { salesAmount?: number; groupCount?: number };
-        monthSales += d.salesAmount || 0;
-        monthGroupCount += (d.groupCount && d.groupCount > 0) ? d.groupCount : 1;
+        const d = s.data() as { salesAmount?: number; groupCount?: number; datetime?: Timestamp };
+        const amount = d.salesAmount || 0;
+        const gc = (d.groupCount && d.groupCount > 0) ? d.groupCount : 1;
+        monthSales += amount;
+        monthGroupCount += gc;
+        // 日次内訳にも反映（JS は単一スレッド協調動作のため共有 Map への同期加算は安全）
+        addDaily(jstDateKey(d.datetime), amount, gc);
       }
 
       return { uid: castUid, name, role: info.role, customerCount, monthSales, monthGroupCount };
     }));
 
     members.sort((a, b) => b.monthSales - a.monthSales);
-    return NextResponse.json({ members });
+
+    // 日次内訳（全キャスト合算）を dateKey 昇順で返す。
+    const dailyTotals = [...dailyMap.entries()]
+      .map(([dateKey, v]) => ({ dateKey, amount: v.amount, count: v.count }))
+      .sort((a, b) => a.dateKey.localeCompare(b.dateKey));
+
+    return NextResponse.json({ members, dailyTotals });
   } catch (e) {
     if (e instanceof AuthError) {
       return NextResponse.json({ error: e.message }, { status: 401 });
