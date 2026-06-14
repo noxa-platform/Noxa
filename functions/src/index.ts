@@ -82,6 +82,9 @@ export {
 // 店舗売上 → キャスト個人売上の控え同期（冪等・退店後も個人履歴が残る）
 export { syncShopSaleToPersonal } from './sales-sync';
 
+// コミュニティ通報の集計 → 3 人以上で自動非表示
+export { hideReportedContent } from './community-moderation';
+
 // AI クレジット ledger（消費を account_credit_ledger に記録）
 export { consumeAiCredit } from './credits';
 

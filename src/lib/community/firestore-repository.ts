@@ -128,7 +128,8 @@ export class FirestoreCommunityRepository implements CommunityRepository {
       orderBy('lastActivityAt', 'desc'),
       limit(100),
     ));
-    let list = snap.docs.map((d) => this.mapThread(d));
+    // 自動非表示(hidden)の投稿は一覧から除外
+    let list = snap.docs.filter((d) => d.data().hidden !== true).map((d) => this.mapThread(d));
     if (filter?.areaTag) list = list.filter((t) => t.areaTag === filter.areaTag);
     if (filter?.jobTag) list = list.filter((t) => t.jobTag === filter.jobTag);
     return list.sort((a, b) => Number(Boolean(b.pinned)) - Number(Boolean(a.pinned)));
@@ -138,6 +139,7 @@ export class FirestoreCommunityRepository implements CommunityRepository {
     const postSnap = await getDoc(doc(db, C.posts, threadId));
     if (!postSnap.exists()) return null;
     const data = postSnap.data() as DocumentData;
+    if (data.hidden === true) return null; // 自動非表示の投稿は開けない
     const thread = this.mapThread({ id: postSnap.id, data: () => data });
     const postAuthorUid = data.authorUid ?? '';
     const cSnap = await getDocs(query(
@@ -145,7 +147,9 @@ export class FirestoreCommunityRepository implements CommunityRepository {
       where('postId', '==', threadId),
       orderBy('resNo', 'asc'),
     ));
-    thread.replies = cSnap.docs.map((d) => this.mapComment(d, thread.boardId, postAuthorUid));
+    thread.replies = cSnap.docs
+      .filter((d) => d.data().hidden !== true) // 非表示レスを除外
+      .map((d) => this.mapComment(d, thread.boardId, postAuthorUid));
     thread.replyCount = thread.replies.length;
     return thread;
   }

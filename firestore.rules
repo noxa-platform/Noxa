@@ -775,7 +775,10 @@ service cloud.firestore {
             && request.resource.data.authorUid == request.auth.uid
             && request.resource.data.body is string
             && request.resource.data.body.size() > 0
-            && request.resource.data.body.size() <= 1000)
+            && request.resource.data.body.size() <= 1000
+            // モデレーション用フィールドは本人編集で改竄不可（CF/admin のみ）
+            && !request.resource.data.diff(resource.data).affectedKeys()
+                 .hasAny(['hidden', 'reportCount', 'official', 'pinned']))
       );
       allow delete: if isAdmin() || (isAuth() && resource.data.authorUid == request.auth.uid);
     }
@@ -794,7 +797,9 @@ service cloud.firestore {
         || (resource.data.authorUid == request.auth.uid
             && request.resource.data.body is string
             && request.resource.data.body.size() > 0
-            && request.resource.data.body.size() <= 1000)
+            && request.resource.data.body.size() <= 1000
+            && !request.resource.data.diff(resource.data).affectedKeys()
+                 .hasAny(['hidden', 'reportCount', 'official']))
       );
       allow delete: if isAdmin() || (isAuth() && resource.data.authorUid == request.auth.uid);
     }
