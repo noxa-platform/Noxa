@@ -17,11 +17,12 @@ import { useCommunity } from '@/lib/community/store';
 import { BoardList } from './BoardList';
 import { ThreadList } from './ThreadList';
 import { ThreadDetail } from './ThreadDetail';
+import { InviteButton } from './InviteButton';
 import { crumbBtn } from './ui';
 
 const { mono, jp: fontJp, display: fontDisplay } = FONT;
 
-export function CommunityClient({ uid }: { uid?: string } = {}) {
+export function CommunityClient({ uid, me }: { uid?: string; me?: { isAdmin: boolean; inviteCredits: number | null } } = {}) {
   const c = useCommunity(uid);
   // mock バックエンドのときだけ「保存されません」注記を出す（firestore 本番では実データ保存）
   const isMock = process.env.NEXT_PUBLIC_COMMUNITY_BACKEND !== 'firestore';
@@ -67,9 +68,12 @@ export function CommunityClient({ uid }: { uid?: string } = {}) {
               <h1 style={{ fontFamily: fontDisplay, fontSize: 'clamp(22px, 4vw, 30px)', fontWeight: 500, margin: 0, color: 'var(--noxa-text-primary)', letterSpacing: '0.02em' }}>Channel</h1>
             </div>
           </div>
-          <div role="note" aria-label="招待制・完全匿名" style={{ display: 'inline-flex', alignItems: 'center', gap: 8, padding: '8px 14px', background: `${WINE}1A`, border: `1px solid ${WINE}55`, borderRadius: 9999, fontFamily: mono, fontSize: 10, letterSpacing: '0.12em', color: '#E89AA6', textTransform: 'uppercase', flexShrink: 0 }}>
-            <span aria-hidden style={{ width: 6, height: 6, borderRadius: 3, background: WINE, flexShrink: 0 }} />
-            招待制 · 完全匿名
+          <div style={{ display: 'inline-flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+            {me && <InviteButton initialCredits={me.inviteCredits} isAdmin={me.isAdmin} />}
+            <div role="note" aria-label="招待制・完全匿名" style={{ display: 'inline-flex', alignItems: 'center', gap: 8, padding: '8px 14px', background: `${WINE}1A`, border: `1px solid ${WINE}55`, borderRadius: 9999, fontFamily: mono, fontSize: 10, letterSpacing: '0.12em', color: '#E89AA6', textTransform: 'uppercase', flexShrink: 0 }}>
+              <span aria-hidden style={{ width: 6, height: 6, borderRadius: 3, background: WINE, flexShrink: 0 }} />
+              招待制 · 完全匿名
+            </div>
           </div>
         </header>
 

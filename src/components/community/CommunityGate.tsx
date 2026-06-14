@@ -9,12 +9,22 @@
 
 import { AuthGuard } from '@/components/AuthGuard';
 import { CommunityClient } from './CommunityClient';
+import { InviteGate } from './InviteGate';
 
 export function CommunityGate() {
   const useFirestore = process.env.NEXT_PUBLIC_COMMUNITY_BACKEND === 'firestore';
 
   if (useFirestore) {
-    return <AuthGuard>{(user) => <CommunityClient uid={user.uid} />}</AuthGuard>;
+    // ログイン必須 → さらに「招待制メンバー」のみ入室可
+    return (
+      <AuthGuard>
+        {(user) => (
+          <InviteGate>
+            {(me) => <CommunityClient uid={user.uid} me={{ isAdmin: me.isAdmin, inviteCredits: me.inviteCredits }} />}
+          </InviteGate>
+        )}
+      </AuthGuard>
+    );
   }
   return <CommunityClient />;
 }

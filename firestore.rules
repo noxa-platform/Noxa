@@ -819,8 +819,12 @@ service cloud.firestore {
       allow update, delete: if isAdmin();
     }
 
-    // 以下は当面未使用（招待コード・プロフィール・設定は Phase 1 後）
-    match /noxa_users/{uid} { allow read, write: if false; }
+    // 会員レコード: 本人のみ read（メンバー判定/残クレジット表示）。write は API(Admin SDK) のみ。
+    match /noxa_users/{uid} {
+      allow read: if isAuth() && request.auth.uid == uid;
+      allow write: if false;
+    }
+    // 招待コード: client 直アクセス不可。発行/引換は API(Admin SDK) 経由のみ。
     match /noxa_invites/{inviteId} { allow read, write: if false; }
     match /noxa_user_settings/{uid} { allow read, write: if false; }
 
