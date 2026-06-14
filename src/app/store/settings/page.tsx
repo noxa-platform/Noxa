@@ -5,7 +5,7 @@ import Link from 'next/link';
 import type { User } from 'firebase/auth';
 import { AuthGuard } from '@/components/AuthGuard';
 import { AccountShell } from '@/components/AccountShell';
-import { useShopConfig, DEFAULT_MODULES, DEFAULT_TERMS, DEFAULT_TRANSPORT_TYPES, type ModuleCfg, type RoleWage, type SalesAttribution, type ChoiceItem } from '@/lib/shopConfig';
+import { useShopConfig, DEFAULT_MODULES, DEFAULT_TERMS, DEFAULT_TRANSPORT_TYPES, DEFAULT_INVENTORY_CATEGORIES, type ModuleCfg, type RoleWage, type SalesAttribution, type ChoiceItem } from '@/lib/shopConfig';
 
 const TERM_KEYS: { key: string; label: string }[] = [
   { key: 'cast', label: 'スタッフの呼称' },
@@ -26,6 +26,7 @@ function SettingsClient({ user }: { user: User }) {
   const [setLen, setSetLen] = useState(60);
   const [rotLen, setRotLen] = useState(15);
   const [transportTypes, setTransportTypes] = useState<ChoiceItem[]>([]);
+  const [invCats, setInvCats] = useState<ChoiceItem[]>([]);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
 
@@ -38,6 +39,7 @@ function SettingsClient({ user }: { user: User }) {
     setSetLen(config.setTimeLength);
     setRotLen(config.rotationTimeLength);
     setTransportTypes(config.transportTypes?.length ? config.transportTypes : DEFAULT_TRANSPORT_TYPES);
+    setInvCats(config.inventoryCategories?.length ? config.inventoryCategories : DEFAULT_INVENTORY_CATEGORIES);
   }, [loading]); // eslint-disable-line react-hooks/exhaustive-deps
 
   if (loading) return <P>読み込み中…</P>;
@@ -52,7 +54,7 @@ function SettingsClient({ user }: { user: User }) {
   const onSave = async () => {
     setSaving(true); setSaved(false);
     try {
-      await save({ terminology: terms, roles: roles.filter((r) => r.name.trim()), modules, salesAttribution: attr, setTimeLength: Math.max(1, setLen), rotationTimeLength: Math.max(1, rotLen), transportTypes: transportTypes.filter((t) => t.label.trim()) });
+      await save({ terminology: terms, roles: roles.filter((r) => r.name.trim()), modules, salesAttribution: attr, setTimeLength: Math.max(1, setLen), rotationTimeLength: Math.max(1, rotLen), transportTypes: transportTypes.filter((t) => t.label.trim()), inventoryCategories: invCats.filter((t) => t.label.trim()) });
       setSaved(true); setTimeout(() => setSaved(false), 2000);
     } finally { setSaving(false); }
   };
@@ -107,6 +109,20 @@ function SettingsClient({ user }: { user: User }) {
           ))}
         </div>
         <p style={{ fontSize: 11, color: 'var(--noxa-text-faint)', margin: '8px 0 0' }}>名称は空欄で既定名。非表示にするとサイドメニューから消えます（データは保持）。</p>
+      </Section>
+
+      {/* 在庫カテゴリ */}
+      <Section title="在庫カテゴリ（在庫品目の区分）">
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          {invCats.map((t, i) => (
+            <div key={t.id} style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+              <input value={t.label} onChange={(e) => setInvCats((p) => p.map((x, j) => j === i ? { ...x, label: e.target.value } : x))} placeholder="カテゴリ名（例: ボトル）" className="noxa-input" style={{ flex: 1 }} />
+              <button type="button" onClick={() => setInvCats((p) => p.filter((_, j) => j !== i))} style={mini}>×</button>
+            </div>
+          ))}
+          <button type="button" onClick={() => setInvCats((p) => [...p, { id: `custom_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`, label: '' }])} style={{ ...mini, alignSelf: 'flex-start' }}>＋ カテゴリを追加</button>
+        </div>
+        <p style={{ fontSize: 11, color: 'var(--noxa-text-faint)', margin: '8px 0 0' }}>在庫画面の区分タブ・品目登録の選択肢になります。削除しても登録済み品目は残ります。</p>
       </Section>
 
       {/* 送迎タイプ */}

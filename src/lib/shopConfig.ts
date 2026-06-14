@@ -28,7 +28,8 @@ export type ShopConfig = {
   salesAttribution: SalesAttribution;
   setTimeLength: number;       // 席回し: 1セット長（分）既定
   rotationTimeLength: number;  // 席回し: 卓内ローテ間隔（分）既定
-  transportTypes: ChoiceItem[]; // 送迎タイプ（店舗で追加・改名可）
+  transportTypes: ChoiceItem[];      // 送迎タイプ（店舗で追加・改名可）
+  inventoryCategories: ChoiceItem[]; // 在庫カテゴリ（店舗で追加・改名可）
 };
 
 /** モジュール既定（key は route の slug。NAV_STORE と一致させる） */
@@ -80,6 +81,13 @@ export const DEFAULT_TRANSPORT_TYPES: ChoiceItem[] = [
   { id: 'after_work', label: '退勤', color: 'var(--noxa-status-info)' },
 ];
 
+/** 在庫カテゴリ既定（従来ハードコードの3種。id は保存値なので変更しないこと） */
+export const DEFAULT_INVENTORY_CATEGORIES: ChoiceItem[] = [
+  { id: 'bottle', label: 'ボトル' },
+  { id: 'food', label: '食材' },
+  { id: 'supply', label: '消耗品' },
+];
+
 export const DEFAULT_CONFIG: ShopConfig = {
   terminology: {},
   roles: DEFAULT_ROLES,
@@ -88,6 +96,7 @@ export const DEFAULT_CONFIG: ShopConfig = {
   setTimeLength: 60,
   rotationTimeLength: 15,
   transportTypes: DEFAULT_TRANSPORT_TYPES,
+  inventoryCategories: DEFAULT_INVENTORY_CATEGORIES,
 };
 
 /** 用語解決: 店舗上書き → 業種プリセット → 既定 → key */
@@ -146,6 +155,7 @@ export function useShopConfig(user: User): UseShopConfig {
         setTimeLength: typeof d.setTimeLength === 'number' && d.setTimeLength > 0 ? d.setTimeLength : 60,
         rotationTimeLength: typeof d.rotationTimeLength === 'number' && d.rotationTimeLength > 0 ? d.rotationTimeLength : 15,
         transportTypes: d.transportTypes?.length ? d.transportTypes : DEFAULT_TRANSPORT_TYPES,
+        inventoryCategories: d.inventoryCategories?.length ? d.inventoryCategories : DEFAULT_INVENTORY_CATEGORIES,
       });
       setLoaded(true);
     }, () => setLoaded(true));

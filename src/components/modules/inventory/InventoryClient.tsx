@@ -15,6 +15,7 @@ import {
 import type { User } from 'firebase/auth';
 import { db } from '@/lib/firebase/config';
 import { useShopId } from '@/lib/useShopId';
+import { useShopConfig, type ChoiceItem } from '@/lib/shopConfig';
 
 /**
  * ⑧ 在庫管理 — Noxa OS（実データ）
@@ -28,7 +29,7 @@ import { useShopId } from '@/lib/useShopId';
 // 型定義
 // ─────────────────────────────────────────────
 
-type ItemCategory = 'bottle' | 'food' | 'supply';
+type ItemCategory = string; // 店舗設定 inventoryCategories の id（既定: bottle/food/supply）
 type StockStatus = 'ok' | 'low' | 'out';
 
 type StockItem = {
@@ -51,20 +52,10 @@ type BottleKeep = {
   remainingPct: number | null; // 数値化できれば 0-100、できなければ null
 };
 
-const CATEGORY_TABS: { id: ItemCategory | 'all'; label: string }[] = [
-  { id: 'all', label: 'すべて' },
-  { id: 'bottle', label: 'ボトル' },
-  { id: 'food', label: '食材' },
-  { id: 'supply', label: '消耗品' },
-];
-
-const CATEGORY_LABEL: Record<ItemCategory, string> = {
-  bottle: 'ボトル',
-  food: '食材',
-  supply: '消耗品',
-};
-
-const CATEGORY_OPTIONS: ItemCategory[] = ['bottle', 'food', 'supply'];
+/** カテゴリ id → 表示名（店舗設定優先・未知idは id をそのまま） */
+function catLabelOf(cats: ChoiceItem[], id: string): string {
+  return cats.find((c) => c.id === id)?.label ?? id;
+}
 
 // ─────────────────────────────────────────────
 // ヘルパー
@@ -99,7 +90,7 @@ function toDateStr(v: unknown): string {
 }
 
 function mapItem(id: string, d: DocumentData): StockItem {
-  const category = (['bottle', 'food', 'supply'] as const).includes(d.category) ? (d.category as ItemCategory) : 'supply';
+  const category = typeof d.category === 'string' && d.category ? d.category : 'supply';
   return {
     id,
     name: (d.name as string) ?? '',
@@ -141,7 +132,10 @@ const today = () => new Date().toISOString().slice(0, 10);
 
 export function InventoryClient({ user }: { user: User }) {
   const shop = useShopId(user);
-  const [activeCategory, setActiveCategory] = useState<ItemCategory | 'all'>('all');
+  const { config } = useShopConfig(user);
+  const cats = config.inventoryCategories;
+  const categoryTabs = useMemo(() => [{ id: 'all', label: 'すべて' }, ...cats], [cats]);
+  const [activeCategory, setActiveCategory] = useState<string>('all');
   const [items, setItems] = useState<StockItem[]>([]);
   const [keeps, setKeeps] = useState<BottleKeep[]>([]);
   const [busy, setBusy] = useState(false);
@@ -494,7 +488,7 @@ export function InventoryClient({ user }: { user: User }) {
             <SectionTitle>在庫一覧</SectionTitle>
             <button
               type="button"
-              onClick={() => setEditor({ id: null, name: '', category: 'bottle', qty: '0', par: '0', unit: '' })}
+              onClick={() => setEditor({ id: null, name: '', category: cats[0]?.id ?? 'bottle', qty: '0', par: '0', unit: '' })}
               style={addBtnStyle}
             >
               ＋ 品目を追加
@@ -513,7 +507,7 @@ export function InventoryClient({ user }: { user: User }) {
               marginBottom: 16,
             }}
           >
-            {CATEGORY_TABS.map((c) => {
+            {categoryTabs.map((c) => {
               const active = c.id === activeCategory;
               return (
                 <button
@@ -634,7 +628,7 @@ export function InventoryClient({ user }: { user: User }) {
                               fontFamily: mono,
                             }}
                           >
-                            {CATEGORY_LABEL[item.category]}
+                            {catLabelOf(cats, item.category)}
                           </span>
                         </td>
                         <td
@@ -942,13 +936,13 @@ export function InventoryClient({ user }: { user: User }) {
 
             <label style={fieldLabel}>カテゴリ
               <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-                {CATEGORY_OPTIONS.map((c) => {
-                  const active = editor.category === c;
+                {cats.map((c) => {
+                  const active = editor.category === c.id;
                   return (
                     <button
-                      key={c}
+                      key={c.id}
                       type="button"
-                      onClick={() => setEditor({ ...editor, category: c })}
+                      onClick={() => setEditor({ ...editor, category: c.id })}
                       style={{
                         cursor: 'pointer',
                         minHeight: 34,
@@ -961,7 +955,7 @@ export function InventoryClient({ user }: { user: User }) {
                         border: `1px solid ${active ? 'var(--noxa-accent-primary)' : 'var(--noxa-border)'}`,
                       }}
                     >
-                      {CATEGORY_LABEL[c]}
+                      {c.label}
                     </button>
                   );
                 })}
