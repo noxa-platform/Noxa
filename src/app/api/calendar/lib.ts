@@ -1,6 +1,35 @@
 // Google OAuthトークンの取得・リフレッシュ
 // Firebase Admin SDKでセキュリティルールをバイパス
+import crypto from 'crypto';
 import { getAdminDb } from '../lib/firebase-admin';
+
+// ── OAuth state の署名（CSRF対策） ───────────────────────────
+// 旧実装は state=uid 平文で、攻撃者が任意 uid のトークン doc を上書きできた。
+// HMAC 署名付き state（uid＋失効＋nonce）にして偽造不可にする。開始は /api/calendar/start。
+const STATE_TTL_MS = 10 * 60 * 1000; // 10分
+function stateSecret(): string {
+  return process.env.CALENDAR_STATE_SECRET || process.env.GOOGLE_CLIENT_SECRET || '';
+}
+export function signState(uid: string): string {
+  const payload = Buffer.from(JSON.stringify({ uid, exp: Date.now() + STATE_TTL_MS, n: crypto.randomBytes(8).toString('hex') })).toString('base64url');
+  const sig = crypto.createHmac('sha256', stateSecret()).update(payload).digest('base64url');
+  return `${payload}.${sig}`;
+}
+/** 署名 state を検証して uid を返す（不正/失効は null） */
+export function verifyState(state: string): string | null {
+  const i = state.lastIndexOf('.');
+  if (i <= 0) return null;
+  const payload = state.slice(0, i);
+  const sig = state.slice(i + 1);
+  const expSig = crypto.createHmac('sha256', stateSecret()).update(payload).digest('base64url');
+  const a = Buffer.from(sig); const b = Buffer.from(expSig);
+  if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) return null;
+  try {
+    const p = JSON.parse(Buffer.from(payload, 'base64url').toString('utf-8')) as { uid?: unknown; exp?: unknown };
+    if (typeof p.uid !== 'string' || typeof p.exp !== 'number' || p.exp < Date.now()) return null;
+    return p.uid;
+  } catch { return null; }
+}
 
 interface TokenDoc {
   accessToken: string;
