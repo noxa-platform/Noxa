@@ -15,6 +15,7 @@ import {
 import type { User } from 'firebase/auth';
 import { db } from '@/lib/firebase/config';
 import { useShopId } from '@/lib/useShopId';
+import { useShopConfig, type ChoiceItem } from '@/lib/shopConfig';
 
 /**
  * ⑦ 送迎 — 配車ボード + 送迎リクエスト一覧 + 地図プレースホルダ（実データ）
@@ -38,8 +39,16 @@ type Vehicle = {
   note?: string;
 };
 
-type RequestType = 'companion_pickup' | 'after_work';
+type RequestType = string; // 店舗設定 transportTypes の id（既定: companion_pickup / after_work）
 type RequestStatus = 'waiting' | 'assigned' | 'in_progress' | 'done';
+
+const TYPE_FALLBACK_COLOR = 'var(--noxa-accent-primary-ink)';
+/** id → 表示メタ（店舗設定優先・未知idは id をそのまま表示） */
+function typeMetaOf(types: ChoiceItem[], id: string): { label: string; color: string } {
+  const f = types.find((t) => t.id === id);
+  if (f) return { label: f.label, color: f.color ?? TYPE_FALLBACK_COLOR };
+  return { label: id || '—', color: 'var(--noxa-text-muted)' };
+}
 
 type TransportRequest = {
   id: string;
@@ -66,11 +75,6 @@ const VEHICLE_STATUS_META: Record<VehicleStatus, { label: string; color: string 
   returning:  { label: '戻り中',   color: 'var(--noxa-status-warning)' },
 };
 const VEHICLE_STATUS_ORDER: VehicleStatus[] = ['standby', 'on_trip', 'returning'];
-
-const REQUEST_TYPE_META: Record<RequestType, { label: string; color: string }> = {
-  companion_pickup: { label: '同伴PU', color: 'var(--noxa-accent-primary-ink)' },
-  after_work:       { label: '退勤',   color: 'var(--noxa-status-info)' },
-};
 
 const REQUEST_STATUS_META: Record<RequestStatus, { label: string; color: string; bg: string }> = {
   waiting:     { label: '待機',     color: 'var(--noxa-text-muted)',          bg: 'rgba(255,255,255,0.05)' },
@@ -105,7 +109,7 @@ function toMs(v: unknown): number {
   if (typeof v === 'number') return v;
   return 0;
 }
-function isReqType(v: unknown): v is RequestType { return v === 'companion_pickup' || v === 'after_work'; }
+function isReqType(v: unknown): v is RequestType { return typeof v === 'string' && v.length > 0; }
 function isReqStatus(v: unknown): v is RequestStatus { return v === 'waiting' || v === 'assigned' || v === 'in_progress' || v === 'done'; }
 function isVehStatus(v: unknown): v is VehicleStatus { return v === 'standby' || v === 'on_trip' || v === 'returning'; }
 
@@ -149,6 +153,8 @@ function chip(active: boolean): React.CSSProperties {
 
 export function TransportClient({ user }: { user: User }) {
   const shop = useShopId(user);
+  const { config } = useShopConfig(user);
+  const reqTypes = config.transportTypes;
   const [vehicles, setVehicles] = useState<Vehicle[]>([]);
   const [requests, setRequests] = useState<TransportRequest[]>([]);
   const [selectedRequestId, setSelectedRequestId] = useState<string | null>(null);
@@ -566,7 +572,7 @@ export function TransportClient({ user }: { user: User }) {
             <PaneTitle>送迎リクエスト</PaneTitle>
 
             {/* リクエスト追加フォーム */}
-            <RequestForm onAdd={addRequest} busy={busy} />
+            <RequestForm onAdd={addRequest} busy={busy} types={reqTypes} />
 
             <div
               style={{
@@ -610,7 +616,7 @@ export function TransportClient({ user }: { user: User }) {
               ) : (
               <ul style={{ listStyle: 'none', margin: 0, padding: 0 }} role="list" aria-label="送迎リクエスト">
                 {requests.map((req, idx) => {
-                  const typeMeta = REQUEST_TYPE_META[req.type];
+                  const typeMeta = typeMetaOf(reqTypes, req.type);
                   const statusMeta = REQUEST_STATUS_META[req.status];
                   const isSelected = req.id === selectedRequestId;
                   const next = NEXT_STATUS[req.status];
@@ -954,7 +960,7 @@ export function TransportClient({ user }: { user: User }) {
             {/* 選択リクエストの詳細カード */}
             {selectedRequest && (() => {
               const req = selectedRequest;
-              const typeMeta = REQUEST_TYPE_META[req.type];
+              const typeMeta = typeMetaOf(reqTypes, req.type);
               const statusMeta = REQUEST_STATUS_META[req.status];
               return (
                 <div
@@ -1092,16 +1098,19 @@ function VehicleForm({ onAdd, busy }: { onAdd: (v: { name: string; driver: strin
 // ─────────────────────────────────────────────
 // リクエスト追加フォーム
 // ─────────────────────────────────────────────
-function RequestForm({ onAdd, busy }: { onAdd: (v: { time: string; type: RequestType; target: string; area: string; memo: string }) => void; busy: boolean }) {
+function RequestForm({ onAdd, busy, types }: { onAdd: (v: { time: string; type: RequestType; target: string; area: string; memo: string }) => void; busy: boolean; types: ChoiceItem[] }) {
+  const defaultType = types[0]?.id ?? 'companion_pickup';
   const [time, setTime] = useState('');
-  const [type, setType] = useState<RequestType>('companion_pickup');
+  const [type, setType] = useState<RequestType>(defaultType);
   const [target, setTarget] = useState('');
   const [area, setArea] = useState('');
   const [memo, setMemo] = useState('');
+  // 設定変更で現在の選択が消えたら先頭へ寄せる
+  useEffect(() => { if (!types.some((t) => t.id === type)) setType(defaultType); }, [types, type, defaultType]);
   const submit = () => {
     if (!target.trim() || busy) return;
     onAdd({ time, type, target, area, memo });
-    setTime(''); setTarget(''); setArea(''); setMemo(''); setType('companion_pickup');
+    setTime(''); setTarget(''); setArea(''); setMemo(''); setType(defaultType);
   };
   return (
     <div style={{ background: 'var(--noxa-surface-card)', border: '1px solid var(--noxa-border)', borderRadius: 14, padding: 14, display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'flex-end', marginBottom: 14 }}>
@@ -1112,8 +1121,8 @@ function RequestForm({ onAdd, busy }: { onAdd: (v: { time: string; type: Request
       <label style={{ display: 'flex', flexDirection: 'column', gap: 4, flex: '0 1 auto' }}>
         <span style={lbl}>種別</span>
         <div style={{ display: 'flex', gap: 4 }}>
-          {(Object.keys(REQUEST_TYPE_META) as RequestType[]).map((t) => (
-            <button key={t} type="button" onClick={() => setType(t)} style={chip(type === t)}>{REQUEST_TYPE_META[t].label}</button>
+          {types.map((t) => (
+            <button key={t.id} type="button" onClick={() => setType(t.id)} style={chip(type === t.id)}>{t.label}</button>
           ))}
         </div>
       </label>

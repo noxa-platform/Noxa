@@ -18,6 +18,8 @@ import { useShopId } from '@/lib/useShopId';
 export type ModuleCfg = { key: string; enabled: boolean; label?: string };
 export type RoleWage = { name: string; wage: number };
 export type SalesAttribution = 'mainCast' | 'operator';
+/** 店舗が編集できる選択肢（id は保存値・既存データ互換のため不変、label は表示名） */
+export type ChoiceItem = { id: string; label: string; color?: string };
 
 export type ShopConfig = {
   terminology: Record<string, string>;
@@ -26,6 +28,7 @@ export type ShopConfig = {
   salesAttribution: SalesAttribution;
   setTimeLength: number;       // 席回し: 1セット長（分）既定
   rotationTimeLength: number;  // 席回し: 卓内ローテ間隔（分）既定
+  transportTypes: ChoiceItem[]; // 送迎タイプ（店舗で追加・改名可）
 };
 
 /** モジュール既定（key は route の slug。NAV_STORE と一致させる） */
@@ -71,6 +74,12 @@ export const INDUSTRY_TERMS: Record<string, Record<string, string>> = {
   スナック: { cast: 'ママ・キャスト', table: '席' },
 };
 
+/** 送迎タイプ既定（従来ハードコードの2種。id は保存値なので変更しないこと） */
+export const DEFAULT_TRANSPORT_TYPES: ChoiceItem[] = [
+  { id: 'companion_pickup', label: '同伴PU', color: 'var(--noxa-accent-primary-ink)' },
+  { id: 'after_work', label: '退勤', color: 'var(--noxa-status-info)' },
+];
+
 export const DEFAULT_CONFIG: ShopConfig = {
   terminology: {},
   roles: DEFAULT_ROLES,
@@ -78,6 +87,7 @@ export const DEFAULT_CONFIG: ShopConfig = {
   salesAttribution: 'mainCast',
   setTimeLength: 60,
   rotationTimeLength: 15,
+  transportTypes: DEFAULT_TRANSPORT_TYPES,
 };
 
 /** 用語解決: 店舗上書き → 業種プリセット → 既定 → key */
@@ -135,6 +145,7 @@ export function useShopConfig(user: User): UseShopConfig {
         salesAttribution: d.salesAttribution ?? 'mainCast',
         setTimeLength: typeof d.setTimeLength === 'number' && d.setTimeLength > 0 ? d.setTimeLength : 60,
         rotationTimeLength: typeof d.rotationTimeLength === 'number' && d.rotationTimeLength > 0 ? d.rotationTimeLength : 15,
+        transportTypes: d.transportTypes?.length ? d.transportTypes : DEFAULT_TRANSPORT_TYPES,
       });
       setLoaded(true);
     }, () => setLoaded(true));

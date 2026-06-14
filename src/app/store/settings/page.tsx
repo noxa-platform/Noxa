@@ -5,7 +5,7 @@ import Link from 'next/link';
 import type { User } from 'firebase/auth';
 import { AuthGuard } from '@/components/AuthGuard';
 import { AccountShell } from '@/components/AccountShell';
-import { useShopConfig, DEFAULT_MODULES, DEFAULT_TERMS, type ModuleCfg, type RoleWage, type SalesAttribution } from '@/lib/shopConfig';
+import { useShopConfig, DEFAULT_MODULES, DEFAULT_TERMS, DEFAULT_TRANSPORT_TYPES, type ModuleCfg, type RoleWage, type SalesAttribution, type ChoiceItem } from '@/lib/shopConfig';
 
 const TERM_KEYS: { key: string; label: string }[] = [
   { key: 'cast', label: 'スタッフの呼称' },
@@ -25,6 +25,7 @@ function SettingsClient({ user }: { user: User }) {
   const [attr, setAttr] = useState<SalesAttribution>('mainCast');
   const [setLen, setSetLen] = useState(60);
   const [rotLen, setRotLen] = useState(15);
+  const [transportTypes, setTransportTypes] = useState<ChoiceItem[]>([]);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
 
@@ -36,6 +37,7 @@ function SettingsClient({ user }: { user: User }) {
     setAttr(config.salesAttribution);
     setSetLen(config.setTimeLength);
     setRotLen(config.rotationTimeLength);
+    setTransportTypes(config.transportTypes?.length ? config.transportTypes : DEFAULT_TRANSPORT_TYPES);
   }, [loading]); // eslint-disable-line react-hooks/exhaustive-deps
 
   if (loading) return <P>読み込み中…</P>;
@@ -50,7 +52,7 @@ function SettingsClient({ user }: { user: User }) {
   const onSave = async () => {
     setSaving(true); setSaved(false);
     try {
-      await save({ terminology: terms, roles: roles.filter((r) => r.name.trim()), modules, salesAttribution: attr, setTimeLength: Math.max(1, setLen), rotationTimeLength: Math.max(1, rotLen) });
+      await save({ terminology: terms, roles: roles.filter((r) => r.name.trim()), modules, salesAttribution: attr, setTimeLength: Math.max(1, setLen), rotationTimeLength: Math.max(1, rotLen), transportTypes: transportTypes.filter((t) => t.label.trim()) });
       setSaved(true); setTimeout(() => setSaved(false), 2000);
     } finally { setSaving(false); }
   };
@@ -105,6 +107,20 @@ function SettingsClient({ user }: { user: User }) {
           ))}
         </div>
         <p style={{ fontSize: 11, color: 'var(--noxa-text-faint)', margin: '8px 0 0' }}>名称は空欄で既定名。非表示にするとサイドメニューから消えます（データは保持）。</p>
+      </Section>
+
+      {/* 送迎タイプ */}
+      <Section title="送迎タイプ（送迎リクエストの種別）">
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          {transportTypes.map((t, i) => (
+            <div key={t.id} style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+              <input value={t.label} onChange={(e) => setTransportTypes((p) => p.map((x, j) => j === i ? { ...x, label: e.target.value } : x))} placeholder="種別名（例: 同伴PU）" className="noxa-input" style={{ flex: 1 }} />
+              <button type="button" onClick={() => setTransportTypes((p) => p.filter((_, j) => j !== i))} style={mini}>×</button>
+            </div>
+          ))}
+          <button type="button" onClick={() => setTransportTypes((p) => [...p, { id: `custom_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`, label: '' }])} style={{ ...mini, alignSelf: 'flex-start' }}>＋ 送迎タイプを追加</button>
+        </div>
+        <p style={{ fontSize: 11, color: 'var(--noxa-text-faint)', margin: '8px 0 0' }}>送迎画面のリクエスト種別の選択肢になります。削除しても過去の記録は残ります。</p>
       </Section>
 
       {/* 売上の付け方 */}
