@@ -1,14 +1,9 @@
 // 自分の紹介コードを取得する API。未発行なら発行する（冪等）。
 //
-// Firestore 構造:
-//   crm_referral_codes/{code} {
-//     ownerUid: string,
-//     createdAt: ServerTimestamp,
-//     usedCount: number,  // 何人がこのコードで登録したか
-//   }
-//   crm_referral_owners/{uid} {
-//     code: string,
-//   }   ← 逆引き用（uid → code）
+// Firestore 構造（v2: reward_referral_*。rules / 退会・統合処理と整合）:
+//   reward_referral_codes/{code} { ownerUid, createdAt, usedCount }
+//   reward_referral_owners/{uid} { code }   ← 逆引き（uid → code）
+// 旧 crm_referral_* に既存コードがある場合は読み取りのみフォールバックして救済する。
 //
 // 発行アルゴリズム: 8 文字英数字。衝突時は最大 5 回リトライ。
 import { NextRequest, NextResponse } from 'next/server';
@@ -29,29 +24,35 @@ export async function GET(request: NextRequest) {
   try {
     const uid = await verifyRequest(request);
     const db = getAdminDb();
-    const ownerRef = db.doc(`crm_referral_owners/${uid}`);
+    const ownerRef = db.doc(`reward_referral_owners/${uid}`);
 
-    const ownerSnap = await ownerRef.get();
+    // 既発行: v2 → なければ旧 crm_ を読みフォールバック（既存コードを救済）
+    let ownerSnap = await ownerRef.get();
+    let legacy = false;
+    if (!(ownerSnap.exists && ownerSnap.data()?.code)) {
+      const legacySnap = await db.doc(`crm_referral_owners/${uid}`).get();
+      if (legacySnap.exists && legacySnap.data()?.code) { ownerSnap = legacySnap; legacy = true; }
+    }
     if (ownerSnap.exists && ownerSnap.data()?.code) {
       const code = ownerSnap.data()!.code as string;
-      const codeSnap = await db.doc(`crm_referral_codes/${code}`).get();
+      const codeSnap = await db.doc(`${legacy ? 'crm' : 'reward'}_referral_codes/${code}`).get();
       return NextResponse.json({
         code,
         usedCount: codeSnap.exists ? (codeSnap.data()?.usedCount ?? 0) : 0,
       });
     }
 
-    // 未発行: 衝突しないコードを試行
+    // 未発行: 衝突しないコードを試行（v2 を確認）
     let code = generateCode();
     for (let i = 0; i < 5; i++) {
-      const existing = await db.doc(`crm_referral_codes/${code}`).get();
+      const existing = await db.doc(`reward_referral_codes/${code}`).get();
       if (!existing.exists) break;
       code = generateCode();
     }
 
     // 衝突しない確証が取れたら作成（race condition は usedCount=0 で merge:false の create で防ぐ）
     await db.runTransaction(async (tx) => {
-      const codeRef = db.doc(`crm_referral_codes/${code}`);
+      const codeRef = db.doc(`reward_referral_codes/${code}`);
       const codeSnap = await tx.get(codeRef);
       if (codeSnap.exists) {
         // 万一の衝突。次回の GET で再試行されるよう例外を投げる

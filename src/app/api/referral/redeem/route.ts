@@ -6,7 +6,7 @@
 //   - 自分自身のコードは 400
 //   - 検証成功時:
 //     - account_subscriptions/{被招待者uid}.referredBy = 招待者uid を書き込み（記録）
-//     - crm_referral_codes/{code}.usedCount += 1
+//     - reward_referral_codes/{code}.usedCount += 1（旧 crm_ コードは読みフォールバックで救済）
 //     - 被招待者に accept_referral ミッション付与（+20cr）
 //     - 招待者に invite_first_friend ミッション付与（+50cr、初回のみ）
 //
@@ -32,8 +32,14 @@ export async function POST(request: NextRequest) {
     }
 
     const db = getAdminDb();
-    const codeRef = db.doc(`crm_referral_codes/${rawCode}`);
-    const codeSnap = await codeRef.get();
+    // v2(reward_) を優先し、無ければ旧 crm_ を読みフォールバック（既存コードを救済）
+    let codeRef = db.doc(`reward_referral_codes/${rawCode}`);
+    let codeSnap = await codeRef.get();
+    if (!codeSnap.exists) {
+      const legacyRef = db.doc(`crm_referral_codes/${rawCode}`);
+      const legacySnap = await legacyRef.get();
+      if (legacySnap.exists) { codeRef = legacyRef; codeSnap = legacySnap; }
+    }
     if (!codeSnap.exists) {
       return NextResponse.json({ error: '無効なコードです' }, { status: 404 });
     }
