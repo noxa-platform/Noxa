@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { useEffect, useMemo, useState } from 'react';
-import { addDoc, collection, deleteDoc, doc, getDocs, serverTimestamp, type DocumentData } from 'firebase/firestore';
+import { addDoc, collection, deleteDoc, doc, getDoc, getDocs, setDoc, serverTimestamp, type DocumentData } from 'firebase/firestore';
 import type { User } from 'firebase/auth';
 import { db } from '@/lib/firebase/config';
 
@@ -11,6 +11,7 @@ import { db } from '@/lib/firebase/config';
  * personal_reminders/{uid}/items に出勤/イベント/MTG 等を保存（本人のみ）。
  */
 const mono = 'var(--noxa-font-mono)';
+// 既定の種別（個人で追加・削除可。保存先 personal_self_styles/{uid}.scheduleKinds）
 const KINDS = ['出勤', 'イベント', 'MTG', 'アフター', 'その他'];
 const KIND_COLOR: Record<string, string> = { 出勤: 'var(--noxa-accent-primary)', イベント: 'var(--noxa-accent-primary-ink)', MTG: '#67E8F9', アフター: '#F5D472', その他: 'var(--noxa-text-faint)' };
 
@@ -26,6 +27,9 @@ export function ScheduleClient({ user }: { user: User }) {
   const [title, setTitle] = useState('');
   const [date, setDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [kind, setKind] = useState(KINDS[0]);
+  const [kinds, setKinds] = useState<string[]>(KINDS);
+  const [editKinds, setEditKinds] = useState(false);
+  const [newKind, setNewKind] = useState('');
   const [busy, setBusy] = useState(false);
 
   const reload = async () => {
@@ -38,6 +42,24 @@ export function ScheduleClient({ user }: { user: User }) {
   };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => { reload(); }, [user.uid]);
+
+  // 個人のカスタム種別を読み込み（無ければ既定）
+  useEffect(() => {
+    (async () => {
+      try {
+        const s = await getDoc(doc(db, `personal_self_styles/${user.uid}`));
+        const k = s.exists() ? (s.data()?.scheduleKinds as unknown) : null;
+        if (Array.isArray(k) && k.length) { const list = k.filter((x): x is string => typeof x === 'string' && !!x); if (list.length) { setKinds(list); setKind(list[0]); } }
+      } catch { /* 既定のまま */ }
+    })();
+  }, [user.uid]);
+
+  // 種別の保存（本人のみ・既存予定の kind 文字列はそのまま残る）
+  const saveKinds = async (next: string[]) => {
+    setKinds(next);
+    if (!next.includes(kind)) setKind(next[0] ?? '');
+    try { await setDoc(doc(db, `personal_self_styles/${user.uid}`), { scheduleKinds: next, updatedAt: serverTimestamp() }, { merge: true }); } catch { /* skip */ }
+  };
 
   const sorted = useMemo(() => [...items].sort((a, b) => a.date.localeCompare(b.date)), [items]);
   const today = new Date().toISOString().slice(0, 10);
@@ -66,8 +88,20 @@ export function ScheduleClient({ user }: { user: User }) {
           <input type="date" value={date} onChange={(e) => setDate(e.target.value)} style={{ ...field, fontFamily: mono }} />
         </label>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-          <span style={lbl}>種別</span>
-          <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>{KINDS.map((k) => <button key={k} type="button" onClick={() => setKind(k)} style={chip(kind === k)}>{k}</button>)}</div>
+          <span style={lbl}>種別 <button type="button" onClick={() => setEditKinds((v) => !v)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--noxa-accent-primary-ink)', fontSize: 10, fontFamily: mono }}>{editKinds ? '完了' : '編集'}</button></span>
+          <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+            {kinds.map((k) => editKinds ? (
+              <span key={k} style={{ ...chip(false), display: 'inline-flex', alignItems: 'center', gap: 6 }}>{k}<button type="button" onClick={() => saveKinds(kinds.filter((x) => x !== k))} title="削除" style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--noxa-text-faint)', fontSize: 13, padding: 0 }}>×</button></span>
+            ) : (
+              <button key={k} type="button" onClick={() => setKind(k)} style={chip(kind === k)}>{k}</button>
+            ))}
+          </div>
+          {editKinds && (
+            <div style={{ display: 'flex', gap: 6, marginTop: 4 }}>
+              <input value={newKind} onChange={(e) => setNewKind(e.target.value)} placeholder="種別を追加" style={{ ...field, minHeight: 34, fontSize: 13, width: 140 }} />
+              <button type="button" onClick={() => { const n = newKind.trim(); if (n && !kinds.includes(n)) { saveKinds([...kinds, n]); setNewKind(''); } }} style={chip(true)}>追加</button>
+            </div>
+          )}
         </div>
         <button type="button" onClick={add} disabled={busy || !title.trim()} style={{ ...chip(true), minHeight: 40, padding: '0 18px', opacity: busy || !title.trim() ? 0.6 : 1 }}>追加</button>
       </div>
