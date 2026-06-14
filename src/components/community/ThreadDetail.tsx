@@ -14,7 +14,8 @@ const { mono, jp: fontJp } = FONT;
 type LikeTarget = { kind: 'thread'; threadId: string } | { kind: 'reply'; threadId: string; replyId: string };
 
 export function ThreadDetail({
-  thread, board, likedIds, likeKey, onToggleLike, onReport, onReply, onBack,
+  thread, board, likedIds, likeKey, onToggleLike, onReport, onReply,
+  onEditThread, onDeleteThread, onEditReply, onDeleteReply, onBack,
 }: {
   thread: Thread;
   board: Board | null;
@@ -23,6 +24,10 @@ export function ThreadDetail({
   onToggleLike: (t: LikeTarget) => void;
   onReport: (t: LikeTarget) => void;
   onReply: (body: string, area?: AreaTag, job?: JobTag) => void;
+  onEditThread: (body: string) => void;
+  onDeleteThread: () => void;
+  onEditReply: (replyId: string, body: string) => void;
+  onDeleteReply: (replyId: string) => void;
   onBack: () => void;
 }) {
   return (
@@ -50,6 +55,8 @@ export function ThreadDetail({
         official={thread.official}
         onLike={() => onToggleLike({ kind: 'thread', threadId: thread.id })}
         onReport={() => onReport({ kind: 'thread', threadId: thread.id })}
+        onEdit={(body) => onEditThread(body)}
+        onDelete={onDeleteThread}
         isOp
       />
 
@@ -73,6 +80,8 @@ export function ThreadDetail({
               official={r.official}
               onLike={() => onToggleLike(target)}
               onReport={() => onReport(target)}
+              onEdit={(body) => onEditReply(r.id, body)}
+              onDelete={() => onDeleteReply(r.id)}
             />
           );
         })}

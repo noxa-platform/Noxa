@@ -17,8 +17,8 @@
  */
 
 import {
-  addDoc, collection, doc, getDoc, getDocs,
-  increment, limit, orderBy, query, runTransaction, serverTimestamp,
+  addDoc, collection, deleteDoc, doc, getDoc, getDocs,
+  increment, limit, orderBy, query, runTransaction, serverTimestamp, updateDoc,
   Timestamp, where,
   type DocumentData, type QueryDocumentSnapshot,
 } from 'firebase/firestore';
@@ -26,7 +26,8 @@ import { db } from '@/lib/firebase/config';
 import { anonId, dayKeyFromMillis } from './anon-id';
 import type { Board, Reply, Thread, ThreadFilter } from './types';
 import type {
-  AddReplyInput, CommunityRepository, CreateThreadInput, LikeTarget, ReportTarget,
+  AddReplyInput, CommunityRepository, CreateThreadInput, EditReplyInput, EditThreadInput,
+  LikeTarget, ReportTarget,
 } from './repository';
 
 const C = {
@@ -190,6 +191,43 @@ export class FirestoreCommunityRepository implements CommunityRepository {
     });
     const updated = await this.getThread(threadId);
     if (!updated) throw new Error('addReply: 取得に失敗');
+    return updated;
+  }
+
+  async editThread(threadId: string, input: EditThreadInput): Promise<Thread> {
+    // 本人のみ（rules でも authorUid==uid を強制）。本文は 1000 字以内。
+    const patch: Record<string, unknown> = { body: input.body, editedAt: serverTimestamp() };
+    if (input.title !== undefined) patch.title = input.title;
+    await updateDoc(doc(db, C.posts, threadId), patch);
+    const updated = await this.getThread(threadId);
+    if (!updated) throw new Error('editThread: 取得に失敗');
+    return updated;
+  }
+
+  async editReply(threadId: string, replyId: string, input: EditReplyInput): Promise<Thread> {
+    await updateDoc(doc(db, C.comments, replyId), { body: input.body, editedAt: serverTimestamp() });
+    const updated = await this.getThread(threadId);
+    if (!updated) throw new Error('editReply: 取得に失敗');
+    return updated;
+  }
+
+  async deleteThread(threadId: string): Promise<void> {
+    // post 本体のみ削除（レスは rules 上「他人の comment」を消せないため残るが、
+    // post が無いとスレッド一覧・詳細から辿れず実質非表示になる）。
+    await deleteDoc(doc(db, C.posts, threadId));
+  }
+
+  async deleteReply(threadId: string, replyId: string): Promise<Thread> {
+    const postRef = doc(db, C.posts, threadId);
+    const commentRef = doc(db, C.comments, replyId);
+    await runTransaction(db, async (tx) => {
+      const commentSnap = await tx.get(commentRef);
+      if (!commentSnap.exists()) return;
+      tx.delete(commentRef);
+      tx.update(postRef, { commentCount: increment(-1) });
+    });
+    const updated = await this.getThread(threadId);
+    if (!updated) throw new Error('deleteReply: 取得に失敗');
     return updated;
   }
 

@@ -22,6 +22,15 @@ export interface AddReplyInput {
   jobTag?: JobTag;
 }
 
+export interface EditThreadInput {
+  title?: string;
+  body: string;
+}
+
+export interface EditReplyInput {
+  body: string;
+}
+
 export type LikeTarget =
   | { kind: 'thread'; threadId: string }
   | { kind: 'reply'; threadId: string; replyId: string };
@@ -35,6 +44,14 @@ export interface CommunityRepository {
   createThread(input: CreateThreadInput): Promise<Thread>;
   /** レス追加。更新後のスレッドを返す。 */
   addReply(threadId: string, input: AddReplyInput): Promise<Thread>;
+  /** スレッド(>>1)の本文編集。本人のみ。更新後のスレッドを返す。 */
+  editThread(threadId: string, input: EditThreadInput): Promise<Thread>;
+  /** レスの本文編集。本人のみ。更新後のスレッドを返す。 */
+  editReply(threadId: string, replyId: string, input: EditReplyInput): Promise<Thread>;
+  /** スレッド削除。本人のみ。 */
+  deleteThread(threadId: string): Promise<void>;
+  /** レス削除。本人のみ。更新後のスレッドを返す。 */
+  deleteReply(threadId: string, replyId: string): Promise<Thread>;
   /** いいねトグル。liked は「押す前の状態」。更新後のスレッドを返す。 */
   toggleLike(target: LikeTarget, liked: boolean): Promise<Thread>;
   report(target: ReportTarget): Promise<void>;

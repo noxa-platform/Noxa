@@ -98,6 +98,10 @@ export function CommunityClient({ uid }: { uid?: string } = {}) {
             onToggleLike={c.toggleLike}
             onReport={c.report}
             onReply={(body, area, job) => { if (c.thread) c.addReply(c.thread.id, { body, areaTag: area, jobTag: job }); }}
+            onEditThread={(body) => { if (c.thread) c.editThread(c.thread.id, body); }}
+            onDeleteThread={() => { if (c.thread) c.deleteThread(c.thread.id); }}
+            onEditReply={(replyId, body) => { if (c.thread) c.editReply(c.thread.id, replyId, body); }}
+            onDeleteReply={(replyId) => { if (c.thread) c.deleteReply(c.thread.id, replyId); }}
             onBack={c.backToThreads}
           />
         )}

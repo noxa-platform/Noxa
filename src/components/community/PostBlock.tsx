@@ -13,7 +13,7 @@ const { mono, jp: fontJp } = FONT;
 
 export function PostBlock({
   resNo, anonId, postedAt, body, areaTag, jobTag, likeCount, liked,
-  isThreadAuthor, isMine, official, onLike, onReport, isOp,
+  isThreadAuthor, isMine, official, onLike, onReport, onEdit, onDelete, isOp,
 }: {
   resNo: number;
   anonId: string;
@@ -28,9 +28,29 @@ export function PostBlock({
   official?: boolean;
   onLike: () => void;
   onReport: () => void;
+  onEdit?: (body: string) => void | Promise<void>;
+  onDelete?: () => void | Promise<void>;
   isOp?: boolean;
 }) {
   const [reported, setReported] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(body);
+  const [busy, setBusy] = useState(false);
+  // 本人の投稿のみ編集・削除可（運営投稿は対象外）
+  const canManage = !!isMine && !official && (!!onEdit || !!onDelete);
+
+  const saveEdit = async () => {
+    const next = draft.trim();
+    if (!onEdit || busy || next.length === 0 || next.length > 1000 || next === body) { setEditing(false); return; }
+    setBusy(true);
+    try { await onEdit(next); setEditing(false); } finally { setBusy(false); }
+  };
+  const doDelete = async () => {
+    if (!onDelete || busy) return;
+    if (!window.confirm(isOp ? 'このスレッドを削除しますか？（元に戻せません）' : 'このレスを削除しますか？（元に戻せません）')) return;
+    setBusy(true);
+    try { await onDelete(); } finally { setBusy(false); }
+  };
 
   return (
     <article style={{ background: 'var(--noxa-surface-card)', border: isOp ? '1px solid var(--noxa-accent-primary)' : '1px solid var(--noxa-border)', borderRadius: 12, padding: 14 }}>
@@ -59,9 +79,27 @@ export function PostBlock({
         <span style={{ fontFamily: mono, fontSize: 10.5, color: 'var(--noxa-text-faint)' }}>{postedAt}</span>
       </div>
 
-      <p style={{ fontFamily: fontJp, fontSize: 14, lineHeight: 1.8, color: 'var(--noxa-text-primary)', margin: '0 0 10px', whiteSpace: 'pre-wrap' }}>{body}</p>
+      {editing ? (
+        <div style={{ marginBottom: 10 }}>
+          <textarea
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            rows={4}
+            maxLength={1000}
+            autoFocus
+            style={{ width: '100%', fontFamily: fontJp, fontSize: 14, lineHeight: 1.7, color: 'var(--noxa-text-primary)', background: 'var(--noxa-bg-base)', border: '1px solid var(--noxa-border-strong)', borderRadius: 10, padding: 10, resize: 'vertical', boxSizing: 'border-box' }}
+          />
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 6 }}>
+            <button type="button" disabled={busy} onClick={saveEdit} style={{ appearance: 'none', cursor: 'pointer', background: 'var(--noxa-accent-primary)', color: '#fff', border: 'none', borderRadius: 8, padding: '6px 14px', fontFamily: mono, fontSize: 12, minHeight: 34 }}>{busy ? '保存中…' : '保存'}</button>
+            <button type="button" disabled={busy} onClick={() => { setDraft(body); setEditing(false); }} style={{ appearance: 'none', cursor: 'pointer', background: 'transparent', color: 'var(--noxa-text-muted)', border: '1px solid var(--noxa-border)', borderRadius: 8, padding: '6px 14px', fontFamily: mono, fontSize: 12, minHeight: 34 }}>キャンセル</button>
+            <span style={{ fontFamily: mono, fontSize: 10.5, color: 'var(--noxa-text-faint)', marginLeft: 'auto' }}>{draft.length}/1000</span>
+          </div>
+        </div>
+      ) : (
+        <p style={{ fontFamily: fontJp, fontSize: 14, lineHeight: 1.8, color: 'var(--noxa-text-primary)', margin: '0 0 10px', whiteSpace: 'pre-wrap' }}>{body}</p>
+      )}
 
-      {(areaTag || jobTag) && <div style={{ marginBottom: 10 }}><TagChips areaTag={areaTag} jobTag={jobTag} /></div>}
+      {!editing && (areaTag || jobTag) && <div style={{ marginBottom: 10 }}><TagChips areaTag={areaTag} jobTag={jobTag} /></div>}
 
       <div style={{ display: 'flex', alignItems: 'center', gap: 14, borderTop: '1px solid var(--noxa-divider)', paddingTop: 8 }}>
         <button type="button" onClick={onLike} aria-pressed={liked} aria-label={`いいね ${likeCount}件`} style={{ appearance: 'none', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 6, minHeight: 36, background: 'transparent', border: 'none', color: liked ? 'var(--noxa-accent-primary-ink)' : 'var(--noxa-text-faint)' }}>
@@ -79,6 +117,18 @@ export function PostBlock({
           >
             {reported ? '通報を受け付けました' : '通報'}
           </button>
+        )}
+
+        {/* 本人の投稿は編集・削除可 */}
+        {canManage && !editing && (
+          <div style={{ display: 'inline-flex', alignItems: 'center', gap: 14, marginLeft: 'auto' }}>
+            {onEdit && (
+              <button type="button" onClick={() => { setDraft(body); setEditing(true); }} aria-label="編集する" style={{ appearance: 'none', cursor: 'pointer', background: 'transparent', border: 'none', color: 'var(--noxa-text-faint)', fontFamily: mono, fontSize: 11.5, minHeight: 36 }}>編集</button>
+            )}
+            {onDelete && (
+              <button type="button" onClick={doDelete} disabled={busy} aria-label="削除する" style={{ appearance: 'none', cursor: 'pointer', background: 'transparent', border: 'none', color: 'var(--noxa-status-error)', fontFamily: mono, fontSize: 11.5, minHeight: 36 }}>削除</button>
+            )}
+          </div>
         )}
       </div>
     </article>

@@ -55,6 +55,10 @@ export interface UseCommunity {
   // mutations
   createThread: (input: { title: string; body: string; areaTag?: AreaTag; jobTag?: JobTag }) => Promise<void>;
   addReply: (threadId: string, input: { body: string; areaTag?: AreaTag; jobTag?: JobTag }) => Promise<void>;
+  editThread: (threadId: string, body: string) => Promise<void>;
+  editReply: (threadId: string, replyId: string, body: string) => Promise<void>;
+  deleteThread: (threadId: string) => Promise<void>;
+  deleteReply: (threadId: string, replyId: string) => Promise<void>;
   toggleLike: (target: { kind: 'thread'; threadId: string } | { kind: 'reply'; threadId: string; replyId: string }) => Promise<void>;
   report: (target: { kind: 'thread'; threadId: string } | { kind: 'reply'; threadId: string; replyId: string }) => Promise<void>;
   likeKey: (target: { kind: 'thread'; threadId: string } | { kind: 'reply'; threadId: string; replyId: string }) => string;
@@ -145,6 +149,28 @@ export function useCommunity(uid?: string): UseCommunity {
     upsertThread(updated);
   }, [upsertThread]);
 
+  const editThread = useCallback(async (tid: string, body: string) => {
+    const updated = await repoRef.current.editThread(tid, { body });
+    upsertThread(updated);
+  }, [upsertThread]);
+
+  const editReply = useCallback(async (tid: string, replyId: string, body: string) => {
+    const updated = await repoRef.current.editReply(tid, replyId, { body });
+    upsertThread(updated);
+  }, [upsertThread]);
+
+  const deleteThread = useCallback(async (tid: string) => {
+    await repoRef.current.deleteThread(tid);
+    setThreads((cur) => cur.filter((t) => t.id !== tid));
+    setThreadId(null);
+    setView('threads');
+  }, []);
+
+  const deleteReply = useCallback(async (tid: string, replyId: string) => {
+    const updated = await repoRef.current.deleteReply(tid, replyId);
+    upsertThread(updated);
+  }, [upsertThread]);
+
   const likeKey = useCallback((target: { kind: 'thread'; threadId: string } | { kind: 'reply'; threadId: string; replyId: string }) => {
     return target.kind === 'thread' ? `t:${target.threadId}` : `r:${target.threadId}:${target.replyId}`;
   }, []);
@@ -170,6 +196,6 @@ export function useCommunity(uid?: string): UseCommunity {
     view, boards, board, threads, thread, areaFilter, jobFilter, likedIds, loading,
     openBoard, openThread, backToBoards, backToThreads,
     setAreaFilter, setJobFilter,
-    createThread, addReply, toggleLike, report, likeKey,
+    createThread, addReply, editThread, editReply, deleteThread, deleteReply, toggleLike, report, likeKey,
   };
 }

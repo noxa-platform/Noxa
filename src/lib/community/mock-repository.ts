@@ -11,7 +11,8 @@
 
 import type { Board, Reply, Thread } from './types';
 import type {
-  AddReplyInput, CommunityRepository, CreateThreadInput, LikeTarget, ReportTarget, ThreadFilter,
+  AddReplyInput, CommunityRepository, CreateThreadInput, EditReplyInput, EditThreadInput,
+  LikeTarget, ReportTarget, ThreadFilter,
 } from './repository';
 import { anonId, todayKey } from './anon-id';
 
@@ -160,6 +161,40 @@ export class MockCommunityRepository implements CommunityRepository {
       jobTag: input.jobTag,
     });
     t.lastActivity = 'たった今';
+    return this.toDomain(t);
+  }
+
+  async editThread(threadId: string, input: EditThreadInput): Promise<Thread> {
+    const t = this.threads.find((x) => x.id === threadId);
+    if (!t) throw new Error(`thread not found: ${threadId}`);
+    if (t.authorUid !== this.uid) throw new Error('編集権限がありません');
+    if (input.title !== undefined) t.title = input.title;
+    t.body = input.body;
+    return this.toDomain(t);
+  }
+
+  async editReply(threadId: string, replyId: string, input: EditReplyInput): Promise<Thread> {
+    const t = this.threads.find((x) => x.id === threadId);
+    if (!t) throw new Error(`thread not found: ${threadId}`);
+    const reply = t.replies.find((x) => x.id === replyId);
+    if (!reply) throw new Error(`reply not found: ${replyId}`);
+    if (reply.authorUid !== this.uid) throw new Error('編集権限がありません');
+    reply.body = input.body;
+    return this.toDomain(t);
+  }
+
+  async deleteThread(threadId: string): Promise<void> {
+    const t = this.threads.find((x) => x.id === threadId);
+    if (t && t.authorUid !== this.uid) throw new Error('削除権限がありません');
+    this.threads = this.threads.filter((x) => x.id !== threadId);
+  }
+
+  async deleteReply(threadId: string, replyId: string): Promise<Thread> {
+    const t = this.threads.find((x) => x.id === threadId);
+    if (!t) throw new Error(`thread not found: ${threadId}`);
+    const reply = t.replies.find((x) => x.id === replyId);
+    if (reply && reply.authorUid !== this.uid) throw new Error('削除権限がありません');
+    t.replies = t.replies.filter((x) => x.id !== replyId);
     return this.toDomain(t);
   }
 
