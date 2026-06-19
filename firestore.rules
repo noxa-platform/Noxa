@@ -545,6 +545,26 @@ service cloud.firestore {
       allow delete: if false;
     }
 
+    // bar_analytics（公開バーページの PV カウンタ。docId = barId_date）
+    // 書き込み: 公開ページ訪問者の PV トラッキング（未ログイン含む）。barId 必須＋項目を PV 系に限定
+    //          （ゴミ項目の注入を防止。値の改ざん完全防止は将来サーバ側集計で対応）。
+    // 読み取り: オーナーのダッシュボード（AnalyticsPanel）のみ。
+    match /bar_analytics/{docId} {
+      allow read: if isAuth()
+        && (resource.data.ownerUid == request.auth.uid || isShopOwnerLike(resource.data.barId));
+      allow create: if request.resource.data.barId is string
+        && request.resource.data.keys().hasOnly(
+             ['barId', 'date', 'pageViews', 'uniqueVisitors', 'uniqueUids', 'referrers', 'ownerUid', 'createdAt', 'updatedAt']);
+      allow update: if request.resource.data.barId is string
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(
+             ['pageViews', 'uniqueVisitors', 'uniqueUids', 'referrers', 'updatedAt']);
+      allow delete: if isAdmin();
+    }
+
+    // bar_goals は廃止。月間売上目標は shop_shops.salesGoalsByMonth["YYYY-MM"] に統合（YoruLog と共有）。
+    //   既存 bar_goals データは移行スクリプトで shop_shops へ転記後に削除。client 直アクセスは無し
+    //   （= ルールを置かず既定拒否のまま）。目標の読み書きは shop_shops の update ルールで担保。
+
     // bar_spotjobs (公認バーテン進化形 = 双方向スポット労働)
     match /bar_spotjobs/{docId} {
       allow read: if true;
