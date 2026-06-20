@@ -759,9 +759,17 @@ service cloud.firestore {
     // 誰でも閲覧可（リンク集は公開）。作成/編集は本人（ownerUid）のみ。
     // claim はトランザクションの create（既存なら失敗）でユニーク性を担保。
     match /profile_pages/{handle} {
-      allow read: if true;
+      // 公開範囲: public/unlisted は誰でも read 可（unlisted は noindex で検索除外＝軽いlink-only）。
+      // private は本人/admin のみ。visibility 無しの既存doc は published==true を public 扱いでフォールバック。
+      allow read: if resource.data.visibility == 'public'
+        || resource.data.visibility == 'unlisted'
+        || (!('visibility' in resource.data) && resource.data.published == true)
+        || (isAuth() && resource.data.ownerUid == request.auth.uid)
+        || isAdmin();
       allow create: if isAuth() && request.resource.data.ownerUid == request.auth.uid;
-      allow update, delete: if isAuth() && resource.data.ownerUid == request.auth.uid;
+      // 本人 or admin（admin は通報対応の takedown 用）
+      allow update, delete: if isAuth()
+        && (resource.data.ownerUid == request.auth.uid || isAdmin());
     }
 
     // ========================================
