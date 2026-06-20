@@ -6,11 +6,13 @@
     "dev": "next dev -p 3100",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "test": "vitest run",
+    "test:rules": "firebase emulators:exec --only firestore --project noxa-platform \"vitest run test/rules\""
   },
   "dependencies": {
-    "clsx": "^2.1.1",
     "class-variance-authority": "^0.7.1",
+    "clsx": "^2.1.1",
     "firebase": "^12.9.0",
     "firebase-admin": "^13.6.1",
     "googleapis": "^171.4.0",
@@ -24,6 +26,7 @@
   },
   "devDependencies": {
     "@eslint/eslintrc": "^3",
+    "@firebase/rules-unit-testing": "^5.0.1",
     "@tailwindcss/postcss": "^4",
     "@types/node": "^20",
     "@types/react": "^19",
@@ -31,6 +34,7 @@
     "eslint": "^9",
     "eslint-config-next": "16.1.6",
     "tailwindcss": "^4",
-    "typescript": "^5"
+    "typescript": "^5",
+    "vitest": "^4.1.9"
   }
 }
