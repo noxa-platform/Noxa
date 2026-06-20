@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { getProfilePage, type ProfilePage, type ProfileType } from '@/lib/handle';
+import { getProfilePage, resolveVisibility, type ProfilePage, type ProfileType } from '@/lib/handle';
 
 const SNS_META: Record<string, { label: string; color: string }> = {
   instagram: { label: 'Instagram', color: '#E1306C' },
@@ -26,7 +26,8 @@ export function PublicProfile({ handle, expectType }: { handle: string; expectTy
 
   if (loading) return <Centered>読み込み中…</Centered>;
   if (!page || page.type !== expectType) return <Centered>このプロフィールは見つかりませんでした。</Centered>;
-  if (!page.published) return <Centered>このプロフィールは非公開です。</Centered>;
+  // private は非公開表示（public/unlisted は描画。read自体はルールで担保済み・二重防御）
+  if (resolveVisibility(page) === 'private') return <Centered>このプロフィールは非公開です。</Centered>;
 
   const initial = (page.displayName || page.handle || '?').trim().charAt(0).toUpperCase();
 

@@ -1,12 +1,15 @@
 import { ImageResponse } from 'next/og';
+import { resolveVisibility } from '@/lib/visibility';
 
 /**
  * 公開プロフィール用の動的 OG 画像ビルダー。
- * Firestore REST（profile_pages は public read）で handle を引き、NOXA ブランドで描画。
+ * Firestore REST で handle を引き、NOXA ブランドで描画。
+ * private は ルール変更後に匿名 REST が 403 で弾く（fetch が null）→自動でブランドOGになる。
+ * unlisted は OG を出す（URLを共有した相手向けプレビュー。検索は noindex で除外）。
  */
 export const OG_SIZE = { width: 1200, height: 630 };
 
-type Parsed = { displayName: string; handle: string; avatar: string; type: string; published: boolean } | null;
+type Parsed = { displayName: string; handle: string; avatar: string; type: string; published: boolean; visibility?: string } | null;
 
 async function fetchProfile(handle: string): Promise<Parsed> {
   try {
@@ -21,13 +24,16 @@ async function fetchProfile(handle: string): Promise<Parsed> {
       avatar: f.avatar?.stringValue ?? '',
       type: f.type?.stringValue ?? 'user',
       published: f.published?.booleanValue ?? false,
+      visibility: f.visibility?.stringValue,
     };
   } catch { return null; }
 }
 
 export async function buildProfileOg(handle: string, expectType: 'user' | 'shop'): Promise<ImageResponse> {
   const p = await fetchProfile(handle);
-  const ok = p && p.published && p.type === expectType;
+  // private は内容を出さない（public/unlisted のみOG表示）。
+  const vis = p ? resolveVisibility(p) : 'private';
+  const ok = p && vis !== 'private' && p.type === expectType;
   const name = ok ? p!.displayName : 'Noxa';
   const sub = ok ? `@${p!.handle}` : 'Nightfall, refined.';
   const avatar = ok ? p!.avatar : '';

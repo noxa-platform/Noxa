@@ -81,7 +81,8 @@ function ProfileLinkClient({ user }: { user: User }) {
     if (!handle) return;
     setSaving(true); setSaved(false);
     try {
-      await updateProfilePage(handle, { displayName, bio, avatar, sns: sns.filter((s) => s.url.trim()), published });
+      // visibility をルールの正本に合わせて同期（Lane A は public/private の2値。unlisted/3値選択は Lane C）
+      await updateProfilePage(handle, { displayName, bio, avatar, sns: sns.filter((s) => s.url.trim()), published, visibility: published ? 'public' : 'private' });
       setSaved(true); setTimeout(() => setSaved(false), 2000);
     } finally { setSaving(false); }
   };
