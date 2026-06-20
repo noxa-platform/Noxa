@@ -50,3 +50,56 @@ export function safeParseJson<T = unknown>(raw: string | null | undefined): T | 
   }
   return null;
 }
+
+/**
+ * AI 出力から「文字列の配列」を安全に取り出す。
+ * 返信案 3 パターン等の配列出力向け。失敗時は空配列。
+ *
+ * DeepSeek V4 系は `["a","b"]` の代わりに `[「a」「b」]` のように
+ * 全角カギ括弧で配列を作ることがある（ベンチ 2026-06-20 確認）。
+ * JSON.parse が通らないため、最終手段として「」/全角引用符の中身を拾う。
+ *
+ * 試行順序:
+ *   1. そのまま JSON.parse
+ *   2. ```json フェンス剥がし
+ *   3. 最初の [ から最後の ] を抽出
+ *   4. 「…」/“…” で囲まれた要素を抽出
+ */
+export function safeParseStringArray(raw: string | null | undefined): string[] {
+  if (!raw) return [];
+  const trimmed = raw.trim();
+  const tryParse = (s: string): string[] | null => {
+    try {
+      const parsed = JSON.parse(s);
+      if (Array.isArray(parsed)) {
+        const arr = parsed.filter((x): x is string => typeof x === 'string' && x.trim().length > 0);
+        if (arr.length > 0) return arr;
+      }
+    } catch {
+      /* noop */
+    }
+    return null;
+  };
+  // 試行 1: そのまま
+  let r = tryParse(trimmed);
+  if (r) return r;
+  // 試行 2: ```json フェンス剥がし
+  const fence = trimmed.match(/```(?:json)?\s*\n?([\s\S]*?)\n?```/i);
+  if (fence?.[1]) {
+    r = tryParse(fence[1].trim());
+    if (r) return r;
+  }
+  // 試行 3: [ … ] を抽出
+  const first = trimmed.indexOf('[');
+  const last = trimmed.lastIndexOf(']');
+  if (first >= 0 && last > first) {
+    r = tryParse(trimmed.slice(first, last + 1));
+    if (r) return r;
+  }
+  // 試行 4: 全角カギ括弧 / 全角引用符の中身を拾う（JSON 崩れ対策）
+  const bracketed = [...trimmed.matchAll(/[「“]([\s\S]*?)[」”]/g)]
+    .map((m) => m[1].trim())
+    .filter((s) => s.length > 0);
+  if (bracketed.length > 0) return bracketed;
+  return [];
+}

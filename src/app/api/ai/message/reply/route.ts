@@ -7,6 +7,7 @@ import { resolveAccessContext, pathCustomer, pathCustomerSubcollection } from '.
 import { resolveWorkspaceContext, composePlaybookAndSelf, buildSelfBaseBlock } from '@/lib/ai-knowledge/prompt-helpers';
 import { getGlobalSuccessPatterns, getAggregateHint } from '@/lib/ai-knowledge/global-patterns';
 import { AI_CONFIG } from '@/lib/ai-knowledge/constants';
+import { safeParseStringArray } from '@/lib/ai-knowledge/safe-json';
 
 // この顧客の過去フィードバック（直近）を取得し good/bad に分ける
 async function getRecentFeedback(ctx: import('../../../lib/access-context').AccessContext, customerId: string, limit = 10) {
@@ -225,6 +226,8 @@ export async function POST(request: NextRequest) {
 - 20-30 代の夜職スタッフがほんまに書く文面になっているか。教科書口調・文学口調は崩す
 
 ## 出力形式
+必ず**半角ダブルクォート**の有効な JSON 配列のみを返す（前後の説明文・コードフェンス禁止）。
+各要素は半角ダブルクォートで囲む。全角引用符「」“”や角括弧での囲みは使わない。
 JSON配列で3つの返信案:
 ["返信案1", "返信案2", "返信案3"]`;
 
@@ -352,18 +355,11 @@ JSON配列で3つの返信案:
       throw err;
     }
 
-    // JSON配列をパース
-    let replies: string[] = [];
-    try {
-      const parsed = JSON.parse(result);
-      if (Array.isArray(parsed)) {
-        replies = parsed.filter((m: unknown) => typeof m === 'string' && m.trim());
-      }
-    } catch {
-      // パース失敗時は単一メッセージとして扱う
-      if (result && result.trim()) {
-        replies = [result.trim()];
-      }
+    // JSON配列をパース（フェンス剥がし / [] 抽出 / 「」崩れ対策を含む安全パーサ）
+    let replies: string[] = safeParseStringArray(result);
+    // それでも取れなければ単一メッセージとして扱う
+    if (replies.length === 0 && result && result.trim()) {
+      replies = [result.trim()];
     }
 
     if (replies.length === 0) {
