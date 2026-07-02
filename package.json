@@ -8,7 +8,7 @@
     "start": "next start",
     "lint": "eslint",
     "test": "vitest run",
-    "test:rules": "firebase emulators:exec --only firestore --project noxa-platform \"vitest run test/rules\""
+    "test:rules": "firebase emulators:exec --only firestore --project noxa-platform \"vitest run --config vitest.rules.config.ts\""
   },
   "dependencies": {
     "class-variance-authority": "^0.7.1",
