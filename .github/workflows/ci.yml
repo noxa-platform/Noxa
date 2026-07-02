@@ -1,0 +1,41 @@
+# NOXA Web CI
+# 目的: 単体テスト(vitest)と Firestore ルールテストを CI で緑固定する。
+# WSL にはローカルで Java エミュレータが無いため、rules テストは CI（temurin JRE）で回すのが本命。
+# 注: lint は既存コードに未修正エラーが多数あるため、緑化まで CI ゲートには含めない（別途対応）。
+name: CI
+
+on:
+  push:
+    branches: ['grind/fable-week', 'feat/**', 'main']
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Setup Java (Firestore エミュレータ用・temurin JRE)
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '21'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install firebase-tools
+        run: npm install -g firebase-tools
+
+      - name: Unit tests (vitest)
+        run: npm run test
+
+      - name: Firestore rules tests (emulator)
+        run: npm run test:rules
