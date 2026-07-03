@@ -28,6 +28,7 @@ export function SalesClient({ user }: { user: User }) {
   const [sales, setSales] = useState<Sale[]>([]);
   const [customers, setCustomers] = useState<{ id: string; name: string }[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
   const [opBusy, setOpBusy] = useState(false); // 取消/修正の二重実行防止
 
@@ -52,8 +53,8 @@ export function SalesClient({ user }: { user: User }) {
     const unsub = onSnapshot(query(collection(db, colPath), where('dayKey', '>=', monthStart)), (snap) => {
       const list: Sale[] = [];
       snap.forEach((d) => { const x = d.data() as DocumentData; list.push({ id: d.id, amount: typeof x.amount === 'number' ? x.amount : 0, customerName: x.customerName ?? null, customerId: x.customerId ?? null, castName: x.castName ?? null, dayKey: x.dayKey ?? '', atMs: toMs(x.checkoutAt) ?? toMs(x.createdAt), voided: x.voided === true, source: x.source ?? 'manual' }); });
-      setSales(list); setLoading(false);
-    }, () => setLoading(false));
+      setSales(list); setLoading(false); setLoadError(null);
+    }, (e) => { setLoading(false); setLoadError(`売上の読み込みに失敗しました（${e.code ?? e.message}）`); });
     return () => unsub();
   }, [colPath, shop.loading]);
 
@@ -105,6 +106,7 @@ export function SalesClient({ user }: { user: User }) {
         <button type="button" onClick={() => setAdding(true)} className="noxa-btn noxa-btn-primary">＋ 売上を記録</button>
       </div>
 
+      {loadError && <p role="alert" style={{ color: 'var(--noxa-status-error)', fontSize: 13, margin: '0 0 12px', padding: '10px 12px', borderRadius: 10, background: 'rgba(229,115,115,0.08)', border: '1px solid var(--noxa-status-error)' }}>{loadError}</p>}
       <div className="grid grid-cols-2 lg:grid-cols-4" style={{ gap: 12, marginBottom: 18 }}>
         <Kpi label="本日" value={yen(sum.today)} accent />
         <Kpi label="今月" value={yen(sum.month)} />

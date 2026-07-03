@@ -37,13 +37,17 @@ export function AttendanceClient({ user }: { user: User }) {
 
   useEffect(() => { const t = setInterval(() => setTick((n) => n + 1), 30000); return () => clearInterval(t); }, []);
 
+  const [loadError, setLoadError] = useState<string | null>(null);
   const reload = async (sid: string) => {
     try {
       const snap = await getDocs(query(collection(db, `shop_shops/${sid}/shifts`), where('castUid', '==', user.uid)));
       const list: Shift[] = []; snap.forEach((d) => list.push(mapShift(d.id, d.data())));
       list.sort((a, b) => (b.startMs ?? 0) - (a.startMs ?? 0));
-      setShifts(list);
-    } catch { /* skip */ }
+      setShifts(list); setLoadError(null);
+    } catch (e) {
+      // 権限エラー等を握りつぶすと「空画面」に見える → 可視化
+      setLoadError(`勤怠の読み込みに失敗しました（${(e as { code?: string; message?: string }).code ?? (e as Error).message}）`);
+    }
   };
 
   useEffect(() => {
@@ -91,6 +95,7 @@ export function AttendanceClient({ user }: { user: User }) {
         <Section label="勤怠"><Empty>所属店舗が見つかりません。</Empty></Section>
       ) : (
         <>
+          {loadError && <p role="alert" style={{ color: 'var(--noxa-status-error)', fontSize: 13, margin: '0 0 12px', padding: '10px 12px', borderRadius: 10, background: 'rgba(229,115,115,0.08)', border: '1px solid var(--noxa-status-error)' }}>{loadError}</p>}
           {/* 打刻 */}
           <section style={{ background: 'var(--noxa-surface-card)', border: '1px solid var(--noxa-border)', borderRadius: 16, padding: 20, marginBottom: 16, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16, flexWrap: 'wrap' }}>
             <div>

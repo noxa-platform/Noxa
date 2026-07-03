@@ -20,19 +20,25 @@ export type ShopRoleCtx = ShopId & {
 
 export function useShopRole(user: User): ShopRoleCtx {
   const shop = useShopId(user);
-  const [role, setRole] = useState<string | null>(null);
-  const [roleReady, setRoleReady] = useState(false);
+  // 非同期取得した member role（shopId とペアで持ち、店舗切替時の取り違えを防ぐ）
+  const [fetched, setFetched] = useState<{ shopId: string; role: string | null } | null>(null);
 
   useEffect(() => {
-    if (shop.loading || !shop.shopId) { setRole(null); setRoleReady(!shop.loading); return; }
-    if (shop.canManage) { setRole('owner'); setRoleReady(true); return; }
+    // オーナー/未解決時は取得不要（派生値でカバー）。setState は必ず非同期コールバック内で行う
+    if (shop.loading || !shop.shopId || shop.canManage) return;
+    const sid = shop.shopId;
     let alive = true;
-    setRoleReady(false);
-    getDoc(doc(db, `shop_shops/${shop.shopId}/members/${user.uid}`))
-      .then((s) => { if (alive) { setRole(s.exists() ? ((s.data() as { role?: string }).role ?? null) : null); setRoleReady(true); } })
-      .catch(() => { if (alive) { setRole(null); setRoleReady(true); } });
+    getDoc(doc(db, `shop_shops/${sid}/members/${user.uid}`))
+      .then((s) => { if (alive) setFetched({ shopId: sid, role: s.exists() ? ((s.data() as { role?: string }).role ?? null) : null }); })
+      .catch(() => { if (alive) setFetched({ shopId: sid, role: null }); });
     return () => { alive = false; };
   }, [shop.loading, shop.shopId, shop.canManage, user.uid]);
+
+  const role = shop.canManage
+    ? 'owner'
+    : (shop.shopId && fetched?.shopId === shop.shopId ? fetched.role : null);
+  const roleReady = !shop.loading
+    && (!shop.shopId || shop.canManage || fetched?.shopId === shop.shopId);
 
   return { ...shop, role, roleReady };
 }

@@ -98,7 +98,11 @@ export function GoalsClient({ user }: { user: User }) {
 
   const save = async () => {
     setGoalSales(draft); setEditing(false);
-    try { await setDoc(doc(db, `personal_goals/${user.uid}/items/current`), { goalSales: draft, updatedAt: serverTimestamp() }, { merge: true }); } catch { /* skip */ }
+    try { await setDoc(doc(db, `personal_goals/${user.uid}/items/current`), { goalSales: draft, updatedAt: serverTimestamp() }, { merge: true }); }
+    catch (e) {
+      // 保存失敗を握りつぶすと「保存できたつもり」になる → 可視化
+      window.alert(`目標の保存に失敗しました（${(e as { code?: string; message?: string }).code ?? (e as Error).message}）`);
+    }
   };
 
   return (

@@ -60,6 +60,7 @@ export function PayrollClient({ user }: { user: User }) {
   const [loading, setLoading] = useState(true);
   const [periods, setPeriods] = useState<Period[]>([]);
   const [noShop, setNoShop] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   useEffect(() => {
     if (device.loading) return;
@@ -81,7 +82,10 @@ export function PayrollClient({ user }: { user: User }) {
         const draft = await computeDraft(shopId, user.uid);
         const merged = draft && !list.some((p) => p.id === draft.id) ? [draft, ...list] : list;
         if (alive) setPeriods(merged);
-      } catch { /* skip */ }
+      } catch (e) {
+        // 権限エラー等の握りつぶし＝「明細が無い」ように見える誤解を防ぐ
+        if (alive) setLoadError(`給与明細の読み込みに失敗しました（${(e as { code?: string; message?: string }).code ?? (e as Error).message}）`);
+      }
       if (alive) setLoading(false);
     })();
     return () => { alive = false; };
@@ -90,6 +94,7 @@ export function PayrollClient({ user }: { user: User }) {
   return (
     <Shell title="給与" eyebrow="ノクサ · 給与" crumb="payroll">
       <PayrollFinalize user={user} />
+      {loadError && <p role="alert" style={{ color: 'var(--noxa-status-error)', fontSize: 13, margin: '0 0 12px', padding: '10px 12px', borderRadius: 10, background: 'rgba(229,115,115,0.08)', border: '1px solid var(--noxa-status-error)' }}>{loadError}</p>}
       {loading ? <Eyebrow>読み込み中…</Eyebrow> : noShop ? (
         <Section label="給与"><Empty>所属店舗が見つかりません。店舗に所属すると給与明細が表示されます。</Empty></Section>
       ) : periods.length === 0 ? (
