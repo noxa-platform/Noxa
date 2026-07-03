@@ -2,7 +2,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   computeCasts, rotateOrder, nextDailySequence, canStartSet,
-  removeCastPatch, buildAssignPatches, toggleInArray,
+  removeCastPatch, buildAssignPatches, toggleInArray, computeSetTimer, stripCastPatches,
 } from '../../src/lib/seating/logic';
 import { createEmptyTable, type FloorTable } from '../../src/lib/seating/types';
 
@@ -103,5 +103,57 @@ describe('toggleInArray', () => {
     expect(toggleInArray(['a'], 'b')).toEqual(['a', 'b']);
     expect(toggleInArray(['a', 'b'], 'b')).toEqual(['a']);
     expect(toggleInArray(undefined, 'x')).toEqual(['x']);
+  });
+});
+
+describe('computeSetTimer（延長はセット長を変えない・BUG-3回帰）', () => {
+  const MIN = 60000;
+  const START = 1_000_000_000; // 0 は「未開始」扱いのため非ゼロの開始時刻を使う
+  const base = { status: 'ACTIVE' as const, startTime: START, setTimeLength: 60 };
+  const at = (min: number) => START + min * MIN;
+  it('延長なし: 経過70分は2セット目・残50分', () => {
+    const r = computeSetTimer({ ...base }, at(70))!;
+    expect(r.setNumber).toBe(2);
+    expect(r.remainingMin).toBe(50);
+    expect(r.setLen).toBe(60);
+  });
+  it('30分延長: 現在セットの境界だけ後ろへずれ、セット長は60のまま', () => {
+    // 経過70分・延長30分 → 実効40分＝まだ1セット目、残り 60+30-70=20分
+    const r = computeSetTimer({ ...base, extraMinutes: 30 }, at(70))!;
+    expect(r.setNumber).toBe(1);
+    expect(r.remainingMin).toBe(20);
+    expect(r.setLen).toBe(60); // 旧バグ: setTimeLength自体が90になっていた
+  });
+  it('二度押し(累計60分延長)でもセット長は不変', () => {
+    const r = computeSetTimer({ ...base, extraMinutes: 60 }, at(130))!;
+    expect(r.setLen).toBe(60);
+    expect(r.setNumber).toBe(2); // 実効70分=2セット目
+  });
+  it('非ACTIVE/未開始は null', () => {
+    expect(computeSetTimer({ status: 'EMPTY', startTime: START, setTimeLength: 60 }, at(0))).toBeNull();
+    expect(computeSetTimer({ status: 'ACTIVE', startTime: null, setTimeLength: 60 }, at(0))).toBeNull();
+  });
+  it('残10分以下で warning', () => {
+    const r = computeSetTimer({ ...base }, at(55))!;
+    expect(r.warning).toBe(true);
+  });
+});
+
+describe('stripCastPatches（幽霊配置の除去・BUG-7回帰）', () => {
+  it('current/main/requested/excluded/castStartTimes から除去し、無関係卓はパッチ無し', () => {
+    const tables = [
+      table('t1', { currentHostIds: ['a', 'b'], mainHostIds: ['a'], requestedHostIds: ['a'], excludedHostIds: ['a'], castStartTimes: { a: 1, b: 2 } }),
+      table('t2', { currentHostIds: ['b'] }),
+    ];
+    const patches = stripCastPatches(tables, 'a');
+    expect(patches).toHaveLength(1);
+    expect(patches[0].tableId).toBe('t1');
+    expect(patches[0].patch.currentHostIds).toEqual(['b']);
+    expect(patches[0].patch.mainHostIds).toEqual([]);
+    expect(patches[0].patch.requestedHostIds).toEqual([]);
+    expect(patches[0].patch.excludedHostIds).toEqual([]);
+    expect(patches[0].patch.castStartTimes).toEqual({ b: 2 });
+    // POS 伝票は触らない
+    expect('slips' in patches[0].patch).toBe(false);
   });
 });

@@ -58,6 +58,8 @@ export interface FloorTable {
   setTimeLength: number;       // 1セット長（分）
   rotationTimeLength: number;  // 席内ローテ間隔（分）
   innerRotationEnabled: boolean;
+  /** 現在の来店の延長合計（分）。セット長は変えず境界を後ろへずらす。退店/開卓でリセット */
+  extraMinutes?: number;
   memo?: string;
 
   // POS 伝票（席回しと同一卓ドキュメントを共有＝完全同期）
@@ -91,6 +93,7 @@ export function createEmptyTable(id: string, name: string): FloorTable {
     setTimeLength: 60,
     rotationTimeLength: 15,
     innerRotationEnabled: false,
+    extraMinutes: 0,
     memo: '',
   };
 }

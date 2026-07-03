@@ -34,7 +34,7 @@ import { getActiveShop, pickShopId } from '@/lib/workspace';
 import { businessDayKey } from '@/lib/datetime';
 import {
   computeCasts, rotateOrder, nextDailySequence, canStartSet,
-  removeCastPatch, buildAssignPatches, toggleInArray, type TablePatch,
+  removeCastPatch, buildAssignPatches, stripCastPatches, toggleInArray, type TablePatch,
 } from './logic';
 
 type StoredCast = {
@@ -190,8 +190,21 @@ export function useSeatingStore(user: User): UseSeatingStore {
   }, [shopId, castRef]);
   const removeCast = useCallback<UseSeatingStore['removeCast']>(async (id) => {
     if (!shopId) return;
-    await deleteDoc(castRef(id));
-  }, [shopId, castRef]);
+    // 名簿削除と同時に全卓の配置からも除去（幽霊配置＝卓に「?」が残るのを防ぐ）。
+    // 卓は tx 内で最新を読み直し、必要な卓だけ変更フィールドを書く。
+    const tableIds = tables.map((t) => t.id);
+    await runTransaction(db, async (tx) => {
+      const freshTables: FloorTable[] = [];
+      for (const tid of tableIds) {
+        const snap = await tx.get(tableRef(tid));
+        if (snap.exists()) freshTables.push(toFloorTable(tid, snap.data() as Partial<FloorTable>));
+      }
+      for (const p of stripCastPatches(freshTables, id)) {
+        tx.set(tableRef(p.tableId), { ...p.patch, updatedAt: serverTimestamp() }, { merge: true });
+      }
+      tx.delete(castRef(id));
+    });
+  }, [shopId, tables, tableRef, castRef]);
   const toggleLock = useCallback<UseSeatingStore['toggleLock']>(async (id) => {
     const c = stored.find((x) => x.id === id);
     await updateCast(id, { isLocked: !(c?.isLocked ?? false) });
@@ -332,6 +345,7 @@ export function useSeatingStore(user: User): UseSeatingStore {
         status: 'ACTIVE', startTime: now, entryTime: now, entryNumber: seq,
         type: customers[0]?.type ?? t.type ?? '正規',
         customers: customers.map((c) => ({ ...c, entryTime: now })),
+        extraMinutes: 0, // 新しい来店＝延長リセット
         castStartTimes, updatedAt: serverTimestamp(),
       }, { merge: true });
     });
@@ -374,12 +388,18 @@ export function useSeatingStore(user: User): UseSeatingStore {
   }, [txUpdateTable]);
 
   const checkTable = useCallback<UseSeatingStore['checkTable']>(async (tableId) => {
-    // ACTIVE のみ CHECK へ（空卓や既にチェック済みの卓を誤って CHECK にしない）
-    await txUpdateTable(tableId, (t) => (t.status === 'ACTIVE' ? { status: 'CHECK' } : null));
+    // ACTIVE⇄CHECK のトグル（誤タップの会計を解除できる。空卓は不変）
+    await txUpdateTable(tableId, (t) => {
+      if (t.status === 'ACTIVE') return { status: 'CHECK' };
+      if (t.status === 'CHECK') return { status: 'ACTIVE' };
+      return null;
+    });
   }, [txUpdateTable]);
 
   const extendTime = useCallback<UseSeatingStore['extendTime']>(async (tableId, minutes) => {
-    await txUpdateTable(tableId, (t) => ({ setTimeLength: (t.setTimeLength || 60) + minutes }));
+    // 延長はセット長(setTimeLength)を変えず extraMinutes に積む。
+    // 旧実装は setTimeLength 本体を加算→以降の全セットが恒久的に伸び料金/セット数がずれるバグだった。
+    await txUpdateTable(tableId, (t) => ({ extraMinutes: Math.max(0, t.extraMinutes ?? 0) + minutes }));
   }, [txUpdateTable]);
 
   const toggleInnerRotation = useCallback<UseSeatingStore['toggleInnerRotation']>(async (tableId) => {
@@ -440,6 +460,7 @@ export function useSeatingStore(user: User): UseSeatingStore {
         status: 'ACTIVE', startTime: now, entryTime: now, entryNumber: seq,
         type: item.type,
         customers: customers.map((c) => ({ ...c })),
+        extraMinutes: 0, // 新しい来店＝延長リセット
         castStartTimes, updatedAt: serverTimestamp(),
       }, { merge: true });
       tx.delete(queueR);

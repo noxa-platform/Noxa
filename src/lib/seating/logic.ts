@@ -96,3 +96,55 @@ export function toggleInArray(arr: string[] | undefined, id: string): string[] {
   const a = arr ?? [];
   return a.includes(id) ? a.filter((x) => x !== id) : [...a, id];
 }
+
+/**
+ * セット残り時間の計算（純関数）。
+ * 延長(extraMinutes)は「セット長(setTimeLength)を変えずに」現在の来店の境界を後ろへずらす。
+ * 旧実装は延長で setTimeLength 本体を加算しており、以降の全セットが恒久的に
+ * 伸びて料金・セット数がずれるバグだった（BUG-3）。
+ */
+export type SetTimerInfo = { remainingMin: number; setNumber: number; setLen: number; warning: boolean; progress: number };
+
+export function computeSetTimer(
+  t: Pick<FloorTable, 'status' | 'startTime' | 'setTimeLength' | 'extraMinutes'>,
+  nowMs: number,
+): SetTimerInfo | null {
+  if (t.status !== 'ACTIVE' || !t.startTime || !t.setTimeLength) return null;
+  const len = t.setTimeLength;
+  const extra = Math.max(0, t.extraMinutes ?? 0);
+  const elapsed = Math.floor((nowMs - t.startTime) / 60000);
+  // 延長分だけ経過を差し引く＝境界が extra 分だけ後ろへずれる（セット長は不変）
+  const effective = Math.max(0, elapsed - extra);
+  const setNumber = Math.floor(effective / len) + 1;
+  const remainingMin = Math.max(0, setNumber * len + extra - elapsed);
+  const progress = Math.min(1, (len - Math.min(remainingMin, len)) / len);
+  return { remainingMin, setNumber, setLen: len, warning: remainingMin <= 10, progress };
+}
+
+/**
+ * キャストを全卓から除去するパッチ群（名簿削除時の幽霊配置防止・BUG-7）。
+ * 変更が必要な卓のみ返す。
+ */
+export function stripCastPatches(tables: FloorTable[], castId: string): { tableId: string; patch: TablePatch }[] {
+  const patches: { tableId: string; patch: TablePatch }[] = [];
+  for (const t of tables) {
+    const inCurrent = (t.currentHostIds ?? []).includes(castId);
+    const inMain = (t.mainHostIds ?? []).includes(castId);
+    const inReq = (t.requestedHostIds ?? []).includes(castId);
+    const inEx = (t.excludedHostIds ?? []).includes(castId);
+    if (!inCurrent && !inMain && !inReq && !inEx) continue;
+    const castStartTimes = { ...(t.castStartTimes ?? {}) };
+    delete castStartTimes[castId];
+    patches.push({
+      tableId: t.id,
+      patch: {
+        currentHostIds: (t.currentHostIds ?? []).filter((c) => c !== castId),
+        mainHostIds: (t.mainHostIds ?? []).filter((c) => c !== castId),
+        requestedHostIds: (t.requestedHostIds ?? []).filter((c) => c !== castId),
+        excludedHostIds: (t.excludedHostIds ?? []).filter((c) => c !== castId),
+        castStartTimes,
+      },
+    });
+  }
+  return patches;
+}

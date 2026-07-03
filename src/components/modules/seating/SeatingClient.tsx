@@ -9,6 +9,7 @@ import { useSeatingStore } from '@/lib/seating/store';
 import { useShopConfig } from '@/lib/shopConfig';
 import { PosClient } from '@/components/modules/pos/PosClient';
 import { generateAIProposals, getSourcingCandidates } from '@/lib/seating/ai';
+import { computeSetTimer } from '@/lib/seating/logic';
 import type { Cast, FloorTable, TableType, Customer, CastStatus, Rank } from '@/lib/seating/types';
 
 /**
@@ -38,16 +39,10 @@ function fmtElapsed(start: number | null): string {
   return `${Math.floor(m / 60)}:${String(m % 60).padStart(2, '0')}`;
 }
 
-// セット残り時間：現在のセット終わりまでの残分・何セット目か・残10分以下の警告
-type SetTimer = { remainingMin: number; setNumber: number; setLen: number; warning: boolean; progress: number };
-function setTimer(t: FloorTable): SetTimer | null {
-  if (t.status !== 'ACTIVE' || !t.startTime || !t.setTimeLength) return null;
-  const len = t.setTimeLength;
-  const elapsed = elapsedMin(t.startTime);
-  const setNumber = Math.floor(elapsed / len) + 1;
-  const remainingMin = Math.max(0, setNumber * len - elapsed);
-  const progress = Math.min(1, (len - remainingMin) / len);
-  return { remainingMin, setNumber, setLen: len, warning: remainingMin <= 10, progress };
+// セット残り時間：現在のセット終わりまでの残分・何セット目か・残10分以下の警告。
+// 計算本体は logic.ts の computeSetTimer（延長 extraMinutes 対応・単体テスト済み）。
+function setTimer(t: FloorTable) {
+  return computeSetTimer(t, Date.now());
 }
 
 // 卓内ローテ通知：自動ローテON卓で次のローテまでの残分（残3分以下で督促）
