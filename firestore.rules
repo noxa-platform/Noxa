@@ -54,7 +54,10 @@ service cloud.firestore {
     // ========================================
 
     match /account_users/{uid} {
-      allow read: if true; // 公開プロフィール（displayName, handle, avatar 等）
+      // PII（lineLoginUserId / platformRole / 内部フラグ等）を含むため公開 read は禁止。
+      // 公開プロフィール表示は profile_pages/{handle}（visibility 制御つき）へ一本化済み。
+      // ※クライアントの読取は全箇所 self のみ（2026-07-03 棚卸し）。iOS も同様前提（要確認は LOG に記録）。
+      allow read: if isSelf(uid) || isAdmin();
       allow create: if isSelf(uid);
       // platformRole は server-side のみで変更可
       allow update: if isAdmin() || (isSelf(uid)
@@ -453,7 +456,9 @@ service cloud.firestore {
 
     match /notification_inbox/{docId} {
       allow read: if isAuth() && resource.data.userId == request.auth.uid;
-      allow create: if isAuth();
+      // 他人の受信箱への偽通知（スパム/フィッシング）防止: 本人宛のみ作成可。
+      // システム発の通知は API/CF (Admin SDK) 経由＝ルール対象外。
+      allow create: if isAuth() && request.resource.data.userId == request.auth.uid;
       allow update: if isAuth() && resource.data.userId == request.auth.uid;
       allow delete: if isAuth() && resource.data.userId == request.auth.uid;
     }
@@ -786,9 +791,16 @@ service cloud.firestore {
 
     // スレッド(post): 作成は本人 uid・カウンタ 0・本文 1000 字以内。
     // 更新は likeCount/commentCount/lastActivityAt のみ誰でも（認証必須）か、本人による本文編集。
+    // 会員判定: 招待制コミュニティのメンバー（noxa_users に doc がある）or admin
+    function isCommunityMember() {
+      return isAuth()
+        && (exists(/databases/$(database)/documents/noxa_users/$(request.auth.uid)) || isAdmin());
+    }
+
     match /noxa_posts/{postId} {
       allow read: if isAuth();
-      allow create: if isAuth()
+      // 投稿は招待済み会員のみ（API 経由の招待で noxa_users が作られる）
+      allow create: if isCommunityMember()
         && request.resource.data.authorUid == request.auth.uid
         && request.resource.data.likeCount == 0
         && request.resource.data.commentCount == 0
@@ -814,7 +826,8 @@ service cloud.firestore {
     // レス(comment): 作成は本人 uid・本文 1000 字以内。更新は likeCount のみ or 本人。
     match /noxa_comments/{commentId} {
       allow read: if isAuth();
-      allow create: if isAuth()
+      // レスも招待済み会員のみ
+      allow create: if isCommunityMember()
         && request.resource.data.authorUid == request.auth.uid
         && request.resource.data.likeCount == 0
         && request.resource.data.body is string
