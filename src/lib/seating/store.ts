@@ -7,10 +7,17 @@
  *   shop_shops/{shopId}/seating_casts/{castId}    … キャスト名簿（rank/wage/lock/baseStatus）
  *   shop_shops/{shopId}/seating_tables/{tableId}  … フロア卓の実状態（配置/客/タイマー）
  *   shop_shops/{shopId}/seating_queue/{itemId}    … 待ち組
- *   shop_shops/{shopId}/seating_meta/state        … 当日連番など
+ *   shop_shops/{shopId}/seating_meta/state        … 当日連番（営業日 dayKey で毎日リセット）
  *
  * キャストの稼働状態（Work/在卓）は卓配置から導出し、Break/Absent のみ名簿に保持。
  * これによりキャスト⇄卓のクロスコレクション不整合を避ける（配置は卓ドキュメントが正）。
+ *
+ * 書込ポリシー（2026-07-03 バグ総ざらいで全面改修）:
+ *   - 卓の更新は必ず runTransaction で**最新値を読み直し、変更フィールドのみ**書く。
+ *     旧実装はローカル state の卓オブジェクト全体を merge 書きしており、
+ *     同一卓ドキュメントに同居する POS 伝票(slips)や他端末の変更を古い値で
+ *     巻き戻す事故（伝票消失・二重上書き）が起きていた。
+ *   - 判定ロジックは logic.ts（純関数）に分離し単体テストで固定。
  */
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
@@ -24,10 +31,16 @@ import type { Cast, CastStatus, FloorTable, QueueItem, TableType, Customer, Rank
 import { createEmptyTable } from './types';
 import { DEFAULT_TABLE_NAMES } from './tables';
 import { getActiveShop, pickShopId } from '@/lib/workspace';
+import { businessDayKey } from '@/lib/datetime';
+import {
+  computeCasts, rotateOrder, nextDailySequence, canStartSet,
+  removeCastPatch, buildAssignPatches, toggleInArray, type TablePatch,
+} from './logic';
 
 type StoredCast = {
   id: string; name: string; rank: Rank; hourlyWage: number; isLocked: boolean;
   baseStatus: Extract<CastStatus, 'Free' | 'Break' | 'Absent'>; imageUrl?: string;
+  uid?: string | null; // 紐付くアカウント uid（給与/個人売上の帰属用・未連携なら null）
 };
 
 // ───────────────────────── shop 解決（POS と同様：デバイス優先 / オーナー shop）
@@ -60,18 +73,6 @@ function useShopTarget(user: User): ShopTarget {
   return ctx;
 }
 
-// ───────────────────────── 派生：卓配置からキャスト稼働状態を算出
-
-function computeCasts(stored: StoredCast[], tables: FloorTable[]): Cast[] {
-  const tableByCast = new Map<string, string>();
-  for (const t of tables) for (const cid of t.currentHostIds ?? []) tableByCast.set(cid, t.id);
-  return stored.map((s) => ({
-    id: s.id, name: s.name, rank: s.rank, hourlyWage: s.hourlyWage, isLocked: s.isLocked, imageUrl: s.imageUrl,
-    status: (tableByCast.has(s.id) ? 'Work' : s.baseStatus) as CastStatus,
-    currentTableId: tableByCast.get(s.id) ?? null,
-  }));
-}
-
 export type UseSeatingStore = {
   loading: boolean;
   shopId: string | null;
@@ -82,7 +83,7 @@ export type UseSeatingStore = {
   tables: FloorTable[];
   queue: QueueItem[];
   // cast
-  addCast: (c: { name: string; rank: Rank; hourlyWage: number }) => Promise<void>;
+  addCast: (c: { name: string; rank: Rank; hourlyWage: number; uid?: string | null }) => Promise<void>;
   updateCast: (id: string, updates: Partial<StoredCast>) => Promise<void>;
   removeCast: (id: string) => Promise<void>;
   toggleLock: (id: string) => Promise<void>;
@@ -111,6 +112,11 @@ export type UseSeatingStore = {
   seatQueueGroup: (tableId: string, item: QueueItem) => Promise<void>;
 };
 
+/** Firestore ドキュメント → FloorTable（欠損フィールドは空卓の既定値で補完） */
+function toFloorTable(id: string, data: Partial<FloorTable> | undefined): FloorTable {
+  return { ...createEmptyTable(id, (data?.name as string) ?? id), ...(data ?? {}), id } as FloorTable;
+}
+
 export function useSeatingStore(user: User): UseSeatingStore {
   const shop = useShopTarget(user);
   const shopId = shop.shopId;
@@ -132,7 +138,7 @@ export function useSeatingStore(user: User): UseSeatingStore {
       }, (e) => console.warn('[noxa:seating] キャスト購読エラー', e?.message ?? e)),
       onSnapshot(collection(db, `shop_shops/${shopId}/seating_tables`), (snap) => {
         const list: FloorTable[] = [];
-        snap.forEach((d) => list.push({ ...createEmptyTable(d.id, d.id), ...(d.data() as Partial<FloorTable>), id: d.id } as FloorTable));
+        snap.forEach((d) => list.push(toFloorTable(d.id, d.data() as Partial<FloorTable>)));
         list.sort((a, b) => a.name.localeCompare(b.name, 'ja'));
         setTables(list);
         setLoadingData(false);
@@ -151,18 +157,31 @@ export function useSeatingStore(user: User): UseSeatingStore {
 
   const tableRef = useCallback((id: string) => doc(db, `shop_shops/${shopId}/seating_tables/${id}`), [shopId]);
   const castRef = useCallback((id: string) => doc(db, `shop_shops/${shopId}/seating_casts/${id}`), [shopId]);
-  const getTable = useCallback((id: string) => tables.find((t) => t.id === id), [tables]);
 
-  const writeTable = useCallback(async (t: FloorTable) => {
+  /**
+   * 卓更新の共通トランザクション。
+   * 最新の卓を読み直して mut() で「変更フィールドのみ」のパッチを作り merge 書きする。
+   * mut が null を返したら書かない（no-op）。卓が存在しなければ何もしない。
+   */
+  const txUpdateTable = useCallback(async (tableId: string, mut: (fresh: FloorTable) => TablePatch | null) => {
     if (!shopId) return;
-    await setDoc(tableRef(t.id), { ...t, updatedAt: serverTimestamp() }, { merge: true });
+    await runTransaction(db, async (tx) => {
+      const ref = tableRef(tableId);
+      const snap = await tx.get(ref);
+      if (!snap.exists()) return;
+      const fresh = toFloorTable(tableId, snap.data() as Partial<FloorTable>);
+      const patch = mut(fresh);
+      if (!patch || Object.keys(patch).length === 0) return;
+      tx.set(ref, { ...patch, updatedAt: serverTimestamp() }, { merge: true });
+    });
   }, [shopId, tableRef]);
 
   // ── cast ops
   const addCast = useCallback<UseSeatingStore['addCast']>(async (c) => {
     if (!shopId) return;
     await addDoc(collection(db, `shop_shops/${shopId}/seating_casts`), {
-      name: c.name, rank: c.rank, hourlyWage: c.hourlyWage, isLocked: false, baseStatus: 'Free', createdAt: serverTimestamp(),
+      name: c.name, rank: c.rank, hourlyWage: c.hourlyWage, isLocked: false, baseStatus: 'Free',
+      uid: c.uid ?? null, createdAt: serverTimestamp(),
     });
   }, [shopId]);
   const updateCast = useCallback<UseSeatingStore['updateCast']>(async (id, updates) => {
@@ -199,12 +218,18 @@ export function useSeatingStore(user: User): UseSeatingStore {
       if (sd?.setTimeLength && sd.setTimeLength > 0) setLen = sd.setTimeLength;
       if (sd?.rotationTimeLength && sd.rotationTimeLength > 0) rotLen = sd.rotationTimeLength;
     } catch { /* ignore */ }
+    // 既存卓は上書きしない（seed の二度押しで稼働中フロアを白紙化しない）
+    const existing = await getDocs(collection(db, `shop_shops/${shopId}/seating_tables`));
+    const existingIds = new Set(existing.docs.map((d) => d.id));
     const batch = writeBatch(db);
+    let created = 0;
     names.forEach((name, i) => {
       const id = `tbl_${i + 1}`;
+      if (existingIds.has(id)) return;
       batch.set(doc(db, `shop_shops/${shopId}/seating_tables/${id}`), { ...createEmptyTable(id, name), setTimeLength: setLen, rotationTimeLength: rotLen, updatedAt: serverTimestamp() });
+      created++;
     });
-    await batch.commit();
+    if (created > 0) await batch.commit();
   }, [shopId]);
 
   const seedTestData = useCallback<UseSeatingStore['seedTestData']>(async () => {
@@ -250,73 +275,67 @@ export function useSeatingStore(user: User): UseSeatingStore {
 
   const assignCast = useCallback<UseSeatingStore['assignCast']>(async (tableId, castId) => {
     if (!shopId) return;
-    const batch = writeBatch(db);
-    for (const t of tables) {
-      const has = t.currentHostIds.includes(castId);
-      if (t.id === tableId) {
-        if (has) continue;
-        const castStartTimes = { ...t.castStartTimes, [castId]: Date.now() };
-        const assignedHistory = t.assignedHistory.includes(castId) ? t.assignedHistory : [...t.assignedHistory, castId];
-        batch.set(tableRef(t.id), { currentHostIds: [...t.currentHostIds, castId], castStartTimes, assignedHistory, updatedAt: serverTimestamp() }, { merge: true });
-      } else if (has) {
-        // 別卓から引き剥がし
-        const castStartTimes = { ...t.castStartTimes };
-        delete castStartTimes[castId];
-        batch.set(tableRef(t.id), {
-          currentHostIds: t.currentHostIds.filter((c) => c !== castId),
-          mainHostIds: t.mainHostIds.filter((c) => c !== castId),
-          castStartTimes, updatedAt: serverTimestamp(),
-        }, { merge: true });
+    // ローカル state ではなく、トランザクション内で全卓を読み直してから配置を計算する。
+    // （2端末が同時に同キャストを別卓へ配置しても「1キャスト=1卓」を保つ）
+    const tableIds = tables.map((t) => t.id);
+    if (!tableIds.includes(tableId)) tableIds.push(tableId);
+    const now = Date.now();
+    await runTransaction(db, async (tx) => {
+      const freshTables: FloorTable[] = [];
+      for (const id of tableIds) {
+        const snap = await tx.get(tableRef(id));
+        if (snap.exists()) freshTables.push(toFloorTable(id, snap.data() as Partial<FloorTable>));
       }
-    }
-    await batch.commit();
+      const patches = buildAssignPatches(freshTables, tableId, castId, now);
+      for (const p of patches) {
+        tx.set(tableRef(p.tableId), { ...p.patch, updatedAt: serverTimestamp() }, { merge: true });
+      }
+    });
   }, [shopId, tables, tableRef]);
 
   const removeCastFromTable = useCallback<UseSeatingStore['removeCastFromTable']>(async (tableId, castId) => {
-    const t = getTable(tableId); if (!t) return;
-    const castStartTimes = { ...t.castStartTimes }; delete castStartTimes[castId];
-    await writeTable({ ...t, currentHostIds: t.currentHostIds.filter((c) => c !== castId), mainHostIds: t.mainHostIds.filter((c) => c !== castId), castStartTimes });
-  }, [getTable, writeTable]);
+    await txUpdateTable(tableId, (t) => removeCastPatch(t, castId));
+  }, [txUpdateTable]);
 
   const toggleMainHost = useCallback<UseSeatingStore['toggleMainHost']>(async (tableId, castId) => {
-    const t = getTable(tableId); if (!t) return;
-    const has = t.mainHostIds.includes(castId);
-    await writeTable({ ...t, mainHostIds: has ? t.mainHostIds.filter((c) => c !== castId) : [...t.mainHostIds, castId] });
-  }, [getTable, writeTable]);
+    await txUpdateTable(tableId, (t) => ({ mainHostIds: toggleInArray(t.mainHostIds, castId) }));
+  }, [txUpdateTable]);
 
   const toggleRequested = useCallback<UseSeatingStore['toggleRequested']>(async (tableId, castId) => {
-    const t = getTable(tableId); if (!t) return;
-    const has = t.requestedHostIds.includes(castId);
-    await writeTable({ ...t, requestedHostIds: has ? t.requestedHostIds.filter((c) => c !== castId) : [...t.requestedHostIds, castId] });
-  }, [getTable, writeTable]);
+    await txUpdateTable(tableId, (t) => ({ requestedHostIds: toggleInArray(t.requestedHostIds, castId) }));
+  }, [txUpdateTable]);
 
   const rotateHosts = useCallback<UseSeatingStore['rotateHosts']>(async (tableId) => {
-    const t = getTable(tableId); if (!t || t.currentHostIds.length < 2) return;
-    const rotated = [...t.currentHostIds];
-    const first = rotated.shift();
-    if (first) rotated.push(first);
-    await writeTable({ ...t, currentHostIds: rotated });
-  }, [getTable, writeTable]);
+    await txUpdateTable(tableId, (t) => {
+      if ((t.currentHostIds ?? []).length < 2) return null;
+      return { currentHostIds: rotateOrder(t.currentHostIds) };
+    });
+  }, [txUpdateTable]);
 
   const startSet = useCallback<UseSeatingStore['startSet']>(async (tableId, customers) => {
     if (!shopId) return;
     const now = Date.now();
+    const todayKey = businessDayKey();
     const metaR = doc(db, `shop_shops/${shopId}/seating_meta/state`);
     await runTransaction(db, async (tx) => {
-      const metaSnap = await tx.get(metaR);
-      const seq = (metaSnap.exists() ? (metaSnap.data().dailySequence as number) : 0) + 1;
-      const t = getTable(tableId);
-      const castStartTimes = { ...(t?.castStartTimes ?? {}) };
-      (t?.currentHostIds ?? []).forEach((cid) => { if (!castStartTimes[cid]) castStartTimes[cid] = now; });
-      tx.set(metaR, { dailySequence: seq, updatedAt: serverTimestamp() }, { merge: true });
+      const [metaSnap, tableSnap] = [await tx.get(metaR), await tx.get(tableRef(tableId))];
+      if (!tableSnap.exists()) throw new Error('卓が見つかりません');
+      const t = toFloorTable(tableId, tableSnap.data() as Partial<FloorTable>);
+      // 使用中の卓への二重セット開始を拒否（先客の customers を上書きで潰さない）
+      if (!canStartSet(t.status)) throw new Error(`この卓は使用中です（${t.name}）`);
+      const meta = metaSnap.exists() ? (metaSnap.data() as { dailySequence?: number; dayKey?: string }) : undefined;
+      const seq = nextDailySequence(meta, todayKey); // 営業日が変わったら1から
+      const castStartTimes = { ...(t.castStartTimes ?? {}) };
+      (t.currentHostIds ?? []).forEach((cid) => { if (!castStartTimes[cid]) castStartTimes[cid] = now; });
+      tx.set(metaR, { dailySequence: seq, dayKey: todayKey, updatedAt: serverTimestamp() }, { merge: true });
       tx.set(tableRef(tableId), {
         status: 'ACTIVE', startTime: now, entryTime: now, entryNumber: seq,
-        type: customers[0]?.type ?? t?.type ?? '正規',
+        type: customers[0]?.type ?? t.type ?? '正規',
         customers: customers.map((c) => ({ ...c, entryTime: now })),
         castStartTimes, updatedAt: serverTimestamp(),
       }, { merge: true });
     });
-  }, [shopId, getTable, tableRef]);
+  }, [shopId, tableRef]);
 
   const updateTableSettings = useCallback<UseSeatingStore['updateTableSettings']>(async (tableId, patch) => {
     if (!shopId) return;
@@ -328,50 +347,61 @@ export function useSeatingStore(user: User): UseSeatingStore {
   }, [shopId]);
 
   const setCastExcluded = useCallback<UseSeatingStore['setCastExcluded']>(async (tableId, castId, excluded) => {
-    const t = getTable(tableId); if (!t) return;
-    const ex = new Set(t.excludedHostIds ?? []);
-    if (excluded) ex.add(castId); else ex.delete(castId);
-    await writeTable({ ...t, excludedHostIds: Array.from(ex) });
-  }, [getTable, writeTable]);
+    await txUpdateTable(tableId, (t) => {
+      const ex = new Set(t.excludedHostIds ?? []);
+      if (excluded) ex.add(castId); else ex.delete(castId);
+      return { excludedHostIds: Array.from(ex) };
+    });
+  }, [txUpdateTable]);
 
-  // テストデータ整理: seed キャスト削除＋全卓を空席リセット（owner 想定）
+  // テストデータ整理: seed キャスト削除＋seed 顧客削除＋全卓を空席リセット（owner 想定）
   const clearSeedData = useCallback<UseSeatingStore['clearSeedData']>(async () => {
     if (!shopId) return;
-    const [cs, ts] = await Promise.all([
+    const [cs, ts, cu] = await Promise.all([
       getDocs(collection(db, `shop_shops/${shopId}/seating_casts`)),
       getDocs(collection(db, `shop_shops/${shopId}/seating_tables`)),
+      getDocs(query(collection(db, `shop_shops/${shopId}/customers`), where('seed', '==', true))),
     ]);
     const batch = writeBatch(db);
     cs.forEach((d) => { if ((d.data() as { seed?: boolean }).seed === true) batch.delete(d.ref); });
+    cu.forEach((d) => batch.delete(d.ref));
     ts.forEach((d) => { const name = (d.data() as { name?: string }).name ?? d.id; batch.set(d.ref, { ...createEmptyTable(d.id, name), slips: [], updatedAt: serverTimestamp() }); });
     await batch.commit();
   }, [shopId]);
 
   const setTableType = useCallback<UseSeatingStore['setTableType']>(async (tableId, type) => {
-    const t = getTable(tableId); if (!t) return;
-    await writeTable({ ...t, type });
-  }, [getTable, writeTable]);
+    await txUpdateTable(tableId, () => ({ type }));
+  }, [txUpdateTable]);
 
   const checkTable = useCallback<UseSeatingStore['checkTable']>(async (tableId) => {
-    const t = getTable(tableId); if (!t) return;
-    await writeTable({ ...t, status: 'CHECK' });
-  }, [getTable, writeTable]);
+    // ACTIVE のみ CHECK へ（空卓や既にチェック済みの卓を誤って CHECK にしない）
+    await txUpdateTable(tableId, (t) => (t.status === 'ACTIVE' ? { status: 'CHECK' } : null));
+  }, [txUpdateTable]);
 
   const extendTime = useCallback<UseSeatingStore['extendTime']>(async (tableId, minutes) => {
-    const t = getTable(tableId); if (!t) return;
-    await writeTable({ ...t, setTimeLength: (t.setTimeLength || 60) + minutes });
-  }, [getTable, writeTable]);
+    await txUpdateTable(tableId, (t) => ({ setTimeLength: (t.setTimeLength || 60) + minutes }));
+  }, [txUpdateTable]);
 
   const toggleInnerRotation = useCallback<UseSeatingStore['toggleInnerRotation']>(async (tableId) => {
-    const t = getTable(tableId); if (!t) return;
-    await writeTable({ ...t, innerRotationEnabled: !t.innerRotationEnabled });
-  }, [getTable, writeTable]);
+    await txUpdateTable(tableId, (t) => ({ innerRotationEnabled: !t.innerRotationEnabled }));
+  }, [txUpdateTable]);
 
   const resetTable = useCallback<UseSeatingStore['resetTable']>(async (tableId) => {
-    const t = getTable(tableId); if (!t) return;
-    // 退店：席回し状態に加え POS 伝票（slips）も明示的に空へ（統合卓ドキュメント）
-    await writeTable({ ...createEmptyTable(t.id, t.name), setTimeLength: t.setTimeLength, innerRotationEnabled: t.innerRotationEnabled, slips: [] });
-  }, [getTable, writeTable]);
+    if (!shopId) return;
+    // 退店：最新の卓設定（セット長/ローテ設定・卓名）だけ引き継ぎ、状態と POS 伝票(slips)を空へ。
+    await runTransaction(db, async (tx) => {
+      const ref = tableRef(tableId);
+      const snap = await tx.get(ref);
+      if (!snap.exists()) return;
+      const t = toFloorTable(tableId, snap.data() as Partial<FloorTable>);
+      tx.set(ref, {
+        ...createEmptyTable(t.id, t.name),
+        setTimeLength: t.setTimeLength, rotationTimeLength: t.rotationTimeLength,
+        innerRotationEnabled: t.innerRotationEnabled,
+        slips: [], updatedAt: serverTimestamp(),
+      }, { merge: true });
+    });
+  }, [shopId, tableRef]);
 
   // ── queue ops
   const addToQueue = useCallback<UseSeatingStore['addToQueue']>(async (item) => {
@@ -383,13 +413,38 @@ export function useSeatingStore(user: User): UseSeatingStore {
     await deleteDoc(doc(db, `shop_shops/${shopId}/seating_queue/${id}`));
   }, [shopId]);
   const seatQueueGroup = useCallback<UseSeatingStore['seatQueueGroup']>(async (tableId, item) => {
+    if (!shopId) return;
+    // 案内＋待ち組削除を単一トランザクションに。
+    // （2端末が同じ待ち組を同時に案内しても、先勝ちで後手は no-op＝二重案内を防ぐ）
     const now = Date.now();
-    const customers: Customer[] = Array.from({ length: Math.max(1, item.groupSize) }, (_, i) => ({
-      id: `cust_${now}_${i}`, name: i === 0 ? item.name : undefined, type: item.type, entryTime: now,
-    }));
-    await startSet(tableId, customers);
-    await removeFromQueue(item.id);
-  }, [startSet, removeFromQueue]);
+    const todayKey = businessDayKey();
+    const queueR = doc(db, `shop_shops/${shopId}/seating_queue/${item.id}`);
+    const metaR = doc(db, `shop_shops/${shopId}/seating_meta/state`);
+    await runTransaction(db, async (tx) => {
+      const queueSnap = await tx.get(queueR);
+      if (!queueSnap.exists()) return; // 既に別端末が案内済み
+      const tableSnap = await tx.get(tableRef(tableId));
+      if (!tableSnap.exists()) throw new Error('卓が見つかりません');
+      const t = toFloorTable(tableId, tableSnap.data() as Partial<FloorTable>);
+      if (!canStartSet(t.status)) throw new Error(`この卓は使用中です（${t.name}）`);
+      const metaSnap = await tx.get(metaR);
+      const meta = metaSnap.exists() ? (metaSnap.data() as { dailySequence?: number; dayKey?: string }) : undefined;
+      const seq = nextDailySequence(meta, todayKey);
+      const customers: Customer[] = Array.from({ length: Math.max(1, item.groupSize) }, (_, i) => ({
+        id: `cust_${now}_${i}`, name: i === 0 ? item.name : undefined, type: item.type, entryTime: now,
+      }));
+      const castStartTimes = { ...(t.castStartTimes ?? {}) };
+      (t.currentHostIds ?? []).forEach((cid) => { if (!castStartTimes[cid]) castStartTimes[cid] = now; });
+      tx.set(metaR, { dailySequence: seq, dayKey: todayKey, updatedAt: serverTimestamp() }, { merge: true });
+      tx.set(tableRef(tableId), {
+        status: 'ACTIVE', startTime: now, entryTime: now, entryNumber: seq,
+        type: item.type,
+        customers: customers.map((c) => ({ ...c })),
+        castStartTimes, updatedAt: serverTimestamp(),
+      }, { merge: true });
+      tx.delete(queueR);
+    });
+  }, [shopId, tableRef]);
 
   return useMemo(() => ({
     loading: shop.loading || loadingData,

@@ -272,7 +272,12 @@ function TableDetail({ table, casts, tables, castById, store, user }: {
   const startSet = async () => {
     const now = Date.now();
     const customers: Customer[] = Array.from({ length: Math.max(1, openGuests) }, (_, i) => ({ id: `cust_${now}_${i}`, type: openType, entryTime: now }));
-    await store.startSet(table.id, customers);
+    try {
+      await store.startSet(table.id, customers);
+    } catch (e) {
+      // 使用中卓への二重開卓ガード等を可視化（握りつぶすと「押しても無反応」に見える）
+      window.alert(String((e as Error)?.message ?? e));
+    }
   };
 
   return (
@@ -486,7 +491,7 @@ function QueuePanel({ queue, tables, store }: { queue: import('@/lib/seating/typ
               <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
                 {emptyTables.length === 0 && <span style={{ fontSize: 11, color: 'var(--noxa-status-warning)' }}>空卓なし</span>}
                 {emptyTables.map((t) => (
-                  <button key={t.id} type="button" onClick={() => { store.seatQueueGroup(t.id, q); setSeatFor(null); }} style={chipStyle(false)}>{t.name}</button>
+                  <button key={t.id} type="button" onClick={() => { store.seatQueueGroup(t.id, q).catch((e) => window.alert(String((e as Error)?.message ?? e))); setSeatFor(null); }} style={chipStyle(false)}>{t.name}</button>
                 ))}
               </div>
             ) : (
