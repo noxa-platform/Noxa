@@ -168,10 +168,10 @@ service cloud.firestore {
 
       match /sales/{saleId} {
         allow read: if isShopMember(shopId);
-        allow create: if isShopMemberWithSalesEdit(shopId)
-          || (isShopMember(shopId) && request.resource.data.castUid == request.auth.uid);
-        allow update: if isShopMemberWithSalesEdit(shopId)
-          || (isShopMember(shopId) && resource.data.castUid == request.auth.uid);
+        // POS 会計は店舗内の共同作業＝メンバー全ロールが登録/修正できる。
+        // 旧「castUid==自分」条件は、一般キャストが他人担当伝票の会計をすると
+        // permission-denied になり現場が詰まるため役割ベースへ変更（2026-07-03）。
+        allow create, update: if isShopMember(shopId);
         allow delete: if isShopOwnerLike(shopId);
       }
 

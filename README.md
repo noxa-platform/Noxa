@@ -35,9 +35,11 @@ noxa-delta.vercel.app/account/delete    ← 退会
 
 ## Firebase
 
-`minami-bar-guide` プロジェクトを yorulog / nomishugy と共有。
+**`noxa-platform`** プロジェクトを yorulog / nomishugy と共有（旧 `minami-bar-guide` は legacy エイリアスのみ・未使用）。
 - account_users / account_subscriptions / account_iap_transactions 等の共通 doc を直接読み書き
-- Cloud Functions は yorulog/functions に集約（`exchangeAuthToken` / `deleteNoxaAccount` 等）
+- **firestore.rules / Cloud Functions の正本はこのリポ**（`firestore.rules`・`functions/`）。
+  デプロイ: `firebase deploy --only firestore:rules` / `firebase deploy --only functions:<name>`（一括デプロイ禁止・名指しのみ）
+- ルールテスト: `npm run test:rules`（要 Java エミュレータ。ローカルに無ければ CI が実行）
 
 ## 開発
 

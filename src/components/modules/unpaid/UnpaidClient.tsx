@@ -14,7 +14,7 @@ import {
 } from 'firebase/firestore';
 import type { User } from 'firebase/auth';
 import { db } from '@/lib/firebase/config';
-import { useShopId } from '@/lib/useShopId';
+import { useShopRole, hasShopRole } from '@/lib/useShopRole';
 
 /**
  * 売掛管理モジュール（機微・オーナー専用・実データ）
@@ -135,13 +135,13 @@ const fieldLabel: React.CSSProperties = {
 };
 
 export function UnpaidClient({ user }: { user: User }) {
-  const shop = useShopId(user);
+  const shop = useShopRole(user);
   const [records, setRecords] = useState<UnpaidRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
 
-  // 機微モジュール：オーナー（canManage）のみアクセス可能
-  const allowed = shop.canManage;
+  // 機微: owner/manager/accounting（rules の isShopMemberWithSalesEdit と一致。店長が未収を見られない問題の解消）
+  const allowed = hasShopRole(shop, ['manager', 'accounting']);
   const path = shop.shopId && allowed ? `shop_shops/${shop.shopId}/unpaid` : null;
 
   // 追加フォーム

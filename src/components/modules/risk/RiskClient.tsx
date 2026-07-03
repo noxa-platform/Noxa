@@ -13,7 +13,7 @@ import {
 } from 'firebase/firestore';
 import type { User } from 'firebase/auth';
 import { db } from '@/lib/firebase/config';
-import { useShopId } from '@/lib/useShopId';
+import { useShopRole, hasShopRole } from '@/lib/useShopRole';
 
 /**
  * リスク客共有 — Noxa OS モジュール（機微・オーナー専用）
@@ -95,7 +95,7 @@ function toEntry(id: string, data: DocumentData): RiskEntry {
 const today = () => new Date().toISOString().slice(0, 10);
 
 export function RiskClient({ user }: { user: User }) {
-  const shop = useShopId(user);
+  const shop = useShopRole(user);
   const [filter, setFilter] = useState<FilterKey>('all');
   const [entries, setEntries] = useState<RiskEntry[]>([]);
   const [loading, setLoading] = useState(true);
@@ -115,7 +115,8 @@ export function RiskClient({ user }: { user: User }) {
   const [eDetail, setEDetail] = useState('');
   const [eDate, setEDate] = useState('');
 
-  const canView = shop.canManage; // 機微：オーナーのみ
+  // 機微: owner/manager/accounting（rules の isShopMemberWithSalesEdit と一致）
+  const canView = hasShopRole(shop, ['manager', 'accounting']);
   const path = shop.shopId && canView ? `shop_shops/${shop.shopId}/risk_customers` : null;
 
   useEffect(() => {

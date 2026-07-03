@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { useEffect, useMemo, useState } from 'react';
-import { collection, onSnapshot, addDoc, doc, updateDoc, serverTimestamp, increment, Timestamp, type DocumentData } from 'firebase/firestore';
+import { collection, onSnapshot, addDoc, doc, updateDoc, serverTimestamp, increment, query, where, Timestamp, type DocumentData } from 'firebase/firestore';
 import { db } from '@/lib/firebase/config';
 import { useShopId } from '@/lib/useShopId';
 import { businessDayKey } from '@/lib/datetime';
@@ -46,7 +46,10 @@ export function SalesClient({ user }: { user: User }) {
   useEffect(() => {
     if (shop.loading) return;
     setLoading(true);
-    const unsub = onSnapshot(collection(db, colPath), (snap) => {
+    // 期間クエリ化: 当月分のみ購読（全件購読は数ヶ月で read 数が破綻する）。
+    // dayKey は businessDayKey 形式（YYYY-MM-DD）なので範囲条件で当月を取る。
+    const monthStart = `${businessDayKey().slice(0, 7)}-01`;
+    const unsub = onSnapshot(query(collection(db, colPath), where('dayKey', '>=', monthStart)), (snap) => {
       const list: Sale[] = [];
       snap.forEach((d) => { const x = d.data() as DocumentData; list.push({ id: d.id, amount: typeof x.amount === 'number' ? x.amount : 0, customerName: x.customerName ?? null, customerId: x.customerId ?? null, castName: x.castName ?? null, dayKey: x.dayKey ?? '', atMs: toMs(x.checkoutAt) ?? toMs(x.createdAt), voided: x.voided === true, source: x.source ?? 'manual' }); });
       setSales(list); setLoading(false);
@@ -105,8 +108,8 @@ export function SalesClient({ user }: { user: User }) {
       <div className="grid grid-cols-2 lg:grid-cols-4" style={{ gap: 12, marginBottom: 18 }}>
         <Kpi label="本日" value={yen(sum.today)} accent />
         <Kpi label="今月" value={yen(sum.month)} />
-        <Kpi label="累計" value={yen(sum.total)} />
-        <Kpi label="件数" value={`${sum.count} 件`} />
+        {/* 期間クエリ化に伴い累計→今月件数へ（全期間集計は月次レポートで） */}
+        <Kpi label="今月件数" value={`${sum.count} 件`} />
       </div>
 
       {loading ? (
