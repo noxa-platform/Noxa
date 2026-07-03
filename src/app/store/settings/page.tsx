@@ -6,6 +6,7 @@ import type { User } from 'firebase/auth';
 import { AuthGuard } from '@/components/AuthGuard';
 import { AccountShell } from '@/components/AccountShell';
 import { useShopConfig, DEFAULT_MODULES, DEFAULT_TERMS, DEFAULT_TRANSPORT_TYPES, DEFAULT_INVENTORY_CATEGORIES, type ModuleCfg, type RoleWage, type SalesAttribution, type ChoiceItem } from '@/lib/shopConfig';
+import { MembersSection } from '@/components/store/MembersSection';
 
 const TERM_KEYS: { key: string; label: string }[] = [
   { key: 'cast', label: 'スタッフの呼称' },
@@ -66,6 +67,11 @@ function SettingsClient({ user }: { user: User }) {
       <p style={{ color: 'var(--noxa-text-muted)', fontSize: 13, lineHeight: 1.7, margin: '0 0 22px' }}>
         業種・店舗に合わせて呼称・役職・モジュール構成・売上ルールを編集できます。料金/税/メニュー/卓名は <Link href="/pos/settings" style={{ color: 'var(--noxa-accent-primary-ink)' }}>POS設定</Link> で。
       </p>
+
+      {/* メンバー・招待 */}
+      <Section title="メンバーと招待">
+        <MembersSection shopId={shopId} myUid={user.uid} />
+      </Section>
 
       {/* 用語辞書 */}
       <Section title="用語（呼称）">

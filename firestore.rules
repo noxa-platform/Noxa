@@ -156,7 +156,14 @@ service cloud.firestore {
 
       match /members/{uid} {
         allow read: if isShopMember(shopId);
-        allow write: if isShopOwnerLike(shopId) || isSelf(uid);
+        // 参加は招待 redeem API (Admin SDK) 経由のみ。旧 `isSelf で write 可` は
+        // 「誰でも任意の店へ任意 role で自己登録」できる穴だったため封鎖（2026-07-03）。
+        // 例外: 店舗作成直後のオーナー自己登録（shop.ownerUid 一致）のみ許可。
+        allow create, update: if isShopOwnerLike(shopId)
+          || (isSelf(uid)
+              && get(/databases/$(database)/documents/shop_shops/$(shopId)).data.ownerUid == request.auth.uid);
+        // 除名は owner/manager、自主退店は本人
+        allow delete: if isShopOwnerLike(shopId) || isSelf(uid);
       }
 
       match /sales/{saleId} {
@@ -234,11 +241,12 @@ service cloud.firestore {
       }
 
       match /invites/{code} {
-        allow read: if isAuth();
+        // 招待コードの閲覧/管理は owner/manager のみ（旧 `read: isAuth` は
+        // 任意ユーザーがコード一覧を列挙→無断参加できる穴だった）。
+        // 受諾側の検証・使用済みマークは redeem API (Admin SDK) が行う。
+        allow read: if isShopOwnerLike(shopId);
         allow create: if isShopOwnerLike(shopId);
-        allow update: if isAuth()
-          && (resource.data.createdBy == request.auth.uid
-              || !resource.data.keys().hasAny(['usedBy']));
+        allow update: if isShopOwnerLike(shopId);
         allow delete: if isShopOwnerLike(shopId);
       }
 
