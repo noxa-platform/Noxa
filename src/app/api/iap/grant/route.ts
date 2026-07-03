@@ -31,6 +31,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { verifyRequest, getAdminDb, AuthError } from '../../lib/firebase-admin';
 import { getIapProduct } from '@/lib/iap/products';
+import { verifyAppleJws, decodeAppleJwsPayload } from '@/lib/iap/verify-apple-jws';
 import { FieldValue } from 'firebase-admin/firestore';
 
 interface GrantBody {
@@ -45,21 +46,23 @@ interface GrantBody {
 }
 
 /**
- * Apple JWS（compact 形式: header.payload.signature）から payload 部分をデコード。
- *
- * 注意: これだけでは「署名検証」にならない。本番では公式 JWKS で検証必須。
- * 現状は payload の中身（transactionId, productId, bundleId, signedDate）を取り出し、
- * 整合性チェック（bundleId 一致 / productId 一致 / transactionId 一致）で最小限の防御。
+ * JWS を検証して payload を得る。
+ * - 本番(NODE_ENV==='production'): x5c チェーン検証（Apple Root CA G3 ピン）を必須。
+ *   偽造 JWS は null を返し、呼び出し側で 403 にする。
+ * - 開発/Preview: まず完全検証を試み、失敗時のみ decode-only にフォールバック
+ *   （Xcode ローカル StoreKit Testing はローカル証明書署名のため完全検証が通らない）。
  */
-function decodeJwsPayload(jws: string): Record<string, unknown> | null {
-  try {
-    const parts = jws.split('.');
-    if (parts.length !== 3) return null;
-    const payload = Buffer.from(parts[1], 'base64url').toString('utf-8');
-    return JSON.parse(payload) as Record<string, unknown>;
-  } catch {
+function verifyOrDecodeJws(jws: string): { payload: Record<string, unknown>; verified: boolean } | null {
+  const verified = verifyAppleJws(jws);
+  if (verified.ok) return { payload: verified.payload, verified: true };
+  if (process.env.NODE_ENV === 'production') {
+    console.warn(`iap grant: JWS 署名検証に失敗 (${verified.reason})`);
     return null;
   }
+  const decoded = decodeAppleJwsPayload(jws);
+  if (!decoded) return null;
+  console.warn(`iap grant: 開発環境のため署名未検証で続行 (verify=${verified.reason})`);
+  return { payload: decoded, verified: false };
 }
 
 export async function POST(request: NextRequest) {
@@ -81,11 +84,15 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: '未知の productId です' }, { status: 400 });
     }
 
-    // JWS の payload を読んで claim 整合性を確認
-    const payload = decodeJwsPayload(signedTransactionJws);
-    if (!payload) {
-      return NextResponse.json({ error: '無効な signedTransactionJws' }, { status: 400 });
+    // JWS の署名検証（本番は必須）+ payload 取得
+    const jwsResult = verifyOrDecodeJws(signedTransactionJws);
+    if (!jwsResult) {
+      return NextResponse.json(
+        { error: 'signedTransactionJws の署名検証に失敗しました' },
+        { status: 403 },
+      );
     }
+    const { payload } = jwsResult;
     const claimedProductId = payload.productId;
     const claimedTxId = payload.transactionId ?? payload.originalTransactionId;
     const claimedBundleId = payload.bundleId;
@@ -118,6 +125,8 @@ export async function POST(request: NextRequest) {
         environment: environment ?? 'unknown',
         processedAt: FieldValue.serverTimestamp(),
         signedDateMs: payload.signedDate ?? null,
+        // 署名検証済みか（本番は常に true。開発の decode-only 付与は false で痕跡を残す）
+        jwsVerified: jwsResult.verified,
       });
       tx.set(
         subRef,

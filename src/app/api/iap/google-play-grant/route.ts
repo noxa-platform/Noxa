@@ -57,39 +57,40 @@ async function verifyGooglePlayPurchase(
 ): Promise<VerifyResult> {
   const saKey = process.env.GOOGLE_PLAY_SERVICE_ACCOUNT_KEY;
   if (!saKey) {
-    // 検証skipは明示フラグ(IAP_ALLOW_UNVERIFIED=true)が立っているときのみ許可。
-    // NODE_ENV依存だとPreview/staging環境で偽トークンによる不正付与を許してしまうため明示化。
-    if (process.env.IAP_ALLOW_UNVERIFIED === 'true') {
-      console.warn('verifyGooglePlayPurchase: IAP_ALLOW_UNVERIFIED=true のため検証skip（本番では絶対に設定しないこと）');
+    // 検証skipは「明示フラグ + 非本番」の両方を満たすときのみ許可。
+    // 本番(NODE_ENV==='production')では IAP_ALLOW_UNVERIFIED が設定されていても
+    // 絶対に skip しない（誤設定による金銭事故を構造的に防ぐ）。
+    if (process.env.IAP_ALLOW_UNVERIFIED === 'true' && process.env.NODE_ENV !== 'production') {
+      console.warn('verifyGooglePlayPurchase: IAP_ALLOW_UNVERIFIED=true のため検証skip（非本番のみ有効）');
       return { ok: true, purchaseState: 0 };
     }
     return { ok: false, reason: 'Service Account 未設定（検証不可）' };
   }
 
-  // TODO: googleapis SDK で実装
-  //
-  //   import { google } from 'googleapis';
-  //   const auth = new google.auth.GoogleAuth({
-  //     credentials: JSON.parse(saKey),
-  //     scopes: ['https://www.googleapis.com/auth/androidpublisher'],
-  //   });
-  //   const publisher = google.androidpublisher({ version: 'v3', auth });
-  //   const { data } = await publisher.purchases.products.get({
-  //     packageName, productId, token: purchaseToken,
-  //   });
-  //   return {
-  //     ok: data.purchaseState === 0,
-  //     purchaseState: data.purchaseState ?? undefined,
-  //     consumptionState: data.consumptionState ?? undefined,
-  //     acknowledgementState: data.acknowledgementState ?? undefined,
-  //   };
-
-  // パラメータは将来の実装時に使うため、形だけ参照しておく（未使用警告回避）
-  void packageName;
-  void productId;
-  void purchaseToken;
-
-  return { ok: false, reason: 'Google Play Developer API 連携未実装' };
+  // googleapis (androidpublisher v3) で purchaseToken を実検証する
+  try {
+    const { google } = await import('googleapis');
+    const auth = new google.auth.GoogleAuth({
+      credentials: JSON.parse(saKey),
+      scopes: ['https://www.googleapis.com/auth/androidpublisher'],
+    });
+    const publisher = google.androidpublisher({ version: 'v3', auth });
+    const { data } = await publisher.purchases.products.get({
+      packageName,
+      productId,
+      token: purchaseToken,
+    });
+    return {
+      ok: data.purchaseState === 0,
+      purchaseState: data.purchaseState ?? undefined,
+      consumptionState: data.consumptionState ?? undefined,
+      acknowledgementState: data.acknowledgementState ?? undefined,
+      ...(data.purchaseState !== 0 ? { reason: `purchaseState=${data.purchaseState}` } : {}),
+    };
+  } catch (e) {
+    console.error('verifyGooglePlayPurchase: androidpublisher 検証エラー', e);
+    return { ok: false, reason: 'Google Play 検証 API 呼び出しに失敗' };
+  }
 }
 
 export async function POST(request: NextRequest) {
