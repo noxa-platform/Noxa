@@ -95,10 +95,11 @@ export type ProfilePage = {
   refId: string;
   displayName: string;
   avatar: string;
-  bio: string;
-  sns: SnsLink[];
+  bio: string;               // 旧フィールド（blocks 移行後は表示に使わない・fallback 用）
+  sns: SnsLink[];            // 旧フィールド（同上）
   published: boolean;        // 後方互換のため残す（visibility が正本）
   visibility?: Visibility;   // 正本（未設定の既存docは published から導出）
+  blocks?: unknown[];        // NOXAページのブロック（正本。normalizeBlocks で安全に読む）
   shopHandle?: string;
 };
 
