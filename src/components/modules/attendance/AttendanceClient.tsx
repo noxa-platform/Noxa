@@ -67,7 +67,11 @@ export function AttendanceClient({ user }: { user: User }) {
   }, [user.uid, device.loading, device.isDevice, device.shopId]);
 
   const today = new Date().toISOString().slice(0, 10);
-  const open = shifts.find((s) => !s.endMs);
+  // 「今日の未退勤」と「過去日の退勤忘れ」を区別する。
+  // 旧実装は日付を見ずに最初の未退勤を対象にしていたため、前日の退勤忘れが
+  // 今日の出勤をブロックし、退勤すると前日の記録に今日の時刻が入る事故があった。
+  const openToday = shifts.find((s) => !s.endMs && s.date === today);
+  const staleOpens = shifts.filter((s) => !s.endMs && s.date !== today);
   const todayDone = shifts.filter((s) => s.date === today && s.endMs);
 
   const clockIn = async () => {
@@ -76,8 +80,8 @@ export function AttendanceClient({ user }: { user: User }) {
     finally { setBusy(false); }
   };
   const clockOut = async () => {
-    if (!shopId || !open || busy) return; setBusy(true);
-    try { await updateDoc(doc(db, `shop_shops/${shopId}/shifts/${open.id}`), { endAt: serverTimestamp() }); await reload(shopId); }
+    if (!shopId || !openToday || busy) return; setBusy(true);
+    try { await updateDoc(doc(db, `shop_shops/${shopId}/shifts/${openToday.id}`), { endAt: serverTimestamp() }); await reload(shopId); }
     finally { setBusy(false); }
   };
 
@@ -91,14 +95,25 @@ export function AttendanceClient({ user }: { user: User }) {
           <section style={{ background: 'var(--noxa-surface-card)', border: '1px solid var(--noxa-border)', borderRadius: 16, padding: 20, marginBottom: 16, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16, flexWrap: 'wrap' }}>
             <div>
               <div className="noxa-eyebrow" style={{ fontSize: 11, marginBottom: 6 }}>今日の勤務</div>
-              {open ? (
-                <div style={{ fontSize: 15 }}>出勤中 <span style={{ fontFamily: mono, color: 'var(--noxa-accent-primary-ink)' }}>{hhmm(open.startMs)}〜</span> <span style={{ fontFamily: mono, fontSize: 12, color: 'var(--noxa-text-muted)' }}>（{dur(open.startMs, Date.now())}）</span></div>
+              {openToday ? (
+                <div style={{ fontSize: 15 }}>出勤中 <span style={{ fontFamily: mono, color: 'var(--noxa-accent-primary-ink)' }}>{hhmm(openToday.startMs)}〜</span> <span style={{ fontFamily: mono, fontSize: 12, color: 'var(--noxa-text-muted)' }}>（{dur(openToday.startMs, Date.now())}）</span></div>
               ) : <div style={{ fontSize: 14, color: 'var(--noxa-text-muted)' }}>未出勤</div>}
             </div>
-            {open
+            {openToday
               ? <button type="button" onClick={clockOut} disabled={busy} style={{ ...chip(true), minHeight: 48, padding: '0 28px', background: 'var(--noxa-accent-destructive)', borderColor: 'var(--noxa-accent-destructive)', fontSize: 15 }}>退勤</button>
               : <button type="button" onClick={clockIn} disabled={busy} style={{ ...chip(true), minHeight: 48, padding: '0 28px', fontSize: 15 }}>出勤</button>}
           </section>
+
+          {/* 退勤忘れ警告（過去日の未退勤。放置すると給与計算で0分になる） */}
+          {staleOpens.length > 0 && (
+            <section style={{ background: 'rgba(229,115,115,0.08)', border: '1px solid var(--noxa-status-error)', borderRadius: 12, padding: '12px 14px', marginBottom: 16 }}>
+              <div style={{ fontSize: 13, color: 'var(--noxa-status-error)', fontWeight: 600, marginBottom: 6 }}>退勤の打刻忘れがあります</div>
+              {staleOpens.map((s) => (
+                <StaleOpenFixer key={s.id} shopId={shopId} shift={s} onFixed={() => reload(shopId)} />
+              ))}
+              <p style={{ fontSize: 11, color: 'var(--noxa-text-muted)', margin: '6px 0 0' }}>そのままだと給与計算に乗りません。実際の退勤時刻を入れて記録を締めてください。</p>
+            </section>
+          )}
 
           {todayDone.length > 0 && (
             <p style={{ fontSize: 12, color: 'var(--noxa-text-muted)', margin: '0 0 16px' }}>本日の完了勤務：{todayDone.map((s) => `${hhmm(s.startMs)}–${hhmm(s.endMs)}`).join(' / ')}</p>
@@ -108,16 +123,101 @@ export function AttendanceClient({ user }: { user: User }) {
 
           <Section label="勤怠履歴">
             {shifts.length === 0 ? <Empty>記録はまだありません。</Empty> : shifts.slice(0, 30).map((s) => (
-              <div key={s.id} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 12px', borderRadius: 10, background: 'var(--noxa-bg-base)', border: '1px solid var(--noxa-border)' }}>
-                <span style={{ fontFamily: mono, fontSize: 11, color: 'var(--noxa-text-muted)', minWidth: 84 }}>{s.date}</span>
-                <span style={{ fontFamily: mono, fontSize: 13, flex: 1 }}>{hhmm(s.startMs)} – {s.endMs ? hhmm(s.endMs) : <span style={{ color: 'var(--noxa-accent-primary-ink)' }}>勤務中</span>}</span>
-                <span style={{ fontFamily: mono, fontSize: 12, color: 'var(--noxa-text-faint)' }}>{dur(s.startMs, s.endMs)}</span>
-              </div>
+              <ShiftRow key={s.id} shopId={shopId} shift={s} onChanged={() => reload(shopId)} />
             ))}
           </Section>
         </>
       )}
     </Shell>
+  );
+}
+
+// ─────────────────────────────────────────────
+// 打刻の修正（本人）
+// rules: shifts write は owner/manager or 本人（castUid==auth.uid）＝本人の自己修正が可能。
+// ─────────────────────────────────────────────
+
+/** "HH:MM" と日付(YYYY-MM-DD)から Timestamp を作る */
+function timeToTs(date: string, hm: string): Timestamp | null {
+  if (!/^\d{2}:\d{2}$/.test(hm)) return null;
+  const d = new Date(`${date}T${hm}:00`);
+  return Number.isNaN(d.getTime()) ? null : Timestamp.fromDate(d);
+}
+const toHm = (ms: number | null) => { if (!ms) return ''; const d = new Date(ms); return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`; };
+
+/** 退勤忘れ（過去日の未退勤）を実時刻入力で締める */
+function StaleOpenFixer({ shopId, shift, onFixed }: { shopId: string; shift: Shift; onFixed: () => void }) {
+  const [hm, setHm] = useState('23:59');
+  const [busy, setBusy] = useState(false);
+  const fix = async () => {
+    const ts = timeToTs(shift.date, hm);
+    if (!ts || busy) return;
+    setBusy(true);
+    try { await updateDoc(doc(db, `shop_shops/${shopId}/shifts/${shift.id}`), { endAt: ts, fixedAt: serverTimestamp() }); onFixed(); }
+    catch (e) { window.alert(String((e as Error)?.message ?? e)); }
+    finally { setBusy(false); }
+  };
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, fontFamily: mono, padding: '4px 0' }}>
+      <span style={{ minWidth: 84 }}>{shift.date}</span>
+      <span>{hhmm(shift.startMs)}〜</span>
+      <input type="time" value={hm} onChange={(e) => setHm(e.target.value)} style={{ minHeight: 32, padding: '2px 8px', borderRadius: 8, background: 'var(--noxa-bg-base)', border: '1px solid var(--noxa-border)', color: 'var(--noxa-text-primary)', fontFamily: mono, fontSize: 12 }} />
+      <button type="button" onClick={fix} disabled={busy} style={{ minHeight: 32, padding: '2px 12px', borderRadius: 8, cursor: 'pointer', background: 'var(--noxa-accent-primary)', border: 'none', color: '#fff', fontSize: 12 }}>この時刻で退勤</button>
+    </div>
+  );
+}
+
+/** 勤怠履歴の1行（本人による打刻修正・削除つき） */
+function ShiftRow({ shopId, shift, onChanged }: { shopId: string; shift: Shift; onChanged: () => void }) {
+  const [editing, setEditing] = useState(false);
+  const [start, setStart] = useState(toHm(shift.startMs));
+  const [end, setEnd] = useState(toHm(shift.endMs));
+  const [busy, setBusy] = useState(false);
+
+  const save = async () => {
+    if (busy) return;
+    const st = timeToTs(shift.date, start);
+    const en = end ? timeToTs(shift.date, end) : null;
+    if (!st) { window.alert('出勤時刻が不正です'); return; }
+    if (en && en.toMillis() <= st.toMillis()) { window.alert('退勤時刻は出勤より後にしてください'); return; }
+    setBusy(true);
+    try {
+      await updateDoc(doc(db, `shop_shops/${shopId}/shifts/${shift.id}`), { startAt: st, ...(en ? { endAt: en } : {}), fixedAt: serverTimestamp() });
+      setEditing(false); onChanged();
+    } catch (e) { window.alert(String((e as Error)?.message ?? e)); }
+    finally { setBusy(false); }
+  };
+  const remove = async () => {
+    if (!window.confirm(`${shift.date} の打刻記録を削除しますか？`)) return;
+    setBusy(true);
+    try { await deleteDoc(doc(db, `shop_shops/${shopId}/shifts/${shift.id}`)); onChanged(); }
+    catch (e) { window.alert(String((e as Error)?.message ?? e)); }
+    finally { setBusy(false); }
+  };
+
+  const tf: React.CSSProperties = { minHeight: 32, padding: '2px 6px', borderRadius: 8, background: 'var(--noxa-bg-base)', border: '1px solid var(--noxa-border)', color: 'var(--noxa-text-primary)', fontFamily: mono, fontSize: 12, width: 92 };
+
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 12px', borderRadius: 10, background: 'var(--noxa-bg-base)', border: '1px solid var(--noxa-border)', flexWrap: 'wrap' }}>
+      <span style={{ fontFamily: mono, fontSize: 11, color: 'var(--noxa-text-muted)', minWidth: 84 }}>{shift.date}</span>
+      {editing ? (
+        <>
+          <input type="time" value={start} onChange={(e) => setStart(e.target.value)} style={tf} />
+          <span style={{ fontFamily: mono, fontSize: 12 }}>–</span>
+          <input type="time" value={end} onChange={(e) => setEnd(e.target.value)} style={tf} />
+          <span style={{ flex: 1 }} />
+          <button type="button" onClick={save} disabled={busy} style={{ minHeight: 30, padding: '2px 12px', borderRadius: 8, cursor: 'pointer', background: 'var(--noxa-accent-primary)', border: 'none', color: '#fff', fontSize: 12 }}>保存</button>
+          <button type="button" onClick={remove} disabled={busy} style={{ minHeight: 30, padding: '2px 10px', borderRadius: 8, cursor: 'pointer', background: 'transparent', border: '1px solid var(--noxa-border)', color: 'var(--noxa-status-error)', fontSize: 12 }}>削除</button>
+          <button type="button" onClick={() => setEditing(false)} style={{ minHeight: 30, padding: '2px 10px', borderRadius: 8, cursor: 'pointer', background: 'transparent', border: '1px solid var(--noxa-border)', color: 'var(--noxa-text-muted)', fontSize: 12 }}>×</button>
+        </>
+      ) : (
+        <>
+          <span style={{ fontFamily: mono, fontSize: 13, flex: 1 }}>{hhmm(shift.startMs)} – {shift.endMs ? hhmm(shift.endMs) : <span style={{ color: 'var(--noxa-accent-primary-ink)' }}>勤務中</span>}</span>
+          <span style={{ fontFamily: mono, fontSize: 12, color: 'var(--noxa-text-faint)' }}>{dur(shift.startMs, shift.endMs)}</span>
+          <button type="button" onClick={() => { setStart(toHm(shift.startMs)); setEnd(toHm(shift.endMs)); setEditing(true); }} title="打刻を修正" style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--noxa-text-faint)', fontSize: 12 }}>✎</button>
+        </>
+      )}
+    </div>
   );
 }
 

@@ -2,7 +2,9 @@
 
 import Link from 'next/link';
 import { useEffect, useMemo, useState } from 'react';
+import { collection, onSnapshot } from 'firebase/firestore';
 import type { User } from 'firebase/auth';
+import { db } from '@/lib/firebase/config';
 import { useSeatingStore } from '@/lib/seating/store';
 import { useShopConfig } from '@/lib/shopConfig';
 import { PosClient } from '@/components/modules/pos/PosClient';
@@ -408,6 +410,7 @@ function CastRoster({ casts, store, wageFor, castLabel = 'キャスト' }: { cas
   const [name, setName] = useState('');
   const [rank, setRank] = useState<Rank>('非役職');
   const [wage, setWage] = useState(5000);
+  const [editing, setEditing] = useState<Cast | null>(null);
   const selectRank = (r: Rank) => { setRank(r); const w = wageFor?.(r); if (typeof w === 'number') setWage(w); };
 
   const cycleStatus = (c: Cast) => {
@@ -426,12 +429,18 @@ function CastRoster({ casts, store, wageFor, castLabel = 'キャスト' }: { cas
         {sorted.map((c) => (
           <div key={c.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '7px 8px', borderRadius: 10, background: 'var(--noxa-bg-base)', border: '1px solid var(--noxa-border)', opacity: c.status === 'Absent' ? 0.5 : 1 }}>
             <span aria-hidden style={{ width: 8, height: 8, borderRadius: 4, background: RANK_TINT[c.rank], flex: 'none' }} />
-            <span style={{ fontSize: 13, flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c.name}<span style={{ fontFamily: mono, fontSize: 9, color: 'var(--noxa-text-faint)', marginLeft: 6 }}>{c.rank}</span></span>
+            <span style={{ fontSize: 13, flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c.name}
+              <span style={{ fontFamily: mono, fontSize: 9, color: 'var(--noxa-text-faint)', marginLeft: 6 }}>{c.rank}</span>
+              {!c.uid && <span title="アカウント未連携（給与計算に乗りません）" style={{ fontSize: 9, color: 'var(--noxa-status-error)', marginLeft: 4 }}>未連携</span>}
+            </span>
+            <button type="button" onClick={() => setEditing(c)} title="編集（時給・アカウント連携）" style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--noxa-text-faint)', fontSize: 12 }}>✎</button>
             <button type="button" onClick={() => cycleStatus(c)} title="状態切替" style={{ ...chipStyle(c.status === 'Work'), minHeight: 26, padding: '2px 8px', fontSize: 11, cursor: c.status === 'Work' ? 'default' : 'pointer' }}>{STATUS_LABEL[c.status]}</button>
             <button type="button" onClick={() => store.toggleLock(c.id)} title="ロック（AI除外）" style={{ background: 'none', border: 'none', cursor: 'pointer', color: c.isLocked ? 'var(--noxa-accent-primary-ink)' : 'var(--noxa-text-faint)', fontSize: 13 }}>{c.isLocked ? '🔒' : '🔓'}</button>
           </div>
         ))}
       </div>
+
+      {editing && <CastEditor cast={editing} store={store} onClose={() => setEditing(null)} />}
 
       {adding ? (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 6, borderTop: '1px solid var(--noxa-divider)', paddingTop: 10 }}>
@@ -583,5 +592,75 @@ const ghostBtn: React.CSSProperties = {
   border: '1px solid var(--noxa-border-strong)', background: 'var(--noxa-surface-muted)', color: 'var(--noxa-text-muted)',
   fontFamily: 'var(--noxa-font-sans-jp)', fontSize: 13, fontWeight: 500,
 };
+
+// ───────────────────────── キャスト編集（時給・rank・アカウント連携）
+
+function CastEditor({ cast, store, onClose }: { cast: Cast; store: ReturnType<typeof useSeatingStore>; onClose: () => void }) {
+  const [name, setName] = useState(cast.name);
+  const [rank, setRank] = useState<Rank>(cast.rank);
+  const [wage, setWage] = useState(cast.hourlyWage);
+  const [uid, setUid] = useState<string>(cast.uid ?? '');
+  const [members, setMembers] = useState<{ uid: string; label: string }[]>([]);
+  const [busy, setBusy] = useState(false);
+
+  // 店舗メンバー（人間のみ）を連携候補として購読
+  useEffect(() => {
+    if (!store.shopId) return;
+    const unsub = onSnapshot(collection(db, `shop_shops/${store.shopId}/members`), (snap) => {
+      const list: { uid: string; label: string }[] = [];
+      snap.forEach((d) => {
+        const m = d.data() as { role?: string; castDisplayName?: string; kind?: string };
+        if (m.kind === 'device') return;
+        list.push({ uid: d.id, label: `${m.castDisplayName || d.id.slice(0, 8)}（${m.role ?? '?'}）` });
+      });
+      setMembers(list);
+    }, () => { /* 権限なしは連携候補なし表示 */ });
+    return () => unsub();
+  }, [store.shopId]);
+
+  const save = async () => {
+    setBusy(true);
+    try {
+      await store.updateCast(cast.id, { name: name.trim() || cast.name, rank, hourlyWage: Math.max(0, wage), uid: uid || null });
+      onClose();
+    } catch (e) {
+      window.alert(String((e as Error)?.message ?? e));
+    } finally { setBusy(false); }
+  };
+  const remove = async () => {
+    if (!window.confirm(`${cast.name} を名簿から削除しますか？`)) return;
+    setBusy(true);
+    try { await store.removeCast(cast.id); onClose(); } finally { setBusy(false); }
+  };
+
+  return (
+    <div onClick={onClose} style={{ position: 'fixed', inset: 0, zIndex: 220, background: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}>
+      <div onClick={(e) => e.stopPropagation()} style={{ width: '100%', maxWidth: 360, background: 'var(--noxa-surface-card)', border: '1px solid var(--noxa-border)', borderRadius: 16, padding: 20, display: 'flex', flexDirection: 'column', gap: 10 }}>
+        <h3 style={{ margin: 0, fontFamily: 'var(--noxa-font-display-jp)', fontSize: 16 }}>キャスト編集</h3>
+        <input value={name} onChange={(e) => setName(e.target.value)} placeholder="名前" style={fieldStyle} />
+        <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+          {RANKS.map((r) => <button key={r} type="button" onClick={() => setRank(r)} style={chipStyle(rank === r)}>{r}</button>)}
+        </div>
+        <label style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <span style={miniLabel}>時給</span>
+          <input type="number" value={wage} onChange={(e) => setWage(Number(e.target.value))} style={fieldStyle} inputMode="numeric" />
+        </label>
+        <label style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+          <span style={miniLabel}>アカウント連携（給与・個人売上の帰属先）</span>
+          <select value={uid} onChange={(e) => setUid(e.target.value)} style={{ ...fieldStyle, width: '100%' }}>
+            <option value="">未連携</option>
+            {members.map((m) => <option key={m.uid} value={m.uid}>{m.label}</option>)}
+          </select>
+          <span style={{ fontSize: 10, color: 'var(--noxa-text-faint)', lineHeight: 1.5 }}>店舗設定の「メンバーと招待」で招待→参加すると候補に出ます。連携すると勤怠×時給が給与計算に乗ります。</span>
+        </label>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <button type="button" className="noxa-btn noxa-btn-primary" style={{ ...primaryBtn, flex: 1 }} disabled={busy} onClick={save}>保存</button>
+          <button type="button" onClick={remove} disabled={busy} style={{ ...ghostBtn, width: 64, color: 'var(--noxa-status-error)' }}>削除</button>
+          <button type="button" onClick={onClose} style={{ ...ghostBtn, width: 64 }}>閉じる</button>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 export default SeatingClient;

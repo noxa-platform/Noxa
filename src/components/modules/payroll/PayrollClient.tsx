@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { collection, getDocs, query, where, type DocumentData } from 'firebase/firestore';
+import { collection, doc, getDoc, getDocs, query, where, type DocumentData } from 'firebase/firestore';
 import type { User } from 'firebase/auth';
 import { db, auth } from '@/lib/firebase/config';
 import { useDeviceClaims } from '@/lib/useShopContext';
@@ -144,11 +144,22 @@ function PayrollFinalize({ user }: { user: User }) {
   const [ym, setYm] = useState(`${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`);
   const [rows, setRows] = useState<FinRow[] | null>(null);
   const [adj, setAdj] = useState<Record<string, Adj>>({});
+  const [wageOv, setWageOv] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
+  // role ベース表示: オーナー(canManage) に加えて manager も確定可（API 側も owner/manager 許可）
+  const [isManager, setIsManager] = useState(false);
+  useEffect(() => {
+    if (!shop.shopId || shop.canManage) return;
+    let alive = true;
+    getDoc(doc(db, `shop_shops/${shop.shopId}/members/${user.uid}`))
+      .then((s) => { if (alive) setIsManager((s.data() as { role?: string } | undefined)?.role === 'manager'); })
+      .catch(() => { /* 権限なしは非表示のまま */ });
+    return () => { alive = false; };
+  }, [shop.shopId, shop.canManage, user.uid]);
 
-  if (shop.loading || !shop.shopId || !shop.canManage) return null; // オーナー以外は非表示
+  if (shop.loading || !shop.shopId || (!shop.canManage && !isManager)) return null; // owner/manager 以外は非表示
 
   const [y, m] = ym.split('-').map(Number);
   const adjustmentsPayload = () => {
@@ -159,10 +170,15 @@ function PayrollFinalize({ user }: { user: User }) {
     }
     return out;
   };
+  const wageOverridesPayload = () => {
+    const out: Record<string, number> = {};
+    for (const [uid, w] of Object.entries(wageOv)) { const n = Number(w) || 0; if (n > 0) out[uid] = n; }
+    return out;
+  };
 
   const preview = async () => {
     setBusy(true); setErr(null); setMsg(null);
-    try { const r = await finalizePost({ shopId: shop.shopId, year: y, month: m, dryRun: true, adjustments: adjustmentsPayload() }); setRows(r.rows); }
+    try { const r = await finalizePost({ shopId: shop.shopId, year: y, month: m, dryRun: true, adjustments: adjustmentsPayload(), wageOverrides: wageOverridesPayload() }); setRows(r.rows); }
     catch (e) { setErr(e instanceof Error ? e.message : '計算に失敗しました'); }
     finally { setBusy(false); }
   };
@@ -170,7 +186,7 @@ function PayrollFinalize({ user }: { user: User }) {
     if (!rows || busy) return;
     if (!window.confirm(`${ym} の給与を${rows.length}名分 確定します。よろしいですか？（再確定で上書き）`)) return;
     setBusy(true); setErr(null); setMsg(null);
-    try { const r = await finalizePost({ shopId: shop.shopId, year: y, month: m, adjustments: adjustmentsPayload() }); setMsg(`✓ ${r.period} を ${r.rows.length}名分 確定しました`); setRows(r.rows); }
+    try { const r = await finalizePost({ shopId: shop.shopId, year: y, month: m, adjustments: adjustmentsPayload(), wageOverrides: wageOverridesPayload() }); setMsg(`✓ ${r.period} を ${r.rows.length}名分 確定しました`); setRows(r.rows); }
     catch (e) { setErr(e instanceof Error ? e.message : '確定に失敗しました'); }
     finally { setBusy(false); }
   };
@@ -185,7 +201,7 @@ function PayrollFinalize({ user }: { user: User }) {
   return (
     <section style={{ background: 'var(--noxa-surface-card)', border: '1px solid var(--noxa-accent-primary)', borderRadius: 16, padding: 18, marginBottom: 18 }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', marginBottom: 12 }}>
-        <h2 style={{ fontFamily: 'var(--noxa-font-display-jp)', fontSize: 16, fontWeight: 500, margin: 0 }}>給与の確定（オーナー）</h2>
+        <h2 style={{ fontFamily: 'var(--noxa-font-display-jp)', fontSize: 16, fontWeight: 500, margin: 0 }}>給与の確定（オーナー / 店長）</h2>
         <input type="month" value={ym} onChange={(e) => { setYm(e.target.value); setRows(null); setMsg(null); }} style={{ ...adjInput, width: 150 }} />
         <button type="button" onClick={preview} disabled={busy} className="noxa-btn noxa-btn-secondary" style={{ fontSize: 12, padding: '6px 14px' }}>{busy ? '計算中…' : '勤務から計算'}</button>
         {rows && rows.length > 0 && <button type="button" onClick={finalize} disabled={busy} className="noxa-btn noxa-btn-primary" style={{ fontSize: 12, padding: '6px 14px' }}>確定する</button>}
@@ -198,17 +214,25 @@ function PayrollFinalize({ user }: { user: User }) {
         <div style={{ overflowX: 'auto' }}>
           <table style={{ width: '100%', minWidth: 560, borderCollapse: 'collapse' }}>
             <thead><tr style={{ textAlign: 'left', color: 'var(--noxa-text-faint)', fontFamily: mono, fontSize: 10 }}>
-              {['キャスト', '時間', '基本給', 'バック', 'ボーナス', '控除', '合計'].map((h) => <th key={h} style={{ padding: '6px 8px', fontWeight: 500 }}>{h}</th>)}
+              {['キャスト', '時間', '時給', '基本給', 'バック', 'ボーナス', '控除', '合計'].map((h) => <th key={h} style={{ padding: '6px 8px', fontWeight: 500 }}>{h}</th>)}
             </tr></thead>
             <tbody>
               {rows.map((r) => {
                 const a = adj[r.castUid] ?? { back: '', bonus: '', penalty: '' };
-                const total = r.base + (Number(a.back) || 0) + (Number(a.bonus) || 0) - Math.abs(Number(a.penalty) || 0);
+                const ovWage = Number(wageOv[r.castUid]) || 0;
+                const effWage = ovWage > 0 ? ovWage : r.wage;
+                const effBase = ovWage > 0 ? Math.round(r.hours * ovWage) : r.base;
+                const total = effBase + (Number(a.back) || 0) + (Number(a.bonus) || 0) - Math.abs(Number(a.penalty) || 0);
                 return (
                   <tr key={r.castUid}>
-                    <td style={{ ...cell, fontFamily: 'var(--noxa-font-sans-jp)' }}>{r.name}</td>
+                    <td style={{ ...cell, fontFamily: 'var(--noxa-font-sans-jp)' }}>{r.name}{r.wage === 0 && <span title="席回し名簿と未紐付け（時給0）。時給を直接入力するか、席回しのキャスト編集で紐付けてください" style={{ color: 'var(--noxa-status-error)', marginLeft: 4 }}>⚠</span>}</td>
                     <td style={cell}>{r.hours}h</td>
-                    <td style={cell}>{yen(r.base)}</td>
+                    <td style={cell}>
+                      {r.wage === 0
+                        ? <input value={wageOv[r.castUid] ?? ''} onChange={(e) => setWageOv((p) => ({ ...p, [r.castUid]: e.target.value }))} placeholder="時給" style={adjInput} inputMode="numeric" />
+                        : <span>¥{effWage.toLocaleString('ja-JP')}</span>}
+                    </td>
+                    <td style={cell}>{yen(effBase)}</td>
                     <td style={cell}><input value={a.back} onChange={(e) => setA(r.castUid, 'back', e.target.value)} placeholder="0" style={adjInput} inputMode="numeric" /></td>
                     <td style={cell}><input value={a.bonus} onChange={(e) => setA(r.castUid, 'bonus', e.target.value)} placeholder="0" style={adjInput} inputMode="numeric" /></td>
                     <td style={cell}><input value={a.penalty} onChange={(e) => setA(r.castUid, 'penalty', e.target.value)} placeholder="0" style={adjInput} inputMode="numeric" /></td>

@@ -4,8 +4,10 @@
 //   period id を YYYY-MM 固定にして set(merge)＝再確定で上書き（重複しない・冪等）。
 //   dryRun:true なら書き込まずに計算結果のみ返す（確定前プレビュー用）。
 //
-// POST { shopId, year, month, dryRun?, adjustments? } -> { period, rows:[{castUid,name,hours,wage,base,total}] }
+// POST { shopId, year, month, dryRun?, adjustments?, wageOverrides? } -> { period, rows:[{castUid,name,hours,wage,base,total}] }
 //   adjustments: { [castUid]: { back?:number, bonus?:number, penalty?:number } }（penalty は控除＝正の値で渡す）
+//   wageOverrides: { [castUid]: number } … seating_casts 未紐付け（時給0）キャストへ UI から直接時給を渡す
+//                  フォールバック。>0 のときのみ名簿の時給より優先。
 
 import { NextRequest, NextResponse } from 'next/server';
 import { Timestamp, FieldValue } from 'firebase-admin/firestore';
@@ -48,6 +50,7 @@ export async function POST(request: NextRequest) {
     const period = `${year}-${String(month).padStart(2, '0')}`;
     const dryRun = body?.dryRun === true;
     const adjustments: Record<string, { back?: number; bonus?: number; penalty?: number }> = body?.adjustments && typeof body.adjustments === 'object' ? body.adjustments : {};
+    const wageOverrides: Record<string, number> = body?.wageOverrides && typeof body.wageOverrides === 'object' ? body.wageOverrides : {};
 
     // キャスト名簿（uid → 時給/表示名）
     const castSnap = await db.collection(`shop_shops/${shopId}/seating_casts`).get();
@@ -74,21 +77,29 @@ export async function POST(request: NextRequest) {
       const info = castByUid.get(castUid) ?? { name: '', wage: 0 };
       let name = info.name;
       if (!name) {
+        // 名簿に無い場合は members の源氏名 → アカウント表示名の順でフォールバック
+        const mem = await db.doc(`shop_shops/${shopId}/members/${castUid}`).get().catch(() => null);
+        name = (mem?.data() as { castDisplayName?: string } | undefined)?.castDisplayName || '';
+      }
+      if (!name) {
         const acc = await db.doc(`account_users/${castUid}`).get().catch(() => null);
         name = (acc?.data() as { displayName?: string } | undefined)?.displayName || castUid.slice(0, 8);
       }
+      // 時給: UI からの直接指定（>0）が名簿より優先（未紐付け=時給0 のフォールバック）
+      const override = numOr0(wageOverrides[castUid]);
+      const wage = override > 0 ? override : info.wage;
       const hours = mins / 60;
-      const base = Math.round(hours * info.wage);
+      const base = Math.round(hours * wage);
       const adj = adjustments[castUid] ?? {};
       const back = numOr0(adj.back), bonus = numOr0(adj.bonus), penalty = numOr0(adj.penalty);
       const breakdown: { label: string; amount: number }[] = [
-        { label: `基本給（勤務 ${hours.toFixed(1)}h × 時給 ¥${info.wage.toLocaleString('ja-JP')}）`, amount: base },
+        { label: `基本給（勤務 ${hours.toFixed(1)}h × 時給 ¥${wage.toLocaleString('ja-JP')}）`, amount: base },
       ];
       if (back) breakdown.push({ label: 'バック', amount: back });
       if (bonus) breakdown.push({ label: 'ボーナス', amount: bonus });
       if (penalty) breakdown.push({ label: '控除', amount: -Math.abs(penalty) });
       const total = base + back + bonus - Math.abs(penalty);
-      rows.push({ castUid, name, hours: Number(hours.toFixed(2)), wage: info.wage, base, total });
+      rows.push({ castUid, name, hours: Number(hours.toFixed(2)), wage, base, total });
 
       if (!dryRun) {
         batch.set(db.doc(`shop_shops/${shopId}/payrolls/${castUid}/items/${period}`), {
@@ -97,7 +108,7 @@ export async function POST(request: NextRequest) {
           total,
           breakdown,
           hours: Number(hours.toFixed(2)),
-          wage: info.wage,
+          wage,
           status: '確定',
           finalizedAt: FieldValue.serverTimestamp(),
           finalizedBy: uid,
