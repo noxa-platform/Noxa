@@ -102,6 +102,10 @@ export function SeatingClient({ user }: { user: User }) {
 
   return (
     <Shell device={store.isDevice}>
+      {/* 購読エラーの可視化（権限/接続エラーで空表示のまま成功と区別がつかない問題） */}
+      {store.dataError && (
+        <p role="alert" style={{ color: 'var(--noxa-status-error)', fontSize: 13, margin: '0 0 12px', padding: '10px 12px', borderRadius: 10, background: 'rgba(229,115,115,0.08)', border: '1px solid var(--noxa-status-error)' }}>{store.dataError}</p>
+      )}
       {/* AI 提案 */}
       {proposals.length > 0 && (
         <div style={{ marginBottom: 16, display: 'flex', flexDirection: 'column', gap: 8 }}>

@@ -79,6 +79,8 @@ export type UseSeatingStore = {
   canManage: boolean;
   isDevice: boolean;
   error: string | null;
+  /** 購読(データ取得)のエラー。権限/接続エラーで空表示のまま成功と区別がつかない問題の可視化用 */
+  dataError: string | null;
   casts: Cast[];
   tables: FloorTable[];
   queue: QueueItem[];
@@ -125,6 +127,7 @@ export function useSeatingStore(user: User): UseSeatingStore {
   const [tables, setTables] = useState<FloorTable[]>([]);
   const [queue, setQueue] = useState<QueueItem[]>([]);
   const [loadingData, setLoadingData] = useState(true);
+  const [dataError, setDataError] = useState<string | null>(null);
 
   // 購読
   useEffect(() => {
@@ -135,20 +138,20 @@ export function useSeatingStore(user: User): UseSeatingStore {
         const list: StoredCast[] = [];
         snap.forEach((d) => list.push({ id: d.id, ...(d.data() as Omit<StoredCast, 'id'>) }));
         setStored(list);
-      }, (e) => console.warn('[noxa:seating] キャスト購読エラー', e?.message ?? e)),
+      }, (e) => { console.warn('[noxa:seating] キャスト購読エラー', e?.message ?? e); setDataError(`キャスト名簿の取得に失敗（${e?.code ?? e?.message ?? e}）`); }),
       onSnapshot(collection(db, `shop_shops/${shopId}/seating_tables`), (snap) => {
         const list: FloorTable[] = [];
         snap.forEach((d) => list.push(toFloorTable(d.id, d.data() as Partial<FloorTable>)));
         list.sort((a, b) => a.name.localeCompare(b.name, 'ja'));
         setTables(list);
         setLoadingData(false);
-      }, () => setLoadingData(false)),
+      }, (e) => { setLoadingData(false); setDataError(`卓情報の取得に失敗（${e?.code ?? e?.message ?? e}）`); }),
       onSnapshot(collection(db, `shop_shops/${shopId}/seating_queue`), (snap) => {
         const list: QueueItem[] = [];
         snap.forEach((d) => list.push({ id: d.id, ...(d.data() as Omit<QueueItem, 'id'>) }));
         list.sort((a, b) => a.joinedAt - b.joinedAt);
         setQueue(list);
-      }, (e) => console.warn('[noxa:seating] 待ち組購読エラー', e?.message ?? e)),
+      }, (e) => { console.warn('[noxa:seating] 待ち組購読エラー', e?.message ?? e); setDataError(`待ち組の取得に失敗（${e?.code ?? e?.message ?? e}）`); }),
     ];
     return () => unsubs.forEach((u) => u());
   }, [shopId]);
@@ -368,7 +371,9 @@ export function useSeatingStore(user: User): UseSeatingStore {
     });
   }, [txUpdateTable]);
 
-  // テストデータ整理: seed キャスト削除＋seed 顧客削除＋全卓を空席リセット（owner 想定）
+  // テストデータ整理: seed キャスト削除＋seed 顧客削除＋卓リセット（owner 想定）。
+  // 稼働中(ACTIVE/CHECK)の卓は白紙化せず seed キャストの配置だけ除去する
+  // （旧実装は全卓リセットで、営業中の実データ卓・POS伝票まで巻き込む破壊操作だった）。
   const clearSeedData = useCallback<UseSeatingStore['clearSeedData']>(async () => {
     if (!shopId) return;
     const [cs, ts, cu] = await Promise.all([
@@ -376,10 +381,26 @@ export function useSeatingStore(user: User): UseSeatingStore {
       getDocs(collection(db, `shop_shops/${shopId}/seating_tables`)),
       getDocs(query(collection(db, `shop_shops/${shopId}/customers`), where('seed', '==', true))),
     ]);
+    const seedCastIds = new Set<string>();
+    cs.forEach((d) => { if ((d.data() as { seed?: boolean }).seed === true) seedCastIds.add(d.id); });
     const batch = writeBatch(db);
-    cs.forEach((d) => { if ((d.data() as { seed?: boolean }).seed === true) batch.delete(d.ref); });
+    seedCastIds.forEach((id) => batch.delete(doc(db, `shop_shops/${shopId}/seating_casts/${id}`)));
     cu.forEach((d) => batch.delete(d.ref));
-    ts.forEach((d) => { const name = (d.data() as { name?: string }).name ?? d.id; batch.set(d.ref, { ...createEmptyTable(d.id, name), slips: [], updatedAt: serverTimestamp() }); });
+    ts.forEach((d) => {
+      const t = toFloorTable(d.id, d.data() as Partial<FloorTable>);
+      if (t.status === 'ACTIVE' || t.status === 'CHECK') {
+        // 稼働卓: seed キャストの配置のみ除去（客・伝票・タイマーは保持）
+        let patch: TablePatch = {};
+        for (const id of seedCastIds) {
+          const merged = { ...t, ...patch } as FloorTable;
+          const p = removeCastPatch(merged, id);
+          patch = { ...patch, ...p };
+        }
+        if (Object.keys(patch).length > 0) batch.set(d.ref, { ...patch, updatedAt: serverTimestamp() }, { merge: true });
+      } else {
+        batch.set(d.ref, { ...createEmptyTable(t.id, t.name), slips: [], updatedAt: serverTimestamp() });
+      }
+    });
     await batch.commit();
   }, [shopId]);
 
@@ -470,13 +491,14 @@ export function useSeatingStore(user: User): UseSeatingStore {
   return useMemo(() => ({
     loading: shop.loading || loadingData,
     shopId, canManage: shop.canManage, isDevice: shop.isDevice, error: shop.error,
+    dataError,
     casts, tables, queue,
     addCast, updateCast, removeCast, toggleLock, setCastBaseStatus,
     seedTables, seedTestData, assignCast, removeCastFromTable, toggleMainHost, toggleRequested, rotateHosts,
     startSet, setTableType, checkTable, extendTime, toggleInnerRotation, updateTableSettings, setCastExcluded, clearSeedData, resetTable,
     addToQueue, removeFromQueue, seatQueueGroup,
   }), [
-    shop.loading, loadingData, shopId, shop.canManage, shop.isDevice, shop.error, casts, tables, queue,
+    shop.loading, loadingData, shopId, shop.canManage, shop.isDevice, shop.error, dataError, casts, tables, queue,
     addCast, updateCast, removeCast, toggleLock, setCastBaseStatus,
     seedTables, seedTestData, assignCast, removeCastFromTable, toggleMainHost, toggleRequested, rotateHosts,
     startSet, setTableType, checkTable, extendTime, toggleInnerRotation, updateTableSettings, setCastExcluded, clearSeedData, resetTable,
