@@ -36,6 +36,7 @@ type UnpaidRecord = {
   due: string | null; // YYYY-MM-DD 期日
   status: UnpaidStatus;
   memo: string | null;
+  source: string | null; // 'pos'=POS会計からの自動起票
   elapsedDays: number; // date からの経過日数（算出）
 };
 
@@ -62,6 +63,7 @@ function mapRecord(id: string, d: DocumentData): UnpaidRecord {
     due: typeof d.due === 'string' && d.due !== '' ? d.due : null,
     status,
     memo: typeof d.memo === 'string' && d.memo !== '' ? d.memo : null,
+    source: typeof d.source === 'string' ? d.source : null,
     elapsedDays: date ? calcElapsedDays(date) : 0,
   };
 }
@@ -524,6 +526,9 @@ export function UnpaidClient({ user }: { user: User }) {
                             }}
                           >
                             {r.customerName}
+                            {r.source === 'pos' && (
+                              <span style={{ marginLeft: 6, padding: '1px 7px', borderRadius: 9999, fontSize: 9, fontFamily: mono, background: 'rgba(139,92,246,0.12)', border: '1px solid var(--noxa-border-strong)', color: 'var(--noxa-accent-primary-ink)' }}>POS</span>
+                            )}
                             {r.memo && (
                               <span style={{ display: 'block', fontSize: 10, color: 'var(--noxa-text-faint)', fontFamily: mono }}>
                                 {r.memo}

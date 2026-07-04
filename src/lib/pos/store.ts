@@ -31,6 +31,7 @@ import {
 import type { FloorTable, Cast } from '@/lib/seating/types';
 import { createEmptyTable } from '@/lib/seating/types';
 import { resolveSaleAttribution } from './attribution';
+import { buildUnpaidEntry } from './unpaid';
 
 const SLIP_NAMES = ['①', '②', '③', '④', '⑤', '⑥', '⑦', '⑧', '⑨', '⑩'];
 function nextSlipName(slips: PosSlip[]): string {
@@ -94,7 +95,7 @@ export type UsePosStore = {
   dispatchSlip: (tableId: string, slipId: string, action: Action) => Promise<void>;
   renameSlip: (tableId: string, slipId: string, name: string) => Promise<void>;
   removeSlip: (tableId: string, slipId: string) => Promise<void>;
-  checkoutSlip: (tableId: string, slipId: string, opts: { amount: number; castName?: string; customerName?: string; guests?: number }) => Promise<void>;
+  checkoutSlip: (tableId: string, slipId: string, opts: { amount: number; castName?: string; customerName?: string; guests?: number; unpaidAmount?: number }) => Promise<void>;
   resultFor: (slip: PosSlip) => CalculationResult;
 };
 
@@ -298,7 +299,26 @@ export function usePosStore(user: User): UsePosStore {
         mainHostIds: Array.isArray(data.mainHostIds) ? (data.mainHostIds as string[]) : [],
       });
       const saleRef = doc(collection(db, `shop_shops/${shopId}/sales`));
+      // ツケ（未収）会計: 同一トランザクションで unpaid 台帳へ起票（二重管理の解消）。
+      // 書込権限は rules の owner/manager/accounting のまま。権限の無いロールには UI が入力を出さない
+      const unpaidEntry = opts.unpaidAmount && opts.unpaidAmount > 0
+        ? buildUnpaidEntry({
+            customerName: opts.customerName ?? slip.customerName,
+            castName: attr.castName,
+            tableName: (data.name as string) ?? '',
+            slipName: slip.name,
+            totalAmount: opts.amount,
+            unpaidAmount: opts.unpaidAmount,
+            dayKey: dayKey(),
+            saleId: saleRef.id,
+            operatorUid: user.uid,
+          })
+        : null;
+      if (unpaidEntry) {
+        tx.set(doc(collection(db, `shop_shops/${shopId}/unpaid`)), { ...unpaidEntry, createdAt: serverTimestamp() });
+      }
       tx.set(saleRef, {
+        ...(unpaidEntry ? { unpaidAmount: unpaidEntry.amount } : {}),
         source: 'pos', entryMode: 'breakdown', amount: opts.amount, tableId, tableName: (data.name as string) ?? '', slipName: slip.name,
         customerType: slip.state.customerType, customerName: opts.customerName ?? slip.customerName ?? null,
         customerId: slip.customerId ?? null,
