@@ -28,6 +28,7 @@ import type { User } from 'firebase/auth';
 import { db } from '@/lib/firebase/config';
 import { useDeviceClaims } from '@/lib/useShopContext';
 import type { Cast, CastStatus, FloorTable, QueueItem, TableType, Customer, Rank } from './types';
+import type { AssistMode } from './ai';
 import { createEmptyTable } from './types';
 import { DEFAULT_TABLE_NAMES } from './tables';
 import { getActiveShop, pickShopId } from '@/lib/workspace';
@@ -41,6 +42,7 @@ type StoredCast = {
   id: string; name: string; rank: Rank; hourlyWage: number; isLocked: boolean;
   baseStatus: Extract<CastStatus, 'Free' | 'Break' | 'Absent'>; imageUrl?: string;
   uid?: string | null; // 紐付くアカウント uid（給与/個人売上の帰属用・未連携なら null）
+  ngCastIds?: string[]; // NG 組合せ（采配エンジンのハード制約）
 };
 
 // ───────────────────────── shop 解決（POS と同様：デバイス優先 / オーナー shop）
@@ -87,6 +89,9 @@ export type UseSeatingStore = {
   /** 回す順番（初回ローテの采配順・seating_meta/state.rotationOrder） */
   rotationOrder: string[];
   setRotationOrder: (order: string[]) => Promise<void>;
+  /** 采配モード（計算エンジンの重み付け・seating_meta/state.assistMode・店舗共有） */
+  assistMode: AssistMode;
+  setAssistMode: (mode: AssistMode) => Promise<void>;
   // cast
   addCast: (c: { name: string; rank: Rank; hourlyWage: number; uid?: string | null }) => Promise<void>;
   updateCast: (id: string, updates: Partial<StoredCast>) => Promise<void>;
@@ -133,6 +138,7 @@ export function useSeatingStore(user: User): UseSeatingStore {
   const [tables, setTables] = useState<FloorTable[]>([]);
   const [queue, setQueue] = useState<QueueItem[]>([]);
   const [rotationOrder, setRotationOrderState] = useState<string[]>([]);
+  const [assistMode, setAssistModeState] = useState<AssistMode>('balanced');
   const [loadingData, setLoadingData] = useState(true);
   const [dataError, setDataError] = useState<string | null>(null);
 
@@ -154,8 +160,9 @@ export function useSeatingStore(user: User): UseSeatingStore {
         setLoadingData(false);
       }, (e) => { setLoadingData(false); setDataError(`卓情報の取得に失敗（${e?.code ?? e?.message ?? e}）`); }),
       onSnapshot(doc(db, `shop_shops/${shopId}/seating_meta/state`), (snap) => {
-        const ro = snap.exists() ? (snap.data() as { rotationOrder?: string[] }).rotationOrder : undefined;
-        setRotationOrderState(Array.isArray(ro) ? ro : []);
+        const data = snap.exists() ? (snap.data() as { rotationOrder?: string[]; assistMode?: string }) : undefined;
+        setRotationOrderState(Array.isArray(data?.rotationOrder) ? data.rotationOrder : []);
+        setAssistModeState(data?.assistMode === 'nomination' || data?.assistMode === 'rookie' ? data.assistMode : 'balanced');
       }, (e) => { console.warn('[noxa:seating] meta購読エラー', e?.message ?? e); }),
       onSnapshot(collection(db, `shop_shops/${shopId}/seating_queue`), (snap) => {
         const list: QueueItem[] = [];
@@ -340,6 +347,11 @@ export function useSeatingStore(user: User): UseSeatingStore {
   const setRotationOrder = useCallback<UseSeatingStore['setRotationOrder']>(async (order) => {
     if (!shopId) return;
     await setDoc(doc(db, `shop_shops/${shopId}/seating_meta/state`), { rotationOrder: order, updatedAt: serverTimestamp() }, { merge: true });
+  }, [shopId]);
+
+  const setAssistMode = useCallback<UseSeatingStore['setAssistMode']>(async (mode) => {
+    if (!shopId) return;
+    await setDoc(doc(db, `shop_shops/${shopId}/seating_meta/state`), { assistMode: mode, updatedAt: serverTimestamp() }, { merge: true });
   }, [shopId]);
 
   const toggleMainHost = useCallback<UseSeatingStore['toggleMainHost']>(async (tableId, castId) => {
@@ -547,13 +559,13 @@ export function useSeatingStore(user: User): UseSeatingStore {
     loading: shop.loading || loadingData,
     shopId, canManage: shop.canManage, isDevice: shop.isDevice, error: shop.error,
     dataError,
-    casts, tables, queue, rotationOrder, setRotationOrder,
+    casts, tables, queue, rotationOrder, setRotationOrder, assistMode, setAssistMode,
     addCast, updateCast, removeCast, toggleLock, setCastBaseStatus,
     seedTables, seedTestData, assignCast, removeCastFromTable, toggleMainHost, toggleRequested, rotateHosts,
     startSet, setTableType, checkTable, extendTime, toggleInnerRotation, updateTableSettings, setCastExcluded, clearSeedData, resetTable, restoreTable,
     addToQueue, removeFromQueue, seatQueueGroup,
   }), [
-    shop.loading, loadingData, shopId, shop.canManage, shop.isDevice, shop.error, dataError, casts, tables, queue, rotationOrder, setRotationOrder,
+    shop.loading, loadingData, shopId, shop.canManage, shop.isDevice, shop.error, dataError, casts, tables, queue, rotationOrder, setRotationOrder, assistMode, setAssistMode,
     addCast, updateCast, removeCast, toggleLock, setCastBaseStatus,
     seedTables, seedTestData, assignCast, removeCastFromTable, toggleMainHost, toggleRequested, rotateHosts,
     startSet, setTableType, checkTable, extendTime, toggleInnerRotation, updateTableSettings, setCastExcluded, clearSeedData, resetTable, restoreTable,

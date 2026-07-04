@@ -24,6 +24,7 @@ interface BoardTable {
 }
 interface BoardCast {
   id: string; name: string; rank: string; status: string; isLocked: boolean;
+  ngWith?: string[]; // NG 組合せ（同卓に付けない相手の名前）
 }
 interface SuggestRequestBody {
   workspaceId: string;
@@ -45,6 +46,7 @@ const SYSTEM_INSTRUCTION = `あなたはナイトワーク店舗の席回し（�
 - ロック中(isLocked)・欠勤(Absent)・BOSS のキャストは配置しない
 - 各卓の excluded（回さない指定）に入っているキャストはその卓に配置しない
 - 他の卓で本指名(main)として付いているキャストを引き剥がさない
+- ngWith（NG組合せ）に載っている相手と同じ卓に付けない
 - 1人のキャストは同時に1卓のみ。既にその卓に居るキャストを再提案しない
 
 方針:

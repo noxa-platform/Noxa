@@ -20,6 +20,7 @@ export interface Cast {
   currentTableId?: string | null;
   imageUrl?: string;
   uid?: string | null; // 紐付くアカウント uid（個人売上の帰属用・未連携なら null）
+  ngCastIds?: string[]; // NG 組合せ（同卓に付けないキャスト。どちらか一方にあれば対称に効く）
 }
 
 export type TableType = '初回' | '初回指名' | 'R' | '正規';

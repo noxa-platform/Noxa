@@ -8,7 +8,7 @@ import { db } from '@/lib/firebase/config';
 import { useSeatingStore } from '@/lib/seating/store';
 import { useShopConfig } from '@/lib/shopConfig';
 import { PosClient } from '@/components/modules/pos/PosClient';
-import { generateAIProposals, getSourcingCandidates, sanitizeAiPlan, type AiPlanItem } from '@/lib/seating/ai';
+import { generateSmartProposals, getSourcingCandidates, sanitizeAiPlan, ASSIST_MODE_LABEL, type AiPlanItem, type AssistMode } from '@/lib/seating/ai';
 import { computeSetTimer, orderedRotationQueue, moveInOrder, firstVisitPickupSet } from '@/lib/seating/logic';
 import { calculateResult, type CalculatorState } from '@/lib/pos/engine';
 import { createDefaultStoreConfig } from '@/lib/pos/defaultConfig';
@@ -144,7 +144,11 @@ export function SeatingClient({ user }: { user: User }) {
   useEffect(() => { const t = setInterval(() => setTick(Date.now()), 15000); return () => clearInterval(t); }, []);
 
   const castById = useMemo(() => new Map(casts.map((c) => [c.id, c])), [casts]);
-  const proposals = useMemo(() => generateAIProposals(tables, casts), [tables, casts]);
+  // 計算ベースの采配エンジン（決定的・無料）。回す順番と采配モードを重みに反映
+  const proposals = useMemo(
+    () => generateSmartProposals(tables, casts, { rotationOrder: store.rotationOrder, mode: store.assistMode }),
+    [tables, casts, store.rotationOrder, store.assistMode],
+  );
   // 回す順番（初回ローテの采配順）と初回ピックアップ
   const rotationQueue = useMemo(() => orderedRotationQueue(store.rotationOrder, casts), [store.rotationOrder, casts]);
   const pickups = useMemo(() => firstVisitPickupSet(tables), [tables]);
@@ -202,7 +206,10 @@ export function SeatingClient({ user }: { user: User }) {
           requested: (t.requestedHostIds ?? []).map((id) => castById.get(id)?.name ?? id),
           excluded: (t.excludedHostIds ?? []).map((id) => castById.get(id)?.name ?? id),
         })),
-        casts: casts.map((c) => ({ id: c.id, name: c.name, rank: c.rank, status: c.status, isLocked: c.isLocked })),
+        casts: casts.map((c) => ({
+          id: c.id, name: c.name, rank: c.rank, status: c.status, isLocked: c.isLocked,
+          ...(c.ngCastIds?.length ? { ngWith: c.ngCastIds.map((id) => castById.get(id)?.name ?? id) } : {}),
+        })),
       };
       const token = await user.getIdToken();
       const res = await fetch('/api/ai/seating-suggest', {
@@ -280,6 +287,17 @@ export function SeatingClient({ user }: { user: User }) {
           </div>
         );
       })()}
+      {/* 采配モード（計算エンジンの重み付け・店舗共有） */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap', marginBottom: 10 }}>
+        <span style={miniLabel}>采配モード</span>
+        {(['balanced', 'nomination', 'rookie'] as AssistMode[]).map((m) => (
+          <button key={m} type="button" onClick={() => store.setAssistMode(m)} style={{ ...chipStyle(store.assistMode === m), minHeight: 28, padding: '4px 12px', fontSize: 12 }}>{ASSIST_MODE_LABEL[m]}</button>
+        ))}
+        <span style={{ fontSize: 10, fontFamily: mono, color: 'var(--noxa-text-faint)' }}>
+          {store.assistMode === 'balanced' ? '回す順番を重視して公平に回す' : store.assistMode === 'nomination' ? '指名/PUを最優先で付ける' : '役職×新人の育成ペアを優先'}
+        </span>
+      </div>
+
       {/* 自動提案（設定ベース・純ロジック・無料） */}
       {proposals.length > 0 && (
         <div style={{ marginBottom: 10, display: 'flex', flexDirection: 'column', gap: 8 }}>
@@ -767,7 +785,7 @@ function CastRoster({ casts, store, wageFor, castLabel = 'キャスト', pickups
         ))}
       </div>
 
-      {editing && <CastEditor cast={editing} store={store} onClose={() => setEditing(null)} />}
+      {editing && <CastEditor cast={editing} allCasts={casts} store={store} onClose={() => setEditing(null)} />}
 
       {adding ? (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 6, borderTop: '1px solid var(--noxa-divider)', paddingTop: 10 }}>
@@ -922,13 +940,15 @@ const ghostBtn: React.CSSProperties = {
 
 // ───────────────────────── キャスト編集（時給・rank・アカウント連携）
 
-function CastEditor({ cast, store, onClose }: { cast: Cast; store: ReturnType<typeof useSeatingStore>; onClose: () => void }) {
+function CastEditor({ cast, allCasts, store, onClose }: { cast: Cast; allCasts: Cast[]; store: ReturnType<typeof useSeatingStore>; onClose: () => void }) {
   const [name, setName] = useState(cast.name);
   const [rank, setRank] = useState<Rank>(cast.rank);
   const [wage, setWage] = useState(cast.hourlyWage);
   const [uid, setUid] = useState<string>(cast.uid ?? '');
+  const [ngIds, setNgIds] = useState<string[]>(() => cast.ngCastIds ?? []);
   const [members, setMembers] = useState<{ uid: string; label: string }[]>([]);
   const [busy, setBusy] = useState(false);
+  const others = allCasts.filter((c) => c.id !== cast.id);
 
   // 店舗メンバー（人間のみ）を連携候補として購読
   useEffect(() => {
@@ -948,7 +968,7 @@ function CastEditor({ cast, store, onClose }: { cast: Cast; store: ReturnType<ty
   const save = async () => {
     setBusy(true);
     try {
-      await store.updateCast(cast.id, { name: name.trim() || cast.name, rank, hourlyWage: Math.max(0, wage), uid: uid || null });
+      await store.updateCast(cast.id, { name: name.trim() || cast.name, rank, hourlyWage: Math.max(0, wage), uid: uid || null, ngCastIds: ngIds });
       onClose();
     } catch (e) {
       window.alert(String((e as Error)?.message ?? e));
@@ -980,6 +1000,25 @@ function CastEditor({ cast, store, onClose }: { cast: Cast; store: ReturnType<ty
           </select>
           <span style={{ fontSize: 10, color: 'var(--noxa-text-faint)', lineHeight: 1.5 }}>店舗設定の「メンバーと招待」で招待→参加すると候補に出ます。連携すると勤怠×時給が給与計算に乗ります。</span>
         </label>
+        {others.length > 0 && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+            <span style={miniLabel}>NG 組合せ（同卓に付けない相手）</span>
+            <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', maxHeight: 110, overflowY: 'auto' }}>
+              {others.map((c) => {
+                const on = ngIds.includes(c.id);
+                return (
+                  <button key={c.id} type="button"
+                    onClick={() => setNgIds((prev) => on ? prev.filter((x) => x !== c.id) : [...prev, c.id])}
+                    style={{ ...chipStyle(on), minHeight: 28, padding: '3px 10px', fontSize: 12,
+                      ...(on ? { background: 'rgba(196,56,74,0.15)', borderColor: 'var(--noxa-status-error)', color: 'var(--noxa-status-error)', boxShadow: 'none' } : {}) }}>
+                    {on ? '🚫 ' : ''}{c.name}
+                  </button>
+                );
+              })}
+            </div>
+            <span style={{ fontSize: 10, color: 'var(--noxa-text-faint)' }}>自動提案・AI提案はこの組合せを絶対に出しません（どちらか一方に設定すれば双方向に効きます）。</span>
+          </div>
+        )}
         <div style={{ display: 'flex', gap: 8 }}>
           <button type="button" className="noxa-btn noxa-btn-primary" style={{ ...primaryBtn, flex: 1 }} disabled={busy} onClick={save}>保存</button>
           <button type="button" onClick={remove} disabled={busy} style={{ ...ghostBtn, width: 64, color: 'var(--noxa-status-error)' }}>削除</button>

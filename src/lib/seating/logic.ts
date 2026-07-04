@@ -12,6 +12,7 @@ export const SESSION_LOG_LIMIT = 30;
 type StoredCastLike = {
   id: string; name: string; rank: Cast['rank']; hourlyWage: number; isLocked: boolean;
   baseStatus: Extract<CastStatus, 'Free' | 'Break' | 'Absent'>; imageUrl?: string; uid?: string | null;
+  ngCastIds?: string[];
 };
 
 /** 卓配置からキャスト稼働状態を導出（配置は卓ドキュメントが正） */
@@ -21,6 +22,7 @@ export function computeCasts(stored: StoredCastLike[], tables: FloorTable[]): Ca
   return stored.map((s) => ({
     id: s.id, name: s.name, rank: s.rank, hourlyWage: s.hourlyWage, isLocked: s.isLocked,
     imageUrl: s.imageUrl, uid: s.uid ?? null,
+    ngCastIds: s.ngCastIds ?? [],
     status: (tableByCast.has(s.id) ? 'Work' : s.baseStatus) as CastStatus,
     currentTableId: tableByCast.get(s.id) ?? null,
   }));
