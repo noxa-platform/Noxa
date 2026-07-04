@@ -60,10 +60,19 @@ export interface FloorTable {
   innerRotationEnabled: boolean;
   /** 現在の来店の延長合計（分）。セット長は変えず境界を後ろへずらす。退店/開卓でリセット */
   extraMinutes?: number;
+  /** 回し履歴（この来店で誰が何分付いたか）。退席時に追記・開卓/退店でリセット・上限あり */
+  sessionLog?: SessionLogEntry[];
   memo?: string;
 
   // POS 伝票（席回しと同一卓ドキュメントを共有＝完全同期）
   slips?: PosSlip[];
+}
+
+/** 回し履歴の1件（castId が start〜end まで着席していた） */
+export interface SessionLogEntry {
+  castId: string;
+  start: number;
+  end: number;
 }
 
 export interface QueueItem {
@@ -94,6 +103,7 @@ export function createEmptyTable(id: string, name: string): FloorTable {
     rotationTimeLength: 15,
     innerRotationEnabled: false,
     extraMinutes: 0,
+    sessionLog: [],
     memo: '',
   };
 }

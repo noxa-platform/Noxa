@@ -9,7 +9,7 @@ import { useSeatingStore } from '@/lib/seating/store';
 import { useShopConfig } from '@/lib/shopConfig';
 import { PosClient } from '@/components/modules/pos/PosClient';
 import { generateAIProposals, getSourcingCandidates } from '@/lib/seating/ai';
-import { computeSetTimer } from '@/lib/seating/logic';
+import { computeSetTimer, orderedRotationQueue, moveInOrder, firstVisitPickupSet } from '@/lib/seating/logic';
 import { calculateResult, type CalculatorState } from '@/lib/pos/engine';
 import { createDefaultStoreConfig } from '@/lib/pos/defaultConfig';
 import type { StoreConfig } from '@/lib/pos/types';
@@ -136,6 +136,9 @@ export function SeatingClient({ user }: { user: User }) {
 
   const castById = useMemo(() => new Map(casts.map((c) => [c.id, c])), [casts]);
   const proposals = useMemo(() => generateAIProposals(tables, casts), [tables, casts]);
+  // 回す順番（初回ローテの采配順）と初回ピックアップ
+  const rotationQueue = useMemo(() => orderedRotationQueue(store.rotationOrder, casts), [store.rotationOrder, casts]);
+  const pickups = useMemo(() => firstVisitPickupSet(tables), [tables]);
   const selected = tables.find((t) => t.id === selectedTableId) ?? null;
 
   if (store.loading) return <Shell><div className="noxa-eyebrow" style={{ padding: '40px 0' }}>読み込み中…</div></Shell>;
@@ -261,14 +264,19 @@ export function SeatingClient({ user }: { user: User }) {
           )}
         </div>
 
-        {/* 右：キャスト / 待機列 */}
+        {/* 右：回す順番（常設）＋ キャスト / 待機列 */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+          <RotationQueuePanel
+            queue={rotationQueue}
+            pickups={pickups}
+            onMove={(id, dir) => store.setRotationOrder(moveInOrder(rotationQueue.map((c) => c.id), id, dir))}
+          />
           <div role="tablist" style={{ display: 'flex', gap: 6 }}>
             <button type="button" role="tab" aria-selected={side === 'casts'} onClick={() => setSide('casts')} style={chipStyle(side === 'casts')}>在籍キャスト</button>
             <button type="button" role="tab" aria-selected={side === 'queue'} onClick={() => setSide('queue')} style={chipStyle(side === 'queue')}>待ち組 {queue.length > 0 ? `(${queue.length})` : ''}</button>
           </div>
           {side === 'casts'
-            ? <CastRoster casts={casts} store={store} wageFor={wageFor} castLabel={cfg.t('cast')} />
+            ? <CastRoster casts={casts} store={store} wageFor={wageFor} castLabel={cfg.t('cast')} pickups={pickups} />
             : <QueuePanel queue={queue} tables={tables} store={store} />}
         </div>
       </div>
@@ -500,6 +508,24 @@ function TableDetail({ table, casts, tables, castById, store, onOpenPos }: {
             </div>
           )}
 
+          {/* 回し履歴（この来店で誰が何分付いたか） */}
+          {(table.sessionLog?.length ?? 0) > 0 && (
+            <div>
+              <div style={{ ...miniLabel, marginBottom: 6 }}>回し履歴（この来店）</div>
+              <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap' }}>
+                {[...(table.sessionLog ?? [])].reverse().slice(0, 12).map((e, i) => {
+                  const c = castById.get(e.castId);
+                  const min = Math.max(1, Math.round((e.end - e.start) / 60000));
+                  return (
+                    <span key={`${e.castId}-${e.end}-${i}`} style={{ fontSize: 10, fontFamily: mono, padding: '2px 8px', borderRadius: 9999, background: 'var(--noxa-surface-muted)', color: 'var(--noxa-text-muted)', border: '1px solid var(--noxa-border)' }}>
+                      {c?.name ?? '?'} · {min}分
+                    </span>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
           {/* アクション */}
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', borderTop: '1px solid var(--noxa-divider)', paddingTop: 12 }}>
             <button type="button" onClick={onOpenPos} style={chipStyle(true)}>🧾 伝票・会計を開く</button>
@@ -527,9 +553,45 @@ function TableDetail({ table, casts, tables, castById, store, onOpenPos }: {
   );
 }
 
+// ───────────────────────── 回す順番（初回ローテの采配キュー・常設）
+
+function RotationQueuePanel({ queue, pickups, onMove }: { queue: Cast[]; pickups: Set<string>; onMove: (castId: string, dir: -1 | 1) => void }) {
+  return (
+    <section aria-label="回す順番" style={{ background: 'var(--noxa-surface-card)', border: '1px solid var(--noxa-border)', borderRadius: 16, padding: 14, display: 'flex', flexDirection: 'column', gap: 8 }}>
+      <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between' }}>
+        <span className="noxa-eyebrow" style={{ fontSize: 11 }}>回す順番（待機中）</span>
+        {queue.length > 0 && <span style={{ fontFamily: mono, fontSize: 10, color: 'var(--noxa-text-faint)' }}>{queue.length}人</span>}
+      </div>
+      {queue.length === 0 ? (
+        <span style={{ fontSize: 12, color: 'var(--noxa-text-faint)' }}>待機中のキャストがいません（卓に付くと自動で最後尾に回ります）。</span>
+      ) : (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 4, maxHeight: 240, overflowY: 'auto' }}>
+          {queue.map((c, i) => (
+            <div key={c.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '5px 8px', borderRadius: 10,
+              background: i === 0 ? 'rgba(139,92,246,0.10)' : 'var(--noxa-bg-base)',
+              border: i === 0 ? '1px solid var(--noxa-accent-primary)' : '1px solid var(--noxa-border)' }}>
+              <span style={{ fontFamily: mono, fontSize: 11, fontWeight: 700, minWidth: 18, textAlign: 'center', color: i === 0 ? 'var(--noxa-accent-primary-ink)' : 'var(--noxa-text-faint)' }}>{i + 1}</span>
+              <span aria-hidden style={{ width: 6, height: 6, borderRadius: 3, background: RANK_TINT[c.rank], flex: 'none' }} />
+              <span style={{ fontSize: 12, flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                {c.name}
+                {i === 0 && <span style={{ fontSize: 9, color: 'var(--noxa-accent-primary-ink)', marginLeft: 5, fontWeight: 600 }}>次</span>}
+                {pickups.has(c.id) && <span title="初回ピックアップに選ばれています" style={{ fontSize: 9, fontWeight: 700, color: 'var(--noxa-status-success)', marginLeft: 5 }}>PU</span>}
+              </span>
+              <button type="button" title="上へ" disabled={i === 0} onClick={() => onMove(c.id, -1)} style={{ ...rotBtn, opacity: i === 0 ? 0.3 : 1 }}>↑</button>
+              <button type="button" title="下へ" disabled={i === queue.length - 1} onClick={() => onMove(c.id, 1)} style={{ ...rotBtn, opacity: i === queue.length - 1 ? 0.3 : 1 }}>↓</button>
+            </div>
+          ))}
+        </div>
+      )}
+    </section>
+  );
+}
+
+const rotBtn: React.CSSProperties = { appearance: 'none', cursor: 'pointer', width: 26, height: 26, borderRadius: 8, flex: 'none', background: 'var(--noxa-surface-muted)', border: '1px solid var(--noxa-border)', color: 'var(--noxa-text-muted)', fontSize: 12, lineHeight: 1, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' };
+
 // ───────────────────────── キャスト名簿
 
-function CastRoster({ casts, store, wageFor, castLabel = 'キャスト' }: { casts: Cast[]; store: ReturnType<typeof useSeatingStore>; wageFor?: (rank: string) => number | undefined; castLabel?: string }) {
+function CastRoster({ casts, store, wageFor, castLabel = 'キャスト', pickups }: { casts: Cast[]; store: ReturnType<typeof useSeatingStore>; wageFor?: (rank: string) => number | undefined; castLabel?: string; pickups?: Set<string> }) {
   const [adding, setAdding] = useState(false);
   const [name, setName] = useState('');
   const [rank, setRank] = useState<Rank>('非役職');
@@ -555,6 +617,7 @@ function CastRoster({ casts, store, wageFor, castLabel = 'キャスト' }: { cas
             <span aria-hidden style={{ width: 8, height: 8, borderRadius: 4, background: RANK_TINT[c.rank], flex: 'none' }} />
             <span style={{ fontSize: 13, flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c.name}
               <span style={{ fontFamily: mono, fontSize: 9, color: 'var(--noxa-text-faint)', marginLeft: 6 }}>{c.rank}</span>
+              {pickups?.has(c.id) && <span title="初回ピックアップに選ばれています" style={{ fontSize: 9, fontWeight: 700, color: 'var(--noxa-status-success)', marginLeft: 4 }}>PU</span>}
               {!c.uid && <span title="アカウント未連携（給与計算に乗りません）" style={{ fontSize: 9, color: 'var(--noxa-status-error)', marginLeft: 4 }}>未連携</span>}
             </span>
             <button type="button" onClick={() => setEditing(c)} title="編集（時給・アカウント連携）" style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--noxa-text-faint)', fontSize: 12 }}>✎</button>

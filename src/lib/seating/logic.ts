@@ -4,7 +4,10 @@
  * store.ts は「Firestore から読んだ最新値」をここへ渡してパッチ（変更フィールドのみ）を受け取り、
  * トランザクションで書く。卓ドキュメント全体の上書きは POS 伝票(slips)等を巻き戻すため禁止。
  */
-import type { Cast, CastStatus, FloorTable, TableStatus } from './types';
+import type { Cast, CastStatus, FloorTable, SessionLogEntry, TableStatus } from './types';
+
+/** 回し履歴の上限（卓 doc の肥大防止。1来店で30回超のローテは実運用上ない） */
+export const SESSION_LOG_LIMIT = 30;
 
 type StoredCastLike = {
   id: string; name: string; rank: Cast['rank']; hourlyWage: number; isLocked: boolean;
@@ -49,15 +52,63 @@ export function canStartSet(status: TableStatus): boolean {
 
 export type TablePatch = Partial<FloorTable>;
 
-/** キャストを卓から外すパッチ（対象卓の配列/開始時刻のみ変更） */
-export function removeCastPatch(t: FloorTable, castId: string): TablePatch {
+/**
+ * キャストを卓から外すパッチ（対象卓の配列/開始時刻のみ変更）。
+ * now を渡すと回し履歴(sessionLog)に「誰が何分付いたか」を追記する（M2 の回し履歴）。
+ */
+export function removeCastPatch(t: FloorTable, castId: string, now?: number): TablePatch {
   const castStartTimes = { ...(t.castStartTimes ?? {}) };
+  const start = castStartTimes[castId];
   delete castStartTimes[castId];
-  return {
+  const patch: TablePatch = {
     currentHostIds: (t.currentHostIds ?? []).filter((c) => c !== castId),
     mainHostIds: (t.mainHostIds ?? []).filter((c) => c !== castId),
     castStartTimes,
   };
+  // 着席していた（開始時刻がある）場合のみ履歴に残す。上限超過は古い方から捨てる
+  if (now && start && (t.currentHostIds ?? []).includes(castId)) {
+    const entry: SessionLogEntry = { castId, start, end: now };
+    patch.sessionLog = [...(t.sessionLog ?? []), entry].slice(-SESSION_LOG_LIMIT);
+  }
+  return patch;
+}
+
+/**
+ * 回す順番キュー（初回ローテの采配順）。
+ * 待機中(Free)かつロック/BOSS 以外を rotationOrder の並びで返し、
+ * 並びに無いキャストは末尾へ（新規追加・卓から戻った人は自然に最後尾）。
+ */
+export function orderedRotationQueue(order: string[] | undefined, casts: Cast[]): Cast[] {
+  const idx = new Map((order ?? []).map((id, i) => [id, i]));
+  return casts
+    .filter((c) => c.status === 'Free' && !c.isLocked && c.rank !== 'BOSS')
+    .sort((a, b) => (idx.get(a.id) ?? Number.MAX_SAFE_INTEGER) - (idx.get(b.id) ?? Number.MAX_SAFE_INTEGER));
+}
+
+/** 並び替え: id を dir(-1=上/+1=下)へ1つ移動した新配列を返す（端はそのまま） */
+export function moveInOrder(order: string[], id: string, dir: -1 | 1): string[] {
+  const i = order.indexOf(id);
+  const j = i + dir;
+  if (i < 0 || j < 0 || j >= order.length) return [...order];
+  const next = [...order];
+  [next[i], next[j]] = [next[j], next[i]];
+  return next;
+}
+
+/** id を並びから外して末尾へ（卓へ付いた人は列の最後尾に回る） */
+export function sendToBackOfOrder(order: string[] | undefined, id: string): string[] {
+  return [...(order ?? []).filter((x) => x !== id), id];
+}
+
+/** 初回ピックアップ（初回系卓でパネル指名/ピックアップされたキャスト）の集合 */
+export function firstVisitPickupSet(tables: FloorTable[]): Set<string> {
+  const s = new Set<string>();
+  for (const t of tables) {
+    if (t.status === 'EMPTY') continue;
+    if (t.type !== '初回' && t.type !== '初回指名') continue;
+    for (const id of t.requestedHostIds ?? []) s.add(id);
+  }
+  return s;
 }
 
 /**
@@ -85,7 +136,7 @@ export function buildAssignPatches(
         patch: { currentHostIds: [...(t.currentHostIds ?? []), castId], castStartTimes, assignedHistory },
       });
     } else if (has) {
-      patches.push({ tableId: t.id, patch: removeCastPatch(t, castId) });
+      patches.push({ tableId: t.id, patch: removeCastPatch(t, castId, now) });
     }
   }
   return patches;

@@ -34,7 +34,7 @@ import { getActiveShop, pickShopId } from '@/lib/workspace';
 import { businessDayKey } from '@/lib/datetime';
 import {
   computeCasts, rotateOrder, nextDailySequence, canStartSet,
-  removeCastPatch, buildAssignPatches, stripCastPatches, toggleInArray, type TablePatch,
+  removeCastPatch, buildAssignPatches, stripCastPatches, toggleInArray, sendToBackOfOrder, type TablePatch,
 } from './logic';
 
 type StoredCast = {
@@ -84,6 +84,9 @@ export type UseSeatingStore = {
   casts: Cast[];
   tables: FloorTable[];
   queue: QueueItem[];
+  /** 回す順番（初回ローテの采配順・seating_meta/state.rotationOrder） */
+  rotationOrder: string[];
+  setRotationOrder: (order: string[]) => Promise<void>;
   // cast
   addCast: (c: { name: string; rank: Rank; hourlyWage: number; uid?: string | null }) => Promise<void>;
   updateCast: (id: string, updates: Partial<StoredCast>) => Promise<void>;
@@ -126,6 +129,7 @@ export function useSeatingStore(user: User): UseSeatingStore {
   const [stored, setStored] = useState<StoredCast[]>([]);
   const [tables, setTables] = useState<FloorTable[]>([]);
   const [queue, setQueue] = useState<QueueItem[]>([]);
+  const [rotationOrder, setRotationOrderState] = useState<string[]>([]);
   const [loadingData, setLoadingData] = useState(true);
   const [dataError, setDataError] = useState<string | null>(null);
 
@@ -146,6 +150,10 @@ export function useSeatingStore(user: User): UseSeatingStore {
         setTables(list);
         setLoadingData(false);
       }, (e) => { setLoadingData(false); setDataError(`卓情報の取得に失敗（${e?.code ?? e?.message ?? e}）`); }),
+      onSnapshot(doc(db, `shop_shops/${shopId}/seating_meta/state`), (snap) => {
+        const ro = snap.exists() ? (snap.data() as { rotationOrder?: string[] }).rotationOrder : undefined;
+        setRotationOrderState(Array.isArray(ro) ? ro : []);
+      }, (e) => { console.warn('[noxa:seating] meta購読エラー', e?.message ?? e); }),
       onSnapshot(collection(db, `shop_shops/${shopId}/seating_queue`), (snap) => {
         const list: QueueItem[] = [];
         snap.forEach((d) => list.push({ id: d.id, ...(d.data() as Omit<QueueItem, 'id'>) }));
@@ -296,7 +304,9 @@ export function useSeatingStore(user: User): UseSeatingStore {
     const tableIds = tables.map((t) => t.id);
     if (!tableIds.includes(tableId)) tableIds.push(tableId);
     const now = Date.now();
+    const metaR = doc(db, `shop_shops/${shopId}/seating_meta/state`);
     await runTransaction(db, async (tx) => {
+      const metaSnap = await tx.get(metaR);
       const freshTables: FloorTable[] = [];
       for (const id of tableIds) {
         const snap = await tx.get(tableRef(id));
@@ -306,12 +316,21 @@ export function useSeatingStore(user: User): UseSeatingStore {
       for (const p of patches) {
         tx.set(tableRef(p.tableId), { ...p.patch, updatedAt: serverTimestamp() }, { merge: true });
       }
+      // 卓に付いた人は「回す順番」の最後尾へ（初回ローテの采配順を自動維持）
+      const meta = metaSnap.exists() ? (metaSnap.data() as { rotationOrder?: string[] }) : undefined;
+      tx.set(metaR, { rotationOrder: sendToBackOfOrder(meta?.rotationOrder, castId), updatedAt: serverTimestamp() }, { merge: true });
     });
   }, [shopId, tables, tableRef]);
 
   const removeCastFromTable = useCallback<UseSeatingStore['removeCastFromTable']>(async (tableId, castId) => {
-    await txUpdateTable(tableId, (t) => removeCastPatch(t, castId));
+    const now = Date.now();
+    await txUpdateTable(tableId, (t) => removeCastPatch(t, castId, now)); // now 付き＝回し履歴に記録
   }, [txUpdateTable]);
+
+  const setRotationOrder = useCallback<UseSeatingStore['setRotationOrder']>(async (order) => {
+    if (!shopId) return;
+    await setDoc(doc(db, `shop_shops/${shopId}/seating_meta/state`), { rotationOrder: order, updatedAt: serverTimestamp() }, { merge: true });
+  }, [shopId]);
 
   const toggleMainHost = useCallback<UseSeatingStore['toggleMainHost']>(async (tableId, castId) => {
     await txUpdateTable(tableId, (t) => ({ mainHostIds: toggleInArray(t.mainHostIds, castId) }));
@@ -349,6 +368,7 @@ export function useSeatingStore(user: User): UseSeatingStore {
         type: customers[0]?.type ?? t.type ?? '正規',
         customers: customers.map((c) => ({ ...c, entryTime: now })),
         extraMinutes: 0, // 新しい来店＝延長リセット
+        sessionLog: [], // 回し履歴も来店単位でリセット
         castStartTimes, updatedAt: serverTimestamp(),
       }, { merge: true });
     });
@@ -482,6 +502,7 @@ export function useSeatingStore(user: User): UseSeatingStore {
         type: item.type,
         customers: customers.map((c) => ({ ...c })),
         extraMinutes: 0, // 新しい来店＝延長リセット
+        sessionLog: [], // 回し履歴も来店単位でリセット
         castStartTimes, updatedAt: serverTimestamp(),
       }, { merge: true });
       tx.delete(queueR);
@@ -492,13 +513,13 @@ export function useSeatingStore(user: User): UseSeatingStore {
     loading: shop.loading || loadingData,
     shopId, canManage: shop.canManage, isDevice: shop.isDevice, error: shop.error,
     dataError,
-    casts, tables, queue,
+    casts, tables, queue, rotationOrder, setRotationOrder,
     addCast, updateCast, removeCast, toggleLock, setCastBaseStatus,
     seedTables, seedTestData, assignCast, removeCastFromTable, toggleMainHost, toggleRequested, rotateHosts,
     startSet, setTableType, checkTable, extendTime, toggleInnerRotation, updateTableSettings, setCastExcluded, clearSeedData, resetTable,
     addToQueue, removeFromQueue, seatQueueGroup,
   }), [
-    shop.loading, loadingData, shopId, shop.canManage, shop.isDevice, shop.error, dataError, casts, tables, queue,
+    shop.loading, loadingData, shopId, shop.canManage, shop.isDevice, shop.error, dataError, casts, tables, queue, rotationOrder, setRotationOrder,
     addCast, updateCast, removeCast, toggleLock, setCastBaseStatus,
     seedTables, seedTestData, assignCast, removeCastFromTable, toggleMainHost, toggleRequested, rotateHosts,
     startSet, setTableType, checkTable, extendTime, toggleInnerRotation, updateTableSettings, setCastExcluded, clearSeedData, resetTable,
