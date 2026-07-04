@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { useEffect, useMemo, useState } from 'react';
-import { collection, onSnapshot } from 'firebase/firestore';
+import { collection, doc, onSnapshot } from 'firebase/firestore';
 import type { User } from 'firebase/auth';
 import { db } from '@/lib/firebase/config';
 import { useSeatingStore } from '@/lib/seating/store';
@@ -10,6 +10,9 @@ import { useShopConfig } from '@/lib/shopConfig';
 import { PosClient } from '@/components/modules/pos/PosClient';
 import { generateAIProposals, getSourcingCandidates } from '@/lib/seating/ai';
 import { computeSetTimer } from '@/lib/seating/logic';
+import { calculateResult, type CalculatorState } from '@/lib/pos/engine';
+import { createDefaultStoreConfig } from '@/lib/pos/defaultConfig';
+import type { StoreConfig } from '@/lib/pos/types';
 import type { Cast, FloorTable, TableType, Customer, CastStatus, Rank } from '@/lib/seating/types';
 
 /**
@@ -29,9 +32,43 @@ const RANK_TINT: Record<Rank, string> = {
 };
 const STATUS_LABEL: Record<CastStatus, string> = { Free: '待機', Work: '在卓', Break: '休憩', Absent: '欠勤' };
 
+const yen = (n: number) => `¥${Math.round(n).toLocaleString('ja-JP')}`;
+
 function elapsedMin(start: number | null): number {
   if (!start) return 0;
   return Math.floor((Date.now() - start) / 60000);
+}
+
+/** POS 料金設定の購読（席回し画面で伝票金額を出すため。読取専用・無ければ既定値） */
+function usePosConfigLite(shopId: string | null): StoreConfig {
+  const [config, setConfig] = useState<StoreConfig>(() => createDefaultStoreConfig('active'));
+  useEffect(() => {
+    if (!shopId) return;
+    const unsub = onSnapshot(doc(db, `shop_shops/${shopId}/pos_config/active`), (snap) => {
+      if (snap.exists()) setConfig({ ...createDefaultStoreConfig('active'), ...(snap.data() as Partial<StoreConfig>) } as StoreConfig);
+    }, () => { /* 権限なし等は既定のまま（金額は概算表示） */ });
+    return () => unsub();
+  }, [shopId]);
+  return config;
+}
+
+/** 卓の伝票サマリ（現在金額・伝票数・注文点数・担当/客名）。伝票が無ければ null */
+type SlipSummary = { count: number; total: number; itemCount: number; castNames: string[]; customerNames: string[] };
+function summarizeSlips(t: FloorTable, config: StoreConfig): SlipSummary | null {
+  const slips = t.slips ?? [];
+  if (slips.length === 0) return null;
+  const d = new Date();
+  const hhmm = `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+  let total = 0; let itemCount = 0;
+  const castNames = new Set<string>(); const customerNames = new Set<string>();
+  for (const s of slips) {
+    const live: CalculatorState = s.state.isDebugMode ? s.state : { ...s.state, currentTime: hhmm };
+    try { total += calculateResult(live, config).currentTotal; } catch { /* 壊れた伝票は金額のみスキップ */ }
+    for (const o of s.state.orders ?? []) if ((o?.count ?? 0) > 0) itemCount += o.count;
+    if (s.castName) castNames.add(s.castName);
+    if (s.customerName) customerNames.add(s.customerName);
+  }
+  return { count: slips.length, total, itemCount, castNames: [...castNames], customerNames: [...customerNames] };
 }
 function fmtElapsed(start: number | null): string {
   const m = elapsedMin(start);
@@ -61,6 +98,9 @@ export function SeatingClient({ user }: { user: User }) {
   const { casts, tables, queue } = store;
   const [selectedTableId, setSelectedTableId] = useState<string | null>(null);
   const [side, setSide] = useState<'casts' | 'queue'>('casts');
+  // 伝票・会計モーダル（卓カードからも直行できるよう親で管理）
+  const [posFor, setPosFor] = useState<string | null>(null);
+  const posConfig = usePosConfigLite(store.shopId);
   const [, setTick] = useState(0);
 
   useEffect(() => { const t = setInterval(() => setTick((n) => n + 1), 15000); return () => clearInterval(t); }, []);
@@ -131,7 +171,7 @@ export function SeatingClient({ user }: { user: User }) {
               const danger = check || tm?.warning;
               const label = check ? '会計' : tm?.warning ? `残${tm.remainingMin}分` : `🔄ローテ`;
               return (
-                <button key={t.id} type="button" onClick={() => setSelectedTableId(t.id)}
+                <button key={t.id} type="button" onClick={() => { setSelectedTableId(t.id); if (check) setPosFor(t.id); }}
                   style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '6px 12px', borderRadius: 9999, cursor: 'pointer', fontSize: 12, fontWeight: 600,
                     background: danger ? (check ? 'rgba(196,56,74,0.12)' : 'rgba(245,212,114,0.12)') : 'rgba(139,92,246,0.12)',
                     border: `1px solid ${danger ? (check ? 'var(--noxa-status-error)' : 'var(--noxa-status-warning)') : 'var(--noxa-accent-primary)'}`,
@@ -152,7 +192,9 @@ export function SeatingClient({ user }: { user: User }) {
             <PaneTitle>フロア</PaneTitle>
             <div className="grid grid-cols-2 sm:grid-cols-3" style={{ gap: 10 }}>
               {tables.map((t) => (
-                <TableCard key={t.id} table={t} castById={castById} active={t.id === selectedTableId} onSelect={() => setSelectedTableId(t.id)} />
+                <TableCard key={t.id} table={t} castById={castById} posConfig={posConfig} active={t.id === selectedTableId}
+                  onSelect={() => setSelectedTableId(t.id)}
+                  onOpenPos={() => { setSelectedTableId(t.id); setPosFor(t.id); }} />
               ))}
             </div>
           </section>
@@ -164,7 +206,7 @@ export function SeatingClient({ user }: { user: User }) {
               tables={tables}
               castById={castById}
               store={store}
-              user={user}
+              onOpenPos={() => setPosFor(selected.id)}
             />
           )}
         </div>
@@ -180,25 +222,50 @@ export function SeatingClient({ user }: { user: User }) {
             : <QueuePanel queue={queue} tables={tables} store={store} />}
         </div>
       </div>
+
+      {/* 伝票・会計（POSをこの卓に絞って埋め込み＝フロアから会計まで1画面で完結） */}
+      {posFor && (() => {
+        const t = tables.find((x) => x.id === posFor);
+        if (!t) return null;
+        return (
+          <div role="dialog" aria-label="伝票・会計" onClick={() => setPosFor(null)}
+            style={{ position: 'fixed', inset: 0, zIndex: 60, background: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'flex-start', justifyContent: 'center', overflowY: 'auto', padding: 16 }}>
+            <div onClick={(e) => e.stopPropagation()} style={{ width: 'min(1100px, 96vw)', marginTop: 8, marginBottom: 24, background: 'var(--noxa-bg-base)', border: '1px solid var(--noxa-border-strong)', borderRadius: 16, padding: '14px 16px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
+                <span style={{ fontFamily: 'var(--noxa-font-display-jp)', fontSize: 18, fontWeight: 700 }}>{t.name} の伝票・会計</span>
+                <button type="button" onClick={() => setPosFor(null)} style={chipStyle(false)}>閉じる ✕</button>
+              </div>
+              <PosClient user={user} focusTableId={t.id} embedded />
+            </div>
+          </div>
+        );
+      })()}
     </Shell>
   );
 }
 
 // ───────────────────────── 卓カード
 
-function TableCard({ table, castById, active, onSelect }: { table: FloorTable; castById: Map<string, Cast>; active: boolean; onSelect: () => void }) {
+function TableCard({ table, castById, posConfig, active, onSelect, onOpenPos }: {
+  table: FloorTable; castById: Map<string, Cast>; posConfig: StoreConfig; active: boolean;
+  onSelect: () => void; onOpenPos: () => void;
+}) {
   const occupied = table.status !== 'EMPTY';
   const timer = setTimer(table);
   const isCheck = table.status === 'CHECK';
+  const slipSum = occupied ? summarizeSlips(table, posConfig) : null;
   // 状態色: 会計=赤 / 残10分以下=黄 / 接客中=紫 / 空席=灰
   const statusColor = isCheck ? 'var(--noxa-status-error)'
     : timer?.warning ? 'var(--noxa-status-warning)'
     : occupied ? 'var(--noxa-accent-primary-ink)' : 'var(--noxa-text-faint)';
   const barColor = timer?.warning ? 'var(--noxa-status-warning)' : 'var(--noxa-accent-primary)';
+  const guestName = table.customers.find((c) => c.name)?.name;
   return (
-    <button type="button" onClick={onSelect} aria-pressed={active}
+    // 会計ボタンを内包するため button のネストを避けて div+role にする
+    <div role="button" tabIndex={0} onClick={onSelect} aria-pressed={active}
+      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onSelect(); } }}
       style={{
-        appearance: 'none', cursor: 'pointer', textAlign: 'left', minHeight: 116, padding: 12, borderRadius: 14,
+        cursor: 'pointer', textAlign: 'left', minHeight: 116, padding: 12, borderRadius: 14,
         background: occupied ? 'var(--noxa-surface-card)' : 'transparent',
         border: active ? '1px solid var(--noxa-accent-primary)' : `1px solid ${isCheck ? 'var(--noxa-status-error)' : occupied ? 'var(--noxa-border-strong)' : 'var(--noxa-border)'}`,
         boxShadow: active ? 'var(--noxa-glow-ring)' : (timer?.warning || isCheck ? `0 0 0 1px ${statusColor}` : 'none'),
@@ -208,7 +275,7 @@ function TableCard({ table, castById, active, onSelect }: { table: FloorTable; c
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
         <span style={{ fontFamily: 'var(--noxa-font-display-jp)', fontSize: 16, fontWeight: 600 }}>{table.name}</span>
         <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-          {table.type && occupied && <span style={{ fontSize: 10, fontFamily: mono, color: 'var(--noxa-text-muted)' }}>{table.type}</span>}
+          {table.type && occupied && <span style={{ fontSize: 10, fontFamily: mono, color: table.type.startsWith('初回') ? 'var(--noxa-status-success)' : 'var(--noxa-text-muted)' }}>{table.type}</span>}
           <span aria-hidden style={{ width: 8, height: 8, borderRadius: 4, background: statusColor, boxShadow: occupied ? `0 0 8px ${statusColor}` : 'none' }} />
         </span>
       </div>
@@ -224,13 +291,35 @@ function TableCard({ table, castById, active, onSelect }: { table: FloorTable; c
                 <span style={{ fontSize: 10, color: 'var(--noxa-text-faint)', fontFamily: mono }}>分 · {timer.setNumber}set</span>
               </span>
             ) : <span style={{ fontSize: 12, fontFamily: mono, color: 'var(--noxa-text-muted)' }}>{fmtElapsed(table.startTime)}</span>}
-            <span style={{ fontSize: 10, fontFamily: mono, color: 'var(--noxa-text-faint)' }}>{table.customers.length}名 · 計{fmtElapsed(table.startTime)}</span>
+            <span style={{ fontSize: 10, fontFamily: mono, color: 'var(--noxa-text-faint)' }}>{guestName ? `${guestName} · ` : ''}{table.customers.length}名 · 計{fmtElapsed(table.startTime)}</span>
           </div>
           {/* セット進捗バー */}
           {timer && (
             <div style={{ height: 4, borderRadius: 9999, background: 'var(--noxa-surface-muted)', overflow: 'hidden' }}>
               <div style={{ width: `${Math.round(timer.progress * 100)}%`, height: '100%', borderRadius: 9999, background: barColor, transition: 'width .4s var(--noxa-ease-natural)' }} />
             </div>
+          )}
+          {/* 伝票サマリ（現在金額・点数）＋ 会計直行。伝票なしなら作成導線 */}
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6 }}>
+            {slipSum ? (
+              <span style={{ display: 'flex', alignItems: 'baseline', gap: 5, minWidth: 0 }}>
+                <span style={{ fontFamily: 'var(--noxa-font-display-en)', fontSize: 15, fontWeight: 600, fontVariantNumeric: 'tabular-nums', color: isCheck ? 'var(--noxa-status-error)' : 'var(--noxa-text-primary)' }}>{yen(slipSum.total)}</span>
+                <span style={{ fontSize: 9, fontFamily: mono, color: 'var(--noxa-text-faint)', whiteSpace: 'nowrap' }}>{slipSum.count}伝票 · {slipSum.itemCount}点</span>
+              </span>
+            ) : (
+              <span style={{ fontSize: 10, color: 'var(--noxa-text-faint)', fontFamily: mono }}>伝票なし</span>
+            )}
+            <button type="button" onClick={(e) => { e.stopPropagation(); onOpenPos(); }}
+              style={{ appearance: 'none', cursor: 'pointer', flex: 'none', fontSize: 11, fontWeight: 600, padding: '3px 10px', borderRadius: 9999,
+                background: isCheck ? 'rgba(196,56,74,0.12)' : 'var(--noxa-surface-muted)',
+                border: `1px solid ${isCheck ? 'var(--noxa-status-error)' : 'var(--noxa-border-strong)'}`,
+                color: isCheck ? 'var(--noxa-status-error)' : 'var(--noxa-accent-primary-ink)' }}>
+              🧾 {isCheck ? '会計する' : '伝票'}
+            </button>
+          </div>
+          {/* 担当（伝票の指名）: 卓キャストと別に伝票側の担当を明示 */}
+          {slipSum && slipSum.castNames.length > 0 && (
+            <span style={{ fontSize: 9, fontFamily: mono, color: 'var(--noxa-text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>担当: {slipSum.castNames.join(' / ')}{slipSum.customerNames.length > 0 ? ` ｜ ${slipSum.customerNames.join(' / ')}` : ''}</span>
           )}
           {/* 卓内ローテ残り（自動ローテON時） */}
           {(() => { const r = rotationTimer(table); return r ? <span style={{ fontSize: 10, fontFamily: mono, color: r.due ? 'var(--noxa-accent-primary-ink)' : 'var(--noxa-text-faint)' }}>🔄 ローテ残{r.remainingMin}分{r.due ? '・そろそろ' : ''}</span> : null; })()}
@@ -251,21 +340,20 @@ function TableCard({ table, castById, active, onSelect }: { table: FloorTable; c
       ) : (
         <span style={{ fontSize: 11, color: 'var(--noxa-text-faint)', fontFamily: mono, marginTop: 'auto' }}>空席</span>
       )}
-    </button>
+    </div>
   );
 }
 
 // ───────────────────────── 卓詳細
 
-function TableDetail({ table, casts, tables, castById, store, user }: {
+function TableDetail({ table, casts, tables, castById, store, onOpenPos }: {
   table: FloorTable; casts: Cast[]; tables: FloorTable[]; castById: Map<string, Cast>;
   store: ReturnType<typeof useSeatingStore>;
-  user: User;
+  onOpenPos: () => void;
 }) {
   const [showPicker, setShowPicker] = useState(false);
   const [openGuests, setOpenGuests] = useState(2);
   const [openType, setOpenType] = useState<TableType>('正規');
-  const [posOpen, setPosOpen] = useState(false);
 
   const candidates = useMemo(() => getSourcingCandidates(casts, tables, table)
     .filter((c) => !table.currentHostIds.includes(c.cast.id)), [casts, tables, table]);
@@ -364,7 +452,7 @@ function TableDetail({ table, casts, tables, castById, store, user }: {
 
           {/* アクション */}
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', borderTop: '1px solid var(--noxa-divider)', paddingTop: 12 }}>
-            <button type="button" onClick={() => setPosOpen(true)} style={chipStyle(true)}>🧾 伝票・会計を開く</button>
+            <button type="button" onClick={onOpenPos} style={chipStyle(true)}>🧾 伝票・会計を開く</button>
             <button type="button" onClick={() => store.rotateHosts(table.id)} style={chipStyle(false)} disabled={table.currentHostIds.length < 2}>席内ローテ</button>
             <button type="button" onClick={() => store.toggleInnerRotation(table.id)} style={chipStyle(table.innerRotationEnabled)}>自動ローテ提案</button>
             <button type="button" onClick={() => store.extendTime(table.id, 30)} style={chipStyle(false)}>＋30分延長</button>
@@ -385,19 +473,6 @@ function TableDetail({ table, casts, tables, castById, store, user }: {
         </>
       )}
 
-      {/* 伝票・会計（POSをこの卓に絞って埋め込み＝フロアから会計まで1画面で完結） */}
-      {posOpen && (
-        <div role="dialog" aria-label="伝票・会計" onClick={() => setPosOpen(false)}
-          style={{ position: 'fixed', inset: 0, zIndex: 60, background: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'flex-start', justifyContent: 'center', overflowY: 'auto', padding: 16 }}>
-          <div onClick={(e) => e.stopPropagation()} style={{ width: 'min(1100px, 96vw)', marginTop: 8, marginBottom: 24, background: 'var(--noxa-bg-base)', border: '1px solid var(--noxa-border-strong)', borderRadius: 16, padding: '14px 16px' }}>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
-              <span style={{ fontFamily: 'var(--noxa-font-display-jp)', fontSize: 18, fontWeight: 700 }}>{table.name} の伝票・会計</span>
-              <button type="button" onClick={() => setPosOpen(false)} style={chipStyle(false)}>閉じる ✕</button>
-            </div>
-            <PosClient user={user} focusTableId={table.id} embedded />
-          </div>
-        </div>
-      )}
     </section>
   );
 }
