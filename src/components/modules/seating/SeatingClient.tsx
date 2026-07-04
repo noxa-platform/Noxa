@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { useEffect, useMemo, useState } from 'react';
-import { collection, doc, onSnapshot } from 'firebase/firestore';
+import { collection, doc, onSnapshot, query, where, Timestamp } from 'firebase/firestore';
 import type { User } from 'firebase/auth';
 import { db } from '@/lib/firebase/config';
 import { useSeatingStore } from '@/lib/seating/store';
@@ -50,6 +50,31 @@ function usePosConfigLite(shopId: string | null): StoreConfig {
     return () => unsub();
   }, [shopId]);
   return config;
+}
+
+/** 新規案内（first-visit タブレット）の着信購読。指名確定が席回しへ流れてきたことを知らせる */
+type IncomingOrder = { id: string; seat: string; tableId: string | null; customerName: string; castNames: string[]; atMs: number };
+function useIncomingFirstVisit(shopId: string | null): IncomingOrder[] {
+  const [items, setItems] = useState<IncomingOrder[]>([]);
+  useEffect(() => {
+    if (!shopId) return;
+    // 購読開始時点から直近15分以降のオーダーのみ（全件購読は read 数と表示の両方で無駄）
+    const since = Timestamp.fromMillis(Date.now() - 15 * 60 * 1000);
+    const q = query(collection(db, `shop_shops/${shopId}/menu_orders`), where('createdAt', '>=', since));
+    const unsub = onSnapshot(q, (snap) => {
+      const list: IncomingOrder[] = [];
+      snap.forEach((d) => {
+        const v = d.data() as Record<string, unknown>;
+        const casts = Array.isArray(v.casts) ? (v.casts as { name?: string }[]).map((c) => c?.name ?? '?') : [];
+        const at = (v.createdAt as { toMillis?: () => number } | null)?.toMillis?.() ?? 0;
+        list.push({ id: d.id, seat: (v.seat as string) ?? '', tableId: (v.tableId as string) ?? null, customerName: (v.customerName as string) ?? '', castNames: casts, atMs: at });
+      });
+      list.sort((a, b) => b.atMs - a.atMs);
+      setItems(list);
+    }, () => { /* menu_orders を読めないロールでは非表示 */ });
+    return () => unsub();
+  }, [shopId]);
+  return items;
 }
 
 /** 卓の伝票サマリ（現在金額・伝票数・注文点数・担当/客名）。伝票が無ければ null */
@@ -101,9 +126,13 @@ export function SeatingClient({ user }: { user: User }) {
   // 伝票・会計モーダル（卓カードからも直行できるよう親で管理）
   const [posFor, setPosFor] = useState<string | null>(null);
   const posConfig = usePosConfigLite(store.shopId);
-  const [, setTick] = useState(0);
+  // 新規案内（客用タブレット）の着信
+  const incoming = useIncomingFirstVisit(store.shopId);
+  const [seenOrders, setSeenOrders] = useState<Set<string>>(() => new Set());
+  // 15秒ティック（残り時間等の再描画）。render 中の Date.now() 直呼びを避けるため now を state で持つ
+  const [now, setTick] = useState(() => Date.now());
 
-  useEffect(() => { const t = setInterval(() => setTick((n) => n + 1), 15000); return () => clearInterval(t); }, []);
+  useEffect(() => { const t = setInterval(() => setTick(Date.now()), 15000); return () => clearInterval(t); }, []);
 
   const castById = useMemo(() => new Map(casts.map((c) => [c.id, c])), [casts]);
   const proposals = useMemo(() => generateAIProposals(tables, casts), [tables, casts]);
@@ -146,6 +175,27 @@ export function SeatingClient({ user }: { user: User }) {
       {store.dataError && (
         <p role="alert" style={{ color: 'var(--noxa-status-error)', fontSize: 13, margin: '0 0 12px', padding: '10px 12px', borderRadius: 10, background: 'rgba(229,115,115,0.08)', border: '1px solid var(--noxa-status-error)' }}>{store.dataError}</p>
       )}
+      {/* 新規案内の着信（客用タブレットのパネル指名 → リアルタイム反映） */}
+      {(() => {
+        const fresh = incoming.filter((o) => !seenOrders.has(o.id) && o.atMs > now - 15 * 60 * 1000).slice(0, 3);
+        if (fresh.length === 0) return null;
+        return (
+          <div style={{ marginBottom: 12, display: 'flex', flexDirection: 'column', gap: 6 }}>
+            {fresh.map((o) => (
+              <div key={o.id} role="status" style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 14px', borderRadius: 12, background: 'rgba(123,232,161,0.08)', border: '1px solid rgba(123,232,161,0.35)' }}>
+                <span aria-hidden style={{ width: 7, height: 7, borderRadius: 4, background: 'var(--noxa-status-success)', boxShadow: '0 0 8px var(--noxa-status-success)', flex: 'none' }} />
+                <span style={{ flex: 1, fontSize: 13, minWidth: 0 }}>
+                  <b>新規案内</b>：{o.seat || '席未選択'} — 指名 {o.castNames.length > 0 ? o.castNames.join('・') : 'なし'}
+                  {o.customerName ? `（${o.customerName}様）` : ''}
+                  <span style={{ fontFamily: mono, fontSize: 10, color: 'var(--noxa-text-faint)', marginLeft: 8 }}>{o.atMs ? `${Math.max(0, Math.floor((now - o.atMs) / 60000))}分前` : ''}</span>
+                </span>
+                {o.tableId && <button type="button" onClick={() => setSelectedTableId(o.tableId)} style={{ ...chipStyle(false), minHeight: 30 }}>卓を見る</button>}
+                <button type="button" title="確認済みにする" onClick={() => setSeenOrders((prev) => new Set(prev).add(o.id))} style={{ ...chipStyle(false), minHeight: 30 }}>✓</button>
+              </div>
+            ))}
+          </div>
+        );
+      })()}
       {/* AI 提案 */}
       {proposals.length > 0 && (
         <div style={{ marginBottom: 16, display: 'flex', flexDirection: 'column', gap: 8 }}>
