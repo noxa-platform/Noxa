@@ -536,8 +536,10 @@ export function useSeatingStore(user: User): UseSeatingStore {
       const metaSnap = await tx.get(metaR);
       const meta = metaSnap.exists() ? (metaSnap.data() as { dailySequence?: number; dayKey?: string }) : undefined;
       const seq = nextDailySequence(meta, todayKey);
+      // name: undefined を書くと Firestore が invalid-argument で拒否し、2名以上の
+      // 待ち組案内が丸ごと失敗していた（バグハント）。名前は先頭客のみキー自体を付与する
       const customers: Customer[] = Array.from({ length: Math.max(1, item.groupSize) }, (_, i) => ({
-        id: `cust_${now}_${i}`, name: i === 0 ? item.name : undefined, type: item.type, entryTime: now,
+        id: `cust_${now}_${i}`, ...(i === 0 && item.name ? { name: item.name } : {}), type: item.type, entryTime: now,
       }));
       // 新しい来店＝着席時刻は現在着席中のキャストのみ引き継ぐ（過去来店の ghost を一掃）
       const castStartTimes = pruneCastStartTimes(t.castStartTimes, t.currentHostIds);
