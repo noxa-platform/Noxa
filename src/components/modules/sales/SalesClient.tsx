@@ -20,7 +20,7 @@ const yen = (n: number) => `¥${Math.round(n).toLocaleString('ja-JP')}`;
 
 function toMs(v: unknown): number | null { if (v instanceof Timestamp) return v.toMillis(); if (v && typeof v === 'object' && 'seconds' in (v as Record<string, unknown>)) return (v as { seconds: number }).seconds * 1000; return null; }
 
-type Sale = { id: string; amount: number; customerName: string | null; customerId: string | null; castName: string | null; dayKey: string; atMs: number | null; voided: boolean; source: string };
+type Sale = { id: string; amount: number; customerName: string | null; customerId: string | null; castName: string | null; dayKey: string; atMs: number | null; voided: boolean; source: string; nomination: string | null; dohan: boolean };
 
 export function SalesClient({ user }: { user: User }) {
   const shop = useShopId(user);
@@ -52,7 +52,13 @@ export function SalesClient({ user }: { user: User }) {
     const monthStart = `${businessDayKey().slice(0, 7)}-01`;
     const unsub = onSnapshot(query(collection(db, colPath), where('dayKey', '>=', monthStart)), (snap) => {
       const list: Sale[] = [];
-      snap.forEach((d) => { const x = d.data() as DocumentData; list.push({ id: d.id, amount: typeof x.amount === 'number' ? x.amount : 0, customerName: x.customerName ?? null, customerId: x.customerId ?? null, castName: x.castName ?? null, dayKey: x.dayKey ?? '', atMs: toMs(x.checkoutAt) ?? toMs(x.createdAt), voided: x.voided === true, source: x.source ?? 'manual' }); });
+      snap.forEach((d) => { const x = d.data() as DocumentData; list.push({
+        // amount が無い旧 CF 控えは salesAmount を表示に使う（個人控えのスキーマ互換）
+        id: d.id, amount: typeof x.amount === 'number' ? x.amount : (typeof x.salesAmount === 'number' ? x.salesAmount : 0),
+        customerName: x.customerName ?? null, customerId: x.customerId ?? null, castName: x.castName ?? null, dayKey: x.dayKey ?? '',
+        atMs: toMs(x.checkoutAt) ?? toMs(x.datetime) ?? toMs(x.createdAt), voided: x.voided === true, source: x.source ?? 'manual',
+        nomination: typeof x.nomination === 'string' ? x.nomination : null, dohan: x.dohan === true,
+      }); });
       setSales(list); setLoading(false); setLoadError(null);
     }, (e) => { setLoading(false); setLoadError(`売上の読み込みに失敗しました（${e.code ?? e.message}）`); });
     return () => unsub();
@@ -129,6 +135,9 @@ export function SalesClient({ user }: { user: User }) {
               <span style={{ flex: 1, minWidth: 0, fontSize: 13, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                 {s.customerName ?? '（名無し）'}{s.castName && <span style={{ color: 'var(--noxa-text-muted)' }}> / {s.castName}</span>}
                 {s.source === 'pos' && <span style={{ fontSize: 10, color: 'var(--noxa-text-faint)', marginLeft: 6 }}>POS</span>}
+                {s.nomination === 'main' && <span style={{ fontSize: 10, color: 'var(--noxa-accent-primary-ink)', marginLeft: 6 }}>本指名</span>}
+                {s.nomination === 'inTable' && <span style={{ fontSize: 10, color: 'var(--noxa-status-info)', marginLeft: 6 }}>場内</span>}
+                {s.dohan && <span style={{ fontSize: 10, color: 'var(--noxa-status-warning)', marginLeft: 6 }}>同伴</span>}
                 {s.voided && <span style={{ color: 'var(--noxa-status-error)', fontSize: 11, marginLeft: 6 }}>取消</span>}
               </span>
               <span style={{ fontFamily: mono, fontSize: 14, fontVariantNumeric: 'tabular-nums', textDecoration: s.voided ? 'line-through' : 'none' }}>{yen(s.amount)}</span>

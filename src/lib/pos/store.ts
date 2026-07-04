@@ -30,6 +30,7 @@ import {
 } from './engine';
 import type { FloorTable, Cast } from '@/lib/seating/types';
 import { createEmptyTable } from '@/lib/seating/types';
+import { resolveSaleAttribution } from './attribution';
 
 const SLIP_NAMES = ['①', '②', '③', '④', '⑤', '⑥', '⑦', '⑧', '⑨', '⑩'];
 function nextSlipName(slips: PosSlip[]): string {
@@ -279,13 +280,27 @@ export function usePosStore(user: User): UsePosStore {
       const lineItems = (Array.isArray(slip.state.orders) ? slip.state.orders : [])
         .filter((o) => (o?.count ?? 0) > 0)
         .map((o) => ({ name: o.name, baseName: o.baseName, unitPrice: o.price, count: o.count, amount: o.price * o.count }));
+      // 帰属解決（純ロジック）: castUid 未保存の伝票でも castId/castName から名簿の uid を
+      // 解決し、担当キャスト本人の個人売上へ正しく帰属させる（旧実装は操作者へ誤帰属）。
+      // 本指名/場内/フリーの指名区分・同伴も会計時点で確定して保存する。
+      const attr = resolveSaleAttribution({
+        mode: attributionRef.current,
+        operatorUid: user.uid,
+        slip,
+        casts,
+        overrideCastName: opts.castName,
+        mainHostIds: Array.isArray(data.mainHostIds) ? (data.mainHostIds as string[]) : [],
+      });
       const saleRef = doc(collection(db, `shop_shops/${shopId}/sales`));
       tx.set(saleRef, {
         source: 'pos', entryMode: 'breakdown', amount: opts.amount, tableId, tableName: (data.name as string) ?? '', slipName: slip.name,
         customerType: slip.state.customerType, customerName: opts.customerName ?? slip.customerName ?? null,
         customerId: slip.customerId ?? null,
-        castName: opts.castName ?? slip.castName ?? null,
-        castUid: attributionRef.current === 'operator' ? user.uid : (slip.castUid ?? user.uid),
+        castName: attr.castName,
+        castUid: attr.castUid,
+        castId: attr.castId,
+        nomination: attr.nomination,
+        dohan: attr.dohan,
         operatorUid: user.uid,
         guests: opts.guests ?? null,
         lineItems,
@@ -300,7 +315,7 @@ export function usePosStore(user: User): UsePosStore {
       const nextSlips = JSON.parse(JSON.stringify(slips.filter((s) => s.id !== slipId)));
       tx.set(ref, { slips: nextSlips, updatedAt: serverTimestamp() }, { merge: true });
     });
-  }, [shopId, tableRef, user.uid]);
+  }, [shopId, tableRef, user.uid, casts]);
 
   const resultFor = useCallback<UsePosStore['resultFor']>((slip) => {
     const live: CalculatorState = slip.state.isDebugMode ? slip.state : { ...slip.state, currentTime: nowHHMM() };
