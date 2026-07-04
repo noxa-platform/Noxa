@@ -100,6 +100,21 @@ export function sendToBackOfOrder(order: string[] | undefined, id: string): stri
   return [...(order ?? []).filter((x) => x !== id), id];
 }
 
+/**
+ * castStartTimes を現在着席中のキャストだけに絞る（新しい来店の開始時に呼ぶ）。
+ * 過去の merge 書込で残った ghost キー（既に外れたキャストの着席時刻）を一掃し、
+ * 「前の来店の時刻を引き継いで経過時間・回し履歴が過大になる」事故を防ぐ。
+ */
+export function pruneCastStartTimes(
+  times: Record<string, number> | undefined,
+  currentHostIds: string[] | undefined,
+): Record<string, number> {
+  const cur = new Set(currentHostIds ?? []);
+  const out: Record<string, number> = {};
+  for (const [k, v] of Object.entries(times ?? {})) if (cur.has(k) && typeof v === 'number') out[k] = v;
+  return out;
+}
+
 /** 初回ピックアップ（初回系卓でパネル指名/ピックアップされたキャスト）の集合 */
 export function firstVisitPickupSet(tables: FloorTable[]): Set<string> {
   const s = new Set<string>();

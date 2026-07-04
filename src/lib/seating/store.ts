@@ -34,7 +34,7 @@ import { getActiveShop, pickShopId } from '@/lib/workspace';
 import { businessDayKey } from '@/lib/datetime';
 import {
   computeCasts, rotateOrder, nextDailySequence, canStartSet,
-  removeCastPatch, buildAssignPatches, stripCastPatches, toggleInArray, sendToBackOfOrder, type TablePatch,
+  removeCastPatch, buildAssignPatches, stripCastPatches, toggleInArray, sendToBackOfOrder, pruneCastStartTimes, type TablePatch,
 } from './logic';
 
 type StoredCast = {
@@ -174,8 +174,13 @@ export function useSeatingStore(user: User): UseSeatingStore {
 
   /**
    * 卓更新の共通トランザクション。
-   * 最新の卓を読み直して mut() で「変更フィールドのみ」のパッチを作り merge 書きする。
+   * 最新の卓を読み直して mut() で「変更フィールドのみ」のパッチを作り update で書く。
    * mut が null を返したら書かない（no-op）。卓が存在しなければ何もしない。
+   *
+   * ⚠ set(merge:true) ではなく update を使う理由: merge はマップ（castStartTimes 等）を
+   * 深マージするため「キーを消したパッチ」を書いても削除が反映されない
+   * （外したキャストの着席時刻 ghost が残り、次の来店に引き継がれる）。
+   * update はトップレベルフィールドを丸ごと置換するのでパッチの意図どおりになる。
    */
   const txUpdateTable = useCallback(async (tableId: string, mut: (fresh: FloorTable) => TablePatch | null) => {
     if (!shopId) return;
@@ -186,7 +191,7 @@ export function useSeatingStore(user: User): UseSeatingStore {
       const fresh = toFloorTable(tableId, snap.data() as Partial<FloorTable>);
       const patch = mut(fresh);
       if (!patch || Object.keys(patch).length === 0) return;
-      tx.set(ref, { ...patch, updatedAt: serverTimestamp() }, { merge: true });
+      tx.update(ref, { ...patch, updatedAt: serverTimestamp() });
     });
   }, [shopId, tableRef]);
 
@@ -214,7 +219,8 @@ export function useSeatingStore(user: User): UseSeatingStore {
         if (snap.exists()) freshTables.push(toFloorTable(tid, snap.data() as Partial<FloorTable>));
       }
       for (const p of stripCastPatches(freshTables, id)) {
-        tx.set(tableRef(p.tableId), { ...p.patch, updatedAt: serverTimestamp() }, { merge: true });
+        // update で書く（merge だと castStartTimes のキー削除が効かない）
+        tx.update(tableRef(p.tableId), { ...p.patch, updatedAt: serverTimestamp() });
       }
       tx.delete(castRef(id));
     });
@@ -317,7 +323,8 @@ export function useSeatingStore(user: User): UseSeatingStore {
       }
       const patches = buildAssignPatches(freshTables, tableId, castId, now);
       for (const p of patches) {
-        tx.set(tableRef(p.tableId), { ...p.patch, updatedAt: serverTimestamp() }, { merge: true });
+        // update で書く（merge だと引き剥がし側の castStartTimes キー削除が効かない）
+        tx.update(tableRef(p.tableId), { ...p.patch, updatedAt: serverTimestamp() });
       }
       // 卓に付いた人は「回す順番」の最後尾へ（初回ローテの采配順を自動維持）
       const meta = metaSnap.exists() ? (metaSnap.data() as { rotationOrder?: string[] }) : undefined;
@@ -363,17 +370,18 @@ export function useSeatingStore(user: User): UseSeatingStore {
       if (!canStartSet(t.status)) throw new Error(`この卓は使用中です（${t.name}）`);
       const meta = metaSnap.exists() ? (metaSnap.data() as { dailySequence?: number; dayKey?: string }) : undefined;
       const seq = nextDailySequence(meta, todayKey); // 営業日が変わったら1から
-      const castStartTimes = { ...(t.castStartTimes ?? {}) };
+      // 新しい来店＝着席時刻は現在着席中のキャストのみ引き継ぐ（過去来店の ghost を一掃）
+      const castStartTimes = pruneCastStartTimes(t.castStartTimes, t.currentHostIds);
       (t.currentHostIds ?? []).forEach((cid) => { if (!castStartTimes[cid]) castStartTimes[cid] = now; });
       tx.set(metaR, { dailySequence: seq, dayKey: todayKey, updatedAt: serverTimestamp() }, { merge: true });
-      tx.set(tableRef(tableId), {
+      tx.update(tableRef(tableId), {
         status: 'ACTIVE', startTime: now, entryTime: now, entryNumber: seq,
         type: customers[0]?.type ?? t.type ?? '正規',
         customers: customers.map((c) => ({ ...c, entryTime: now })),
         extraMinutes: 0, // 新しい来店＝延長リセット
         sessionLog: [], // 回し履歴も来店単位でリセット
         castStartTimes, updatedAt: serverTimestamp(),
-      }, { merge: true });
+      });
     });
   }, [shopId, tableRef]);
 
@@ -419,7 +427,7 @@ export function useSeatingStore(user: User): UseSeatingStore {
           const p = removeCastPatch(merged, id);
           patch = { ...patch, ...p };
         }
-        if (Object.keys(patch).length > 0) batch.set(d.ref, { ...patch, updatedAt: serverTimestamp() }, { merge: true });
+        if (Object.keys(patch).length > 0) batch.update(d.ref, { ...patch, updatedAt: serverTimestamp() });
       } else {
         batch.set(d.ref, { ...createEmptyTable(t.id, t.name), slips: [], updatedAt: serverTimestamp() });
       }
@@ -462,12 +470,14 @@ export function useSeatingStore(user: User): UseSeatingStore {
       const raw = snap.data() as Partial<FloorTable>;
       const t = toFloorTable(tableId, raw);
       snapshot = JSON.parse(JSON.stringify(raw)); // serverTimestamp 等を含まない plain copy
+      // merge なしの全置換＝本当の白紙化（merge だと castStartTimes 等のマップに
+      // ghost キーが残り、entryNumber 等の残骸も消えない）
       tx.set(ref, {
         ...createEmptyTable(t.id, t.name),
         setTimeLength: t.setTimeLength, rotationTimeLength: t.rotationTimeLength,
         innerRotationEnabled: t.innerRotationEnabled,
         slips: [], updatedAt: serverTimestamp(),
-      }, { merge: true });
+      });
     });
     return snapshot;
   }, [shopId, tableRef]);
@@ -517,17 +527,18 @@ export function useSeatingStore(user: User): UseSeatingStore {
       const customers: Customer[] = Array.from({ length: Math.max(1, item.groupSize) }, (_, i) => ({
         id: `cust_${now}_${i}`, name: i === 0 ? item.name : undefined, type: item.type, entryTime: now,
       }));
-      const castStartTimes = { ...(t.castStartTimes ?? {}) };
+      // 新しい来店＝着席時刻は現在着席中のキャストのみ引き継ぐ（過去来店の ghost を一掃）
+      const castStartTimes = pruneCastStartTimes(t.castStartTimes, t.currentHostIds);
       (t.currentHostIds ?? []).forEach((cid) => { if (!castStartTimes[cid]) castStartTimes[cid] = now; });
       tx.set(metaR, { dailySequence: seq, dayKey: todayKey, updatedAt: serverTimestamp() }, { merge: true });
-      tx.set(tableRef(tableId), {
+      tx.update(tableRef(tableId), {
         status: 'ACTIVE', startTime: now, entryTime: now, entryNumber: seq,
         type: item.type,
         customers: customers.map((c) => ({ ...c })),
         extraMinutes: 0, // 新しい来店＝延長リセット
         sessionLog: [], // 回し履歴も来店単位でリセット
         castStartTimes, updatedAt: serverTimestamp(),
-      }, { merge: true });
+      });
       tx.delete(queueR);
     });
   }, [shopId, tableRef]);

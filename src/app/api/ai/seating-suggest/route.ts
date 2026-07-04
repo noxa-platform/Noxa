@@ -84,7 +84,14 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: '盤面データが大きすぎます' }, { status: 400 });
     }
 
-    const boardText = JSON.stringify({ tables: body.tables, casts: body.casts, settings: body.settings ?? {} });
+    // settings は既知の数値のみ通す（任意 object をそのままプロンプトへ入れない）
+    const setLen = Number(body.settings?.setTimeLength);
+    const rotLen = Number(body.settings?.rotationTimeLength);
+    const settings = {
+      ...(Number.isFinite(setLen) && setLen > 0 ? { setTimeLength: setLen } : {}),
+      ...(Number.isFinite(rotLen) && rotLen > 0 ? { rotationTimeLength: rotLen } : {}),
+    };
+    const boardText = JSON.stringify({ tables: body.tables, casts: body.casts, settings });
     const requestText = (body.requestText ?? '').slice(0, 500);
     const userPrompt = `# 現在の盤面\n${boardText}\n\n# 店舗の要望\n${requestText || '（特になし。盤面全体を見て最適な回しを提案してください）'}\n\n上記から配置提案を JSON で返してください。`;
 
