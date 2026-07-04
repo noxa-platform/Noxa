@@ -127,6 +127,64 @@ export function proposeRotation(table: FloorTable): AIProposal | null {
   };
 }
 
+// ───────────────────────── AI（サーバ提案）のバリデーション
+
+export interface AiPlanItem {
+  tableId: string;
+  action: 'assign' | 'rotate';
+  castIds: string[];
+  reason: string;
+}
+
+/**
+ * /api/ai/seating-suggest の応答を盤面の制約で検証する（純ロジック）。
+ * AI の柔軟解釈 × 純ロジックの制約充足のハイブリッド構成の「制約」側。
+ * - 存在しない卓/キャスト・不正 action を落とす
+ * - BOSS / ロック中 / 欠勤 / その卓の除外リスト入りは配置しない
+ * - 他卓で本指名(main)のキャストは引き剥がさない
+ * - 既にその卓に居るキャストは再配置しない
+ * - rotate は現着2人以上の卓のみ
+ */
+export function sanitizeAiPlan(raw: unknown, casts: Cast[], tables: FloorTable[]): AiPlanItem[] {
+  if (!Array.isArray(raw)) return [];
+  const castById = new Map(casts.map((c) => [c.id, c]));
+  const tableById = new Map(tables.map((t) => [t.id, t]));
+  const isMainElsewhere = (castId: string, tableId: string) =>
+    tables.some((t) => t.id !== tableId && (t.mainHostIds ?? []).includes(castId));
+
+  const out: AiPlanItem[] = [];
+  for (const item of raw as Record<string, unknown>[]) {
+    if (!item || typeof item !== 'object') continue;
+    const tableId = typeof item.tableId === 'string' ? item.tableId : '';
+    const action = item.action === 'assign' || item.action === 'rotate' ? item.action : null;
+    const table = tableById.get(tableId);
+    if (!table || !action) continue;
+    const reason = typeof item.reason === 'string' ? item.reason.slice(0, 120) : '';
+
+    if (action === 'rotate') {
+      if ((table.currentHostIds ?? []).length < 2) continue;
+      out.push({ tableId, action, castIds: [], reason });
+    } else {
+      const excluded = new Set(table.excludedHostIds ?? []);
+      const ids = (Array.isArray(item.castIds) ? item.castIds : [])
+        .filter((id): id is string => typeof id === 'string')
+        .filter((id) => {
+          const c = castById.get(id);
+          if (!c) return false;
+          if (c.rank === 'BOSS' || c.isLocked || c.status === 'Absent') return false;
+          if (excluded.has(id)) return false;
+          if ((table.currentHostIds ?? []).includes(id)) return false;
+          if (isMainElsewhere(id, tableId)) return false;
+          return true;
+        });
+      if (ids.length === 0) continue;
+      out.push({ tableId, action, castIds: ids, reason });
+    }
+    if (out.length >= 5) break;
+  }
+  return out;
+}
+
 // ───────────────────────── generator
 
 export function generateAIProposals(allTables: FloorTable[], allCasts: Cast[]): AIProposal[] {

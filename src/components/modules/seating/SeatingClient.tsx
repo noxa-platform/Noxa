@@ -8,7 +8,7 @@ import { db } from '@/lib/firebase/config';
 import { useSeatingStore } from '@/lib/seating/store';
 import { useShopConfig } from '@/lib/shopConfig';
 import { PosClient } from '@/components/modules/pos/PosClient';
-import { generateAIProposals, getSourcingCandidates } from '@/lib/seating/ai';
+import { generateAIProposals, getSourcingCandidates, sanitizeAiPlan, type AiPlanItem } from '@/lib/seating/ai';
 import { computeSetTimer, orderedRotationQueue, moveInOrder, firstVisitPickupSet } from '@/lib/seating/logic';
 import { calculateResult, type CalculatorState } from '@/lib/pos/engine';
 import { createDefaultStoreConfig } from '@/lib/pos/defaultConfig';
@@ -129,6 +129,13 @@ export function SeatingClient({ user }: { user: User }) {
   // 新規案内（客用タブレット）の着信
   const incoming = useIncomingFirstVisit(store.shopId);
   const [seenOrders, setSeenOrders] = useState<Set<string>>(() => new Set());
+  // AI 席回し（要望ベース・/api/ai/seating-suggest）
+  const [aiOpen, setAiOpen] = useState(false);
+  const [aiText, setAiText] = useState('');
+  const [aiBusy, setAiBusy] = useState(false);
+  const [aiError, setAiError] = useState<string | null>(null);
+  const [aiPlan, setAiPlan] = useState<AiPlanItem[] | null>(null);
+  const [aiNote, setAiNote] = useState('');
   // 15秒ティック（残り時間等の再描画）。render 中の Date.now() 直呼びを避けるため now を state で持つ
   const [now, setTick] = useState(() => Date.now());
 
@@ -172,6 +179,59 @@ export function SeatingClient({ user }: { user: User }) {
     if (p.type === 'ASSIGN') { for (const cid of p.castIds ?? []) await store.assignCast(p.targetTableId, cid); }
   };
 
+  // AI 席回し: 盤面＋要望をサーバへ送り、返ってきた提案を純ロジックで検証して表示
+  const askAi = async () => {
+    if (!store.shopId || aiBusy) return;
+    setAiBusy(true); setAiError(null); setAiPlan(null); setAiNote('');
+    try {
+      const nowMs = Date.now();
+      const payload = {
+        workspaceId: store.shopId,
+        requestText: aiText.trim() || undefined,
+        settings: { setTimeLength: cfg.config.setTimeLength, rotationTimeLength: cfg.config.rotationTimeLength },
+        tables: tables.map((t) => ({
+          id: t.id, name: t.name, type: t.type, status: t.status,
+          guests: t.customers.length,
+          elapsedMin: t.startTime ? Math.floor((nowMs - t.startTime) / 60000) : 0,
+          currentHosts: t.currentHostIds.map((cid) => {
+            const c = castById.get(cid);
+            return { id: cid, name: c?.name ?? '?', rank: c?.rank ?? '?', main: t.mainHostIds.includes(cid), sinceMin: t.castStartTimes?.[cid] ? Math.floor((nowMs - t.castStartTimes[cid]) / 60000) : 0 };
+          }),
+          requested: (t.requestedHostIds ?? []).map((id) => castById.get(id)?.name ?? id),
+          excluded: (t.excludedHostIds ?? []).map((id) => castById.get(id)?.name ?? id),
+        })),
+        casts: casts.map((c) => ({ id: c.id, name: c.name, rank: c.rank, status: c.status, isLocked: c.isLocked })),
+      };
+      const token = await user.getIdToken();
+      const res = await fetch('/api/ai/seating-suggest', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify(payload),
+      });
+      const data = await res.json().catch(() => ({} as Record<string, unknown>));
+      if (!res.ok) {
+        setAiError(typeof data.error === 'string' ? data.error : `AI提案に失敗しました（${res.status}）`);
+        return;
+      }
+      const plan = sanitizeAiPlan(data.proposals, casts, tables);
+      setAiPlan(plan);
+      setAiNote(typeof data.note === 'string' ? data.note : '');
+      if (plan.length === 0) setAiError('適用できる提案がありませんでした（制約違反の提案は自動で除外しています）。要望を変えてもう一度どうぞ。');
+    } catch (e) {
+      setAiError(String((e as Error)?.message ?? e));
+    } finally { setAiBusy(false); }
+  };
+
+  const applyAiPlanItem = async (p: AiPlanItem) => {
+    try {
+      if (p.action === 'rotate') await store.rotateHosts(p.tableId);
+      else for (const cid of p.castIds) await store.assignCast(p.tableId, cid);
+      setAiPlan((prev) => (prev ? prev.filter((x) => x !== p) : prev));
+    } catch (e) {
+      window.alert(String((e as Error)?.message ?? e));
+    }
+  };
+
   return (
     <Shell device={store.isDevice}>
       {/* 購読エラーの可視化（権限/接続エラーで空表示のまま成功と区別がつかない問題） */}
@@ -199,17 +259,63 @@ export function SeatingClient({ user }: { user: User }) {
           </div>
         );
       })()}
-      {/* AI 提案 */}
+      {/* 自動提案（設定ベース・純ロジック・無料） */}
       {proposals.length > 0 && (
-        <div style={{ marginBottom: 16, display: 'flex', flexDirection: 'column', gap: 8 }}>
+        <div style={{ marginBottom: 10, display: 'flex', flexDirection: 'column', gap: 8 }}>
           {proposals.slice(0, 4).map((p) => (
             <div key={p.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 14px', borderRadius: 12, background: 'rgba(139,92,246,0.08)', border: '1px solid var(--noxa-border-strong)' }}>
-              <span style={{ flex: 1, fontSize: 13, color: 'var(--noxa-text-primary)' }}>{p.message}</span>
+              <span style={{ flex: 1, fontSize: 13, color: 'var(--noxa-text-primary)', minWidth: 0 }}>
+                {p.message}
+                {p.reason && <span style={{ display: 'block', fontSize: 10, fontFamily: mono, color: 'var(--noxa-text-faint)', marginTop: 2 }}>{p.reason}</span>}
+              </span>
               <button type="button" onClick={() => applyProposal(p)} style={{ ...chipStyle(true), minHeight: 30 }}>適用</button>
             </div>
           ))}
         </div>
       )}
+
+      {/* AI 席回し（要望ベース・理由つきカード→ワンタップ適用） */}
+      <section aria-label="AI席回し" style={{ marginBottom: 14, background: 'var(--noxa-surface-card)', border: '1px solid var(--noxa-border)', borderRadius: 14, padding: '10px 14px', display: 'flex', flexDirection: 'column', gap: 10 }}>
+        <button type="button" onClick={() => setAiOpen((v) => !v)}
+          style={{ appearance: 'none', cursor: 'pointer', background: 'none', border: 'none', color: 'var(--noxa-text-primary)', display: 'flex', alignItems: 'center', gap: 8, padding: 0, textAlign: 'left' }}>
+          <span style={{ fontSize: 14, fontWeight: 600 }}>✨ AI 席回し</span>
+          <span style={{ fontSize: 10, fontFamily: mono, color: 'var(--noxa-text-faint)', flex: 1 }}>要望を伝えると盤面を見て配置を提案（クレジット消費）</span>
+          <span aria-hidden style={{ color: 'var(--noxa-text-faint)' }}>{aiOpen ? '▲' : '▼'}</span>
+        </button>
+        {aiOpen && (
+          <>
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+              <textarea value={aiText} onChange={(e) => setAiText(e.target.value)} rows={2}
+                placeholder="例：3番卓は盛り上げ役を厚めに / 新人を指名客の隣で経験させたい（空欄なら盤面全体の最適化）"
+                style={{ ...fieldStyle, flex: '1 1 260px', resize: 'vertical', fontSize: 13 }} />
+              <button type="button" onClick={askAi} disabled={aiBusy} className="noxa-btn noxa-btn-primary"
+                style={{ ...primaryBtn, width: 'auto', padding: '0 18px', alignSelf: 'flex-end', opacity: aiBusy ? 0.6 : 1 }}>
+                {aiBusy ? '考え中…' : 'AIに提案してもらう'}
+              </button>
+            </div>
+            {aiError && <p role="alert" style={{ margin: 0, fontSize: 12, color: 'var(--noxa-status-error)' }}>{aiError}</p>}
+            {aiNote && <p style={{ margin: 0, fontSize: 12, color: 'var(--noxa-text-muted)' }}>{aiNote}</p>}
+            {(aiPlan?.length ?? 0) > 0 && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                {aiPlan!.map((p, i) => {
+                  const t = tables.find((x) => x.id === p.tableId);
+                  const names = p.castIds.map((id) => castById.get(id)?.name ?? '?').join('・');
+                  return (
+                    <div key={`${p.tableId}-${i}`} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '9px 12px', borderRadius: 12, background: 'rgba(139,92,246,0.06)', border: '1px solid var(--noxa-border-strong)' }}>
+                      <span style={{ flex: 1, fontSize: 13, minWidth: 0 }}>
+                        <b>{t?.name ?? p.tableId}</b>：{p.action === 'rotate' ? '席内ローテ' : `${names} を配置`}
+                        {p.reason && <span style={{ display: 'block', fontSize: 11, color: 'var(--noxa-text-muted)', marginTop: 2 }}>{p.reason}</span>}
+                      </span>
+                      <button type="button" onClick={() => applyAiPlanItem(p)} style={{ ...chipStyle(true), minHeight: 30 }}>適用</button>
+                      <button type="button" title="見送る" onClick={() => setAiPlan((prev) => prev ? prev.filter((x) => x !== p) : prev)} style={{ ...chipStyle(false), minHeight: 30 }}>×</button>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </>
+        )}
+      </section>
 
       {/* 要対応アラート（会計 / セット残り10分以下 / ローテ督促） */}
       {(() => {
