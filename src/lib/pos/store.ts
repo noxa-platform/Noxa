@@ -187,8 +187,14 @@ export function usePosStore(user: User): UsePosStore {
       const tn = configRef.current.tableNames;
       if (Array.isArray(tn) && tn.length) names = tn;
     } catch { /* ignore */ }
-    await Promise.all(names.map((name, i) =>
-      setDoc(doc(db, `shop_shops/${shopId}/seating_tables/tbl_${i + 1}`), { ...createEmptyTable(`tbl_${i + 1}`, name), updatedAt: serverTimestamp() })));
+    // 既存卓は上書きしない（席回し側と同じガード。二度押しで稼働中フロア・伝票を白紙化しない）
+    const existing = await getDocs(collection(db, `shop_shops/${shopId}/seating_tables`));
+    const existingIds = new Set(existing.docs.map((d) => d.id));
+    await Promise.all(names.map((name, i) => {
+      const id = `tbl_${i + 1}`;
+      if (existingIds.has(id)) return Promise.resolve();
+      return setDoc(doc(db, `shop_shops/${shopId}/seating_tables/${id}`), { ...createEmptyTable(id, name), updatedAt: serverTimestamp() });
+    }));
   }, [shopId, configRef]);
 
   // Firestore は undefined を拒否するため、書込前に undefined を除去（JSON 往復）

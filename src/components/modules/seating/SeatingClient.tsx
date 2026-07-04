@@ -136,6 +136,8 @@ export function SeatingClient({ user }: { user: User }) {
   const [aiError, setAiError] = useState<string | null>(null);
   const [aiPlan, setAiPlan] = useState<AiPlanItem[] | null>(null);
   const [aiNote, setAiNote] = useState('');
+  // 退店アンドゥ（誤操作を60秒以内なら巻き戻せる）
+  const [undo, setUndo] = useState<{ tableId: string; name: string; snapshot: Partial<FloorTable>; until: number } | null>(null);
   // 15秒ティック（残り時間等の再描画）。render 中の Date.now() 直呼びを避けるため now を state で持つ
   const [now, setTick] = useState(() => Date.now());
 
@@ -220,6 +222,25 @@ export function SeatingClient({ user }: { user: User }) {
     } catch (e) {
       setAiError(String((e as Error)?.message ?? e));
     } finally { setAiBusy(false); }
+  };
+
+  // 退店（アンドゥ付き）: リセット前スナップショットを60秒保持
+  const resetWithUndo = async (t: FloorTable) => {
+    try {
+      const snapshot = await store.resetTable(t.id);
+      if (snapshot) setUndo({ tableId: t.id, name: t.name, snapshot, until: Date.now() + 60_000 });
+    } catch (e) {
+      window.alert(String((e as Error)?.message ?? e));
+    }
+  };
+  const undoReset = async () => {
+    if (!undo) return;
+    try {
+      await store.restoreTable(undo.tableId, undo.snapshot);
+      setUndo(null);
+    } catch (e) {
+      window.alert(String((e as Error)?.message ?? e));
+    }
   };
 
   const applyAiPlanItem = async (p: AiPlanItem) => {
@@ -366,6 +387,7 @@ export function SeatingClient({ user }: { user: User }) {
               castById={castById}
               store={store}
               onOpenPos={() => setPosFor(selected.id)}
+              onReset={() => resetWithUndo(selected)}
             />
           )}
         </div>
@@ -404,6 +426,17 @@ export function SeatingClient({ user }: { user: User }) {
           </div>
         );
       })()}
+
+      {/* 退店アンドゥのトースト（60秒） */}
+      {undo && now < undo.until && (
+        <div role="status" style={{ position: 'fixed', left: '50%', bottom: 20, transform: 'translateX(-50%)', zIndex: 80,
+          display: 'flex', alignItems: 'center', gap: 12, padding: '10px 16px', borderRadius: 12,
+          background: 'var(--noxa-surface-card)', border: '1px solid var(--noxa-border-strong)', boxShadow: 'var(--noxa-glow-soft)' }}>
+          <span style={{ fontSize: 13 }}>{undo.name} を退店処理しました</span>
+          <button type="button" onClick={undoReset} style={{ ...chipStyle(true), minHeight: 30 }}>↩ 元に戻す</button>
+          <button type="button" onClick={() => setUndo(null)} style={{ appearance: 'none', cursor: 'pointer', background: 'none', border: 'none', color: 'var(--noxa-text-faint)', fontSize: 15 }}>×</button>
+        </div>
+      )}
     </Shell>
   );
 }
@@ -510,10 +543,11 @@ function TableCard({ table, castById, posConfig, active, onSelect, onOpenPos }: 
 
 // ───────────────────────── 卓詳細
 
-function TableDetail({ table, casts, tables, castById, store, onOpenPos }: {
+function TableDetail({ table, casts, tables, castById, store, onOpenPos, onReset }: {
   table: FloorTable; casts: Cast[]; tables: FloorTable[]; castById: Map<string, Cast>;
   store: ReturnType<typeof useSeatingStore>;
   onOpenPos: () => void;
+  onReset: () => void;
 }) {
   const [showPicker, setShowPicker] = useState(false);
   const [openGuests, setOpenGuests] = useState(2);
@@ -639,7 +673,7 @@ function TableDetail({ table, casts, tables, castById, store, onOpenPos }: {
             <button type="button" onClick={() => store.toggleInnerRotation(table.id)} style={chipStyle(table.innerRotationEnabled)}>自動ローテ提案</button>
             <button type="button" onClick={() => store.extendTime(table.id, 30)} style={chipStyle(false)}>＋30分延長</button>
             <button type="button" onClick={() => store.checkTable(table.id)} style={chipStyle(table.status === 'CHECK')}>会計</button>
-            <button type="button" onClick={() => { if (window.confirm(`${table.name} を退店処理（リセット）しますか？`)) store.resetTable(table.id); }} style={{ ...chipStyle(false), color: 'var(--noxa-status-error)', borderColor: 'rgba(229,115,115,0.4)', marginLeft: 'auto' }}>退店</button>
+            <button type="button" onClick={() => { if (window.confirm(`${table.name} を退店処理（リセット）しますか？（60秒以内なら元に戻せます）`)) onReset(); }} style={{ ...chipStyle(false), color: 'var(--noxa-status-error)', borderColor: 'rgba(229,115,115,0.4)', marginLeft: 'auto' }}>退店</button>
           </div>
 
           {/* この卓のセット設定（オーナー） */}

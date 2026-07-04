@@ -110,7 +110,10 @@ export type UseSeatingStore = {
   updateTableSettings: (tableId: string, patch: { setTimeLength?: number; rotationTimeLength?: number }) => Promise<void>;
   setCastExcluded: (tableId: string, castId: string, excluded: boolean) => Promise<void>;
   clearSeedData: () => Promise<void>;
-  resetTable: (tableId: string) => Promise<void>;
+  /** 退店処理。アンドゥ用にリセット直前の卓データを返す（卓が無ければ null） */
+  resetTable: (tableId: string) => Promise<Partial<FloorTable> | null>;
+  /** 退店アンドゥ。卓が空席のままのときだけスナップショットを書き戻す */
+  restoreTable: (tableId: string, snapshot: Partial<FloorTable>) => Promise<void>;
   // queue
   addToQueue: (item: { name: string; groupSize: number; type: TableType; notes?: string }) => Promise<void>;
   removeFromQueue: (id: string) => Promise<void>;
@@ -448,19 +451,39 @@ export function useSeatingStore(user: User): UseSeatingStore {
   }, [txUpdateTable]);
 
   const resetTable = useCallback<UseSeatingStore['resetTable']>(async (tableId) => {
-    if (!shopId) return;
+    if (!shopId) return null;
     // 退店：最新の卓設定（セット長/ローテ設定・卓名）だけ引き継ぎ、状態と POS 伝票(slips)を空へ。
+    // 誤操作アンドゥ用にリセット直前のデータを返す。
+    let snapshot: Partial<FloorTable> | null = null;
     await runTransaction(db, async (tx) => {
       const ref = tableRef(tableId);
       const snap = await tx.get(ref);
       if (!snap.exists()) return;
-      const t = toFloorTable(tableId, snap.data() as Partial<FloorTable>);
+      const raw = snap.data() as Partial<FloorTable>;
+      const t = toFloorTable(tableId, raw);
+      snapshot = JSON.parse(JSON.stringify(raw)); // serverTimestamp 等を含まない plain copy
       tx.set(ref, {
         ...createEmptyTable(t.id, t.name),
         setTimeLength: t.setTimeLength, rotationTimeLength: t.rotationTimeLength,
         innerRotationEnabled: t.innerRotationEnabled,
         slips: [], updatedAt: serverTimestamp(),
       }, { merge: true });
+    });
+    return snapshot;
+  }, [shopId, tableRef]);
+
+  const restoreTable = useCallback<UseSeatingStore['restoreTable']>(async (tableId, snapshot) => {
+    if (!shopId) return;
+    // アンドゥは「まだ空席のまま」のときだけ（次の来店が始まった卓を巻き戻さない）
+    await runTransaction(db, async (tx) => {
+      const ref = tableRef(tableId);
+      const snap = await tx.get(ref);
+      if (!snap.exists()) throw new Error('卓が見つかりません');
+      const cur = toFloorTable(tableId, snap.data() as Partial<FloorTable>);
+      if (cur.status !== 'EMPTY') throw new Error(`この卓は既に使用中のため元に戻せません（${cur.name}）`);
+      const clean = JSON.parse(JSON.stringify(snapshot)) as Record<string, unknown>;
+      delete clean.updatedAt; // 旧タイムスタンプ型の混入を避ける
+      tx.set(ref, { ...clean, updatedAt: serverTimestamp() }, { merge: true });
     });
   }, [shopId, tableRef]);
 
@@ -516,13 +539,13 @@ export function useSeatingStore(user: User): UseSeatingStore {
     casts, tables, queue, rotationOrder, setRotationOrder,
     addCast, updateCast, removeCast, toggleLock, setCastBaseStatus,
     seedTables, seedTestData, assignCast, removeCastFromTable, toggleMainHost, toggleRequested, rotateHosts,
-    startSet, setTableType, checkTable, extendTime, toggleInnerRotation, updateTableSettings, setCastExcluded, clearSeedData, resetTable,
+    startSet, setTableType, checkTable, extendTime, toggleInnerRotation, updateTableSettings, setCastExcluded, clearSeedData, resetTable, restoreTable,
     addToQueue, removeFromQueue, seatQueueGroup,
   }), [
     shop.loading, loadingData, shopId, shop.canManage, shop.isDevice, shop.error, dataError, casts, tables, queue, rotationOrder, setRotationOrder,
     addCast, updateCast, removeCast, toggleLock, setCastBaseStatus,
     seedTables, seedTestData, assignCast, removeCastFromTable, toggleMainHost, toggleRequested, rotateHosts,
-    startSet, setTableType, checkTable, extendTime, toggleInnerRotation, updateTableSettings, setCastExcluded, clearSeedData, resetTable,
+    startSet, setTableType, checkTable, extendTime, toggleInnerRotation, updateTableSettings, setCastExcluded, clearSeedData, resetTable, restoreTable,
     addToQueue, removeFromQueue, seatQueueGroup,
   ]);
 }
