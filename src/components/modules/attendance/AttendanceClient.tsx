@@ -6,6 +6,9 @@ import type { User } from 'firebase/auth';
 import { db } from '@/lib/firebase/config';
 import { useDeviceClaims } from '@/lib/useShopContext';
 import { getActiveShop, pickShopId } from '@/lib/workspace';
+import { useShopRole, hasShopRole } from '@/lib/useShopRole';
+import { summarizeTeamShifts, type TeamShift } from '@/lib/attendance/summary';
+import { businessDayKey } from '@/lib/datetime';
 import { Shell, Section, Empty, Eyebrow, chip } from '@/components/modules/schedule/ScheduleClient';
 
 /**
@@ -29,6 +32,9 @@ function dur(a: number | null, b: number | null) { if (!a || !b) return ''; cons
 
 export function AttendanceClient({ user }: { user: User }) {
   const device = useDeviceClaims(user);
+  // 横断一覧の表示ゲート（owner/manager。rules 上 shifts は全メンバー read 可＝変更なし）
+  const roleCtx = useShopRole(user);
+  const canOversee = !device.isDevice && hasShopRole(roleCtx, ['manager']);
   const [loading, setLoading] = useState(true);
   const [shopId, setShopId] = useState<string | null>(null);
   const [shifts, setShifts] = useState<Shift[]>([]);
@@ -123,6 +129,9 @@ export function AttendanceClient({ user }: { user: User }) {
           {todayDone.length > 0 && (
             <p style={{ fontSize: 12, color: 'var(--noxa-text-muted)', margin: '0 0 16px' }}>本日の完了勤務：{todayDone.map((s) => `${hhmm(s.startMs)}–${hhmm(s.endMs)}`).join(' / ')}</p>
           )}
+
+          {/* 全キャストの当日/月次出勤状況（owner/manager のみ） */}
+          {canOversee && <TeamAttendanceSection shopId={shopId} />}
 
           <ShiftCalendar shopId={shopId} uid={user.uid} shifts={shifts} />
 
@@ -340,6 +349,86 @@ function ShiftCalendar({ shopId, uid, shifts }: { shopId: string; uid: string; s
           </div>
         </div>
       )}
+    </Section>
+  );
+}
+
+// ─────────────────────────────────────────────
+// 全キャストの勤怠横断一覧（owner/manager）
+// 当月 shifts を範囲クエリで取得し、キャスト別の当日状況＋月間合計を表示。
+// ─────────────────────────────────────────────
+
+function TeamAttendanceSection({ shopId }: { shopId: string }) {
+  const [cursor, setCursor] = useState(() => { const d = new Date(); return { y: d.getFullYear(), m: d.getMonth() + 1 }; });
+  const [teamShifts, setTeamShifts] = useState<TeamShift[] | null>(null);
+  // 集計基準時刻（render 中の Date.now() を避け、取得完了時に確定する）
+  const [asOf, setAsOf] = useState<{ nowMs: number; todayKey: string }>(() => ({ nowMs: Date.now(), todayKey: businessDayKey() }));
+  const [names, setNames] = useState<Record<string, string>>({});
+  const [err, setErr] = useState<string | null>(null);
+
+  // メンバー表示名（members.castDisplayName）
+  useEffect(() => {
+    let alive = true;
+    getDocs(collection(db, `shop_shops/${shopId}/members`)).then((snap) => {
+      if (!alive) return;
+      const m: Record<string, string> = {};
+      snap.forEach((d) => { const v = d.data() as { castDisplayName?: string; kind?: string }; if (v.kind !== 'device') m[d.id] = v.castDisplayName || d.id.slice(0, 8); });
+      setNames(m);
+    }).catch(() => { /* 名前解決できなくても uid 先頭で表示 */ });
+    return () => { alive = false; };
+  }, [shopId]);
+
+  // 当月分の全キャスト shifts（date 範囲クエリ・全件購読はしない）
+  useEffect(() => {
+    let alive = true;
+    const mm = String(cursor.m).padStart(2, '0');
+    const start = `${cursor.y}-${mm}-01`;
+    const end = cursor.m === 12 ? `${cursor.y + 1}-01-01` : `${cursor.y}-${String(cursor.m + 1).padStart(2, '0')}-01`;
+    getDocs(query(collection(db, `shop_shops/${shopId}/shifts`), where('date', '>=', start), where('date', '<', end)))
+      .then((snap) => {
+        if (!alive) return;
+        const list: TeamShift[] = [];
+        snap.forEach((d) => { const v = d.data() as DocumentData; list.push({ castUid: (v.castUid as string) ?? '', date: (v.date as string) ?? '', startMs: toMs(v.startAt), endMs: toMs(v.endAt) }); });
+        setTeamShifts(list); setAsOf({ nowMs: Date.now(), todayKey: businessDayKey() }); setErr(null);
+      })
+      .catch((e) => { if (alive) { setTeamShifts([]); setErr(`チーム勤怠の取得に失敗（${(e as { code?: string }).code ?? (e as Error).message}）`); } });
+    return () => { alive = false; };
+  }, [shopId, cursor.y, cursor.m]);
+
+  const rows = useMemo(() => summarizeTeamShifts(teamShifts ?? [], asOf.todayKey, asOf.nowMs), [teamShifts, asOf]);
+  const fmtH = (min: number) => `${Math.floor(min / 60)}h${String(min % 60).padStart(2, '0')}`;
+  const move = (dir: -1 | 1) => setCursor((c) => { const d = new Date(c.y, c.m - 1 + dir, 1); return { y: d.getFullYear(), m: d.getMonth() + 1 }; });
+  const workingCount = rows.filter((r) => r.today === 'working').length;
+
+  return (
+    <Section label={`チーム勤怠（出勤中 ${workingCount}人）`}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>
+        <button type="button" onClick={() => move(-1)} style={navBtn}>‹</button>
+        <span style={{ fontFamily: 'var(--noxa-font-display-en)', fontSize: 16, fontWeight: 600 }}>{cursor.y}.{String(cursor.m).padStart(2, '0')}</span>
+        <button type="button" onClick={() => move(1)} style={navBtn}>›</button>
+        <span style={{ fontSize: 10, fontFamily: mono, color: 'var(--noxa-text-faint)' }}>当日状況と月間合計（owner/manager のみ表示）</span>
+      </div>
+      {err && <p role="alert" style={{ margin: '0 0 8px', fontSize: 12, color: 'var(--noxa-status-error)' }}>{err}</p>}
+      {teamShifts === null ? <Eyebrow>読み込み中…</Eyebrow>
+        : rows.length === 0 ? <Empty>この月の打刻はまだありません。</Empty>
+        : (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+          {rows.map((r) => (
+            <div key={r.castUid} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '9px 12px', borderRadius: 10, background: 'var(--noxa-bg-base)', border: `1px solid ${r.today === 'working' ? 'var(--noxa-accent-primary)' : 'var(--noxa-border)'}`, flexWrap: 'wrap' }}>
+              <span aria-hidden style={{ width: 8, height: 8, borderRadius: 4, flex: 'none',
+                background: r.today === 'working' ? 'var(--noxa-status-success)' : r.today === 'done' ? 'var(--noxa-text-muted)' : 'var(--noxa-border-strong)',
+                boxShadow: r.today === 'working' ? '0 0 8px var(--noxa-status-success)' : 'none' }} />
+              <span style={{ fontSize: 13, fontWeight: 600, flex: 1, minWidth: 100, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{names[r.castUid] ?? r.castUid.slice(0, 8)}</span>
+              <span style={{ fontFamily: mono, fontSize: 12, minWidth: 110 }}>
+                {r.today === 'working' ? <>出勤中 {hhmm(r.todayStartMs)}〜</> : r.today === 'done' ? `本日 ${fmtH(r.todayMinutes)}` : '本日 未出勤'}
+              </span>
+              <span style={{ fontFamily: mono, fontSize: 11, color: 'var(--noxa-text-muted)' }}>月 {r.monthDays}日 · {fmtH(r.monthMinutes)}</span>
+              {r.staleOpenCount > 0 && <span title="過去日の退勤忘れ" style={{ fontSize: 10, color: 'var(--noxa-status-error)', fontFamily: mono }}>⚠ 退勤忘れ{r.staleOpenCount}</span>}
+            </div>
+          ))}
+        </div>
+      )}
+      <p style={{ margin: '8px 0 0', fontSize: 10, color: 'var(--noxa-text-faint)', lineHeight: 1.6 }}>※ 過去日の退勤忘れは時間に計上されません（本人の勤怠画面で締められます）。</p>
     </Section>
   );
 }
