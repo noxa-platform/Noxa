@@ -1,6 +1,7 @@
 // 管理者専用: 直近 N 日の Push 配信統計を返す。
-// Cloud Functions の `crm_push_stats/{YYYY-MM-DD}` を Admin SDK で読み取り、
-// /dev/push-test ページから参照する。
+// Cloud Functions（lib/stats.ts）の実書込先 `notification_push_stats/{YYYY-MM-DD}` を
+// Admin SDK で読み取り、/dev/push-test ページから参照する。
+// ※ 旧実装は存在しない `crm_push_stats` を読んでおり統計が常に空だった（Day10 修正）。
 //
 // 認証: Firebase ID Token (Bearer) + 管理者 email チェック。
 
@@ -67,7 +68,7 @@ export async function GET(request: Request): Promise<Response> {
   const dates = jstDateKeys(days);
   const rows: PushStatsRow[] = [];
   for (const date of dates) {
-    const snap = await db.doc(`crm_push_stats/${date}`).get();
+    const snap = await db.doc(`notification_push_stats/${date}`).get();
     if (!snap.exists) {
       rows.push({ date, sent: 0, failed: 0, invalidTokenDeleted: 0 });
       continue;

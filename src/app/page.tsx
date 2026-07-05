@@ -56,13 +56,13 @@ const MODULES: OsModule[] = [
     href: '/inventory', status: 'live', group: 'main',
   },
   {
-    number: 9, id: 'business-card', title: 'オリシャン名刺発注', desc: 'デザイン → 印刷 → 発送をワンストップ。',
-    href: '/business-card', status: 'live', group: 'main',
+    number: 9, id: 'business-card', title: 'オリシャン名刺発注', desc: 'デザイン作成と発注内容の管理（印刷連携は準備中）。',
+    href: '/business-card', status: 'beta', group: 'main',
   },
   // SUB A / B
   {
     letter: 'A', id: 'community', title: '夜職コミュニティ', desc: '紹介制クローズド SNS。情報共有と相互サポート。',
-    href: '/community', status: 'soon', group: 'sub',
+    href: '/community', status: 'live', group: 'sub',
   },
   {
     letter: 'B', id: 'nomishugy', title: 'のみシュギ',

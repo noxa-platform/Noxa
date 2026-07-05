@@ -274,15 +274,16 @@ export function useSeatingStore(user: User): UseSeatingStore {
 
   const seedTestData = useCallback<UseSeatingStore['seedTestData']>(async () => {
     if (!shopId) return;
+    // 架空名のみ（実在キャスト名をテストデータに使わない・Day10 差し替え）
     const SEED_CASTS: { name: string; rank: Rank; hourlyWage: number }[] = [
-      { name: 'TO-YA', rank: 'BOSS', hourlyWage: 10000 },
-      { name: '祐也', rank: '役職', hourlyWage: 8000 }, { name: '迅', rank: '役職', hourlyWage: 8000 },
-      { name: 'ちんすこう', rank: '役職', hourlyWage: 8000 }, { name: '夢麗', rank: '役職', hourlyWage: 7000 },
-      { name: '宗', rank: '役職', hourlyWage: 7000 }, { name: 'クロム', rank: '役職', hourlyWage: 7000 },
-      { name: '大和', rank: '非役職', hourlyWage: 5000 }, { name: 'スバル', rank: '非役職', hourlyWage: 5000 },
-      { name: '琥', rank: '非役職', hourlyWage: 5000 }, { name: 'じゅり', rank: '非役職', hourlyWage: 5000 },
-      { name: '聡', rank: '非役職', hourlyWage: 5000 }, { name: '夏目', rank: '非役職', hourlyWage: 5000 },
-      { name: 'カヲル', rank: '新人', hourlyWage: 3000 }, { name: 'J', rank: '新人', hourlyWage: 3000 },
+      { name: 'デモ・レイ', rank: 'BOSS', hourlyWage: 10000 },
+      { name: 'アオイ', rank: '役職', hourlyWage: 8000 }, { name: 'ソラ', rank: '役職', hourlyWage: 8000 },
+      { name: 'レン', rank: '役職', hourlyWage: 8000 }, { name: 'ユヅキ', rank: '役職', hourlyWage: 7000 },
+      { name: 'カナデ', rank: '役職', hourlyWage: 7000 }, { name: 'ハル', rank: '役職', hourlyWage: 7000 },
+      { name: 'リク', rank: '非役職', hourlyWage: 5000 }, { name: 'ナギ', rank: '非役職', hourlyWage: 5000 },
+      { name: 'トワ', rank: '非役職', hourlyWage: 5000 }, { name: 'ミナト', rank: '非役職', hourlyWage: 5000 },
+      { name: 'イツキ', rank: '非役職', hourlyWage: 5000 }, { name: 'シオン', rank: '非役職', hourlyWage: 5000 },
+      { name: 'ヒナタ', rank: '新人', hourlyWage: 3000 }, { name: 'ルカ', rank: '新人', hourlyWage: 3000 },
     ];
     const RANKS_C = ['VIP', 'ゴールド', 'レギュラー', '新規'];
     const CUST_NAMES = ['田中', '山本', '佐藤', '鈴木', '伊藤', '中村', '小林', '加藤', '吉田', '山田', '松本', '井上', '木村', '林', '清水', '森', '池田', '橋本', '阿部', '石川', '山口', '中島', '前田', '藤田'];

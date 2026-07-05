@@ -13,6 +13,7 @@
 
 import Link from 'next/link';
 import { FONT, WINE } from '@/lib/community/constants';
+import { isFirestoreCommunityBackend } from '@/lib/community/repository';
 import { useCommunity } from '@/lib/community/store';
 import { BoardList } from './BoardList';
 import { ThreadList } from './ThreadList';
@@ -25,7 +26,7 @@ const { mono, jp: fontJp, display: fontDisplay } = FONT;
 export function CommunityClient({ uid, me }: { uid?: string; me?: { isAdmin: boolean; inviteCredits: number | null } } = {}) {
   const c = useCommunity(uid);
   // mock バックエンドのときだけ「保存されません」注記を出す（firestore 本番では実データ保存）
-  const isMock = process.env.NEXT_PUBLIC_COMMUNITY_BACKEND !== 'firestore';
+  const isMock = !isFirestoreCommunityBackend();
 
   return (
     <main

@@ -10,7 +10,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { AreaTag, Board, JobTag, Thread, ThreadFilter } from './types';
-import type { CommunityRepository } from './repository';
+import { isFirestoreCommunityBackend, type CommunityRepository } from './repository';
 import { MockCommunityRepository } from './mock-repository';
 import { FirestoreCommunityRepository } from './firestore-repository';
 
@@ -18,12 +18,11 @@ export type CommunityView = 'boards' | 'threads' | 'thread';
 
 /**
  * repository ファクトリ（差し替えポイント）。
- * NEXT_PUBLIC_COMMUNITY_BACKEND=firestore かつ uid があれば Firestore、無ければ Mock。
- * 既定（未設定）は Mock なので、Firebase 未設定でもローカル閲覧が壊れない。
+ * 既定は Firestore（Day10 本番化）。NEXT_PUBLIC_COMMUNITY_BACKEND=mock で明示した場合と
+ * uid が無い（未ログイン）場合のみ Mock＝Firebase 未設定でもローカル閲覧が壊れない。
  */
 export function createCommunityRepository(uid?: string): CommunityRepository {
-  const backend = process.env.NEXT_PUBLIC_COMMUNITY_BACKEND;
-  if (backend === 'firestore' && uid) {
+  if (isFirestoreCommunityBackend() && uid) {
     return new FirestoreCommunityRepository(uid);
   }
   return new MockCommunityRepository();
