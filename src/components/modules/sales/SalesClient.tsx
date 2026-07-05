@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { useEffect, useMemo, useState } from 'react';
-import { collection, onSnapshot, addDoc, doc, updateDoc, serverTimestamp, increment, query, where, Timestamp, type DocumentData } from 'firebase/firestore';
+import { collection, onSnapshot, addDoc, doc, updateDoc, deleteDoc, getDocs, serverTimestamp, increment, query, where, Timestamp, type DocumentData } from 'firebase/firestore';
 import { db } from '@/lib/firebase/config';
 import { useShopId } from '@/lib/useShopId';
 import { businessDayKey } from '@/lib/datetime';
@@ -20,7 +20,7 @@ const yen = (n: number) => `¥${Math.round(n).toLocaleString('ja-JP')}`;
 
 function toMs(v: unknown): number | null { if (v instanceof Timestamp) return v.toMillis(); if (v && typeof v === 'object' && 'seconds' in (v as Record<string, unknown>)) return (v as { seconds: number }).seconds * 1000; return null; }
 
-type Sale = { id: string; amount: number; customerName: string | null; customerId: string | null; castName: string | null; dayKey: string; atMs: number | null; voided: boolean; source: string; nomination: string | null; dohan: boolean };
+type Sale = { id: string; amount: number; customerName: string | null; customerId: string | null; castName: string | null; dayKey: string; atMs: number | null; voided: boolean; source: string; nomination: string | null; dohan: boolean; unpaidAmount: number };
 
 export function SalesClient({ user }: { user: User }) {
   const shop = useShopId(user);
@@ -58,6 +58,7 @@ export function SalesClient({ user }: { user: User }) {
         customerName: x.customerName ?? null, customerId: x.customerId ?? null, castName: x.castName ?? null, dayKey: x.dayKey ?? '',
         atMs: toMs(x.checkoutAt) ?? toMs(x.datetime) ?? toMs(x.createdAt), voided: x.voided === true, source: x.source ?? 'manual',
         nomination: typeof x.nomination === 'string' ? x.nomination : null, dohan: x.dohan === true,
+        unpaidAmount: typeof x.unpaidAmount === 'number' ? x.unpaidAmount : 0,
       }); });
       setSales(list); setLoading(false); setLoadError(null);
     }, (e) => { setLoading(false); setLoadError(`売上の読み込みに失敗しました（${e.code ?? e.message}）`); });
@@ -89,6 +90,16 @@ export function SalesClient({ user }: { user: User }) {
       await updateDoc(doc(db, `${colPath}/${s.id}`), { voided: true, voidedAt: serverTimestamp(), voidReason: r });
       // 顧客実績から減算（取消＝集計から外す）
       if (s.customerId) { const ref = custRef(s.customerId); if (ref) await updateDoc(ref, { totalSales: increment(-s.amount), visitCount: increment(-1) }).catch(() => {}); }
+      // ツケ会計の取消: 紐付く未収起票も削除（発生源が消えた台帳を残さない）。
+      // unpaid の権限（owner/manager/accounting）が無いロールでは残るため、その旨を通知する
+      if (shop.shopId && s.unpaidAmount > 0) {
+        try {
+          const linked = await getDocs(query(collection(db, `shop_shops/${shop.shopId}/unpaid`), where('saleId', '==', s.id)));
+          await Promise.all(linked.docs.map((d) => deleteDoc(d.ref)));
+        } catch {
+          window.alert('売上は取消しましたが、紐付く未収（ツケ）の削除権限がありません。売掛管理から削除してください。');
+        }
+      }
     } finally { setOpBusy(false); }
   };
   const editSale = async (s: Sale) => {
@@ -138,6 +149,7 @@ export function SalesClient({ user }: { user: User }) {
                 {s.nomination === 'main' && <span style={{ fontSize: 10, color: 'var(--noxa-accent-primary-ink)', marginLeft: 6 }}>本指名</span>}
                 {s.nomination === 'inTable' && <span style={{ fontSize: 10, color: 'var(--noxa-status-info)', marginLeft: 6 }}>場内</span>}
                 {s.dohan && <span style={{ fontSize: 10, color: 'var(--noxa-status-warning)', marginLeft: 6 }}>同伴</span>}
+                {s.unpaidAmount > 0 && <span title={`うち未収 ¥${s.unpaidAmount.toLocaleString('ja-JP')}`} style={{ fontSize: 10, color: 'var(--noxa-status-error)', marginLeft: 6 }}>ツケ{yen(s.unpaidAmount)}</span>}
                 {s.voided && <span style={{ color: 'var(--noxa-status-error)', fontSize: 11, marginLeft: 6 }}>取消</span>}
               </span>
               <span style={{ fontFamily: mono, fontSize: 14, fontVariantNumeric: 'tabular-nums', textDecoration: s.voided ? 'line-through' : 'none' }}>{yen(s.amount)}</span>

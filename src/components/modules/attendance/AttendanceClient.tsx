@@ -8,8 +8,14 @@ import { useDeviceClaims } from '@/lib/useShopContext';
 import { getActiveShop, pickShopId } from '@/lib/workspace';
 import { useShopRole, hasShopRole } from '@/lib/useShopRole';
 import { summarizeTeamShifts, type TeamShift } from '@/lib/attendance/summary';
-import { businessDayKey } from '@/lib/datetime';
 import { Shell, Section, Empty, Eyebrow, chip } from '@/components/modules/schedule/ScheduleClient';
+
+/**
+ * shifts.date の日付キー規約: 打刻側（clockIn）が書く `toISOString().slice(0,10)`（UTC 暦日）。
+ * チーム集計の「本日」判定はこの規約に合わせる（businessDayKey=JST 6時切替を使うと
+ * 朝6〜9時の打刻が本日に出ないズレが出る）。規約自体の変更は既存データ互換に響くため不変。
+ */
+const shiftDateKey = () => new Date().toISOString().slice(0, 10);
 
 /**
  * 勤怠 — Noxa OS（実データ）
@@ -362,7 +368,7 @@ function TeamAttendanceSection({ shopId }: { shopId: string }) {
   const [cursor, setCursor] = useState(() => { const d = new Date(); return { y: d.getFullYear(), m: d.getMonth() + 1 }; });
   const [teamShifts, setTeamShifts] = useState<TeamShift[] | null>(null);
   // 集計基準時刻（render 中の Date.now() を避け、取得完了時に確定する）
-  const [asOf, setAsOf] = useState<{ nowMs: number; todayKey: string }>(() => ({ nowMs: Date.now(), todayKey: businessDayKey() }));
+  const [asOf, setAsOf] = useState<{ nowMs: number; todayKey: string }>(() => ({ nowMs: Date.now(), todayKey: shiftDateKey() }));
   const [names, setNames] = useState<Record<string, string>>({});
   const [err, setErr] = useState<string | null>(null);
 
@@ -389,7 +395,7 @@ function TeamAttendanceSection({ shopId }: { shopId: string }) {
         if (!alive) return;
         const list: TeamShift[] = [];
         snap.forEach((d) => { const v = d.data() as DocumentData; list.push({ castUid: (v.castUid as string) ?? '', date: (v.date as string) ?? '', startMs: toMs(v.startAt), endMs: toMs(v.endAt) }); });
-        setTeamShifts(list); setAsOf({ nowMs: Date.now(), todayKey: businessDayKey() }); setErr(null);
+        setTeamShifts(list); setAsOf({ nowMs: Date.now(), todayKey: shiftDateKey() }); setErr(null);
       })
       .catch((e) => { if (alive) { setTeamShifts([]); setErr(`チーム勤怠の取得に失敗（${(e as { code?: string }).code ?? (e as Error).message}）`); } });
     return () => { alive = false; };
