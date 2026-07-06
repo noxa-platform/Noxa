@@ -4,6 +4,7 @@ import { reserveAiCredit, refundAiCredit, logAiLedger } from '../../lib/credits'
 import { estimateAiCost } from '@/lib/ai-cost';
 import { getAdminDb, verifyRequest, AuthError } from '../../lib/firebase-admin';
 import { resolveAccessContext } from '../../lib/access-context';
+import { pickForAi, AI_CUSTOMER_FIELDS, AI_LOG_FIELDS } from '@/lib/ai-privacy';
 
 async function getCustomerWithLogs(workspaceId: string, customerId: string): Promise<string> {
   try {
@@ -16,9 +17,11 @@ async function getCustomerWithLogs(workspaceId: string, customerId: string): Pro
         .get(),
     ]);
 
+    // PII ガード（Day12）: doc 丸ごと送信をやめ、allowlist 抽出＋連絡先マスクを通す
+    // （旧実装は電話・メール等を含む全フィールドを AI プロンプトへ載せていた）
     return JSON.stringify({
-      customer: customerSnap.exists ? customerSnap.data() : {},
-      recentLogs: logsSnap.docs.map((d) => d.data()),
+      customer: pickForAi(customerSnap.exists ? customerSnap.data() : undefined, AI_CUSTOMER_FIELDS),
+      recentLogs: logsSnap.docs.map((d) => pickForAi(d.data(), AI_LOG_FIELDS)),
     });
   } catch (e) {
     console.error('getCustomerWithLogs error:', e);

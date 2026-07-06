@@ -7,6 +7,7 @@ import { resolveWorkspaceContext, composePlaybookAndSelf } from '@/lib/ai-knowle
 import { AI_CONFIG } from '@/lib/ai-knowledge/constants';
 import { getAdminDb, verifyRequest, AuthError } from '../../lib/firebase-admin';
 import { resolveAccessContext, pathCustomers, pathStandaloneSales, pathAiThread, type AccessContext } from '../../lib/access-context';
+import { maskDeep } from '@/lib/ai-privacy';
 
 // 会話履歴の最大メッセージ数
 const MAX_HISTORY_MESSAGES = AI_CONFIG.maxHistoryMessages;
@@ -103,7 +104,8 @@ async function getCustomerContext(
           myMessageStyle: d.myMessageStyle || '',
         };
       });
-      return JSON.stringify(customers, null, 2);
+      // フリーテキスト（メモ・好み等）に混じる電話/メールをマスク（PII ガード・Day12）
+      return JSON.stringify(maskDeep(customers), null, 2);
     }
 
     // 50人超：サマリー + 言及された顧客の詳細
@@ -152,7 +154,8 @@ async function getCustomerContext(
     let context = `顧客数: ${customerCount}人\n\n`;
 
     if (detailedCustomers.length > 0) {
-      context += `## 言及された顧客の詳細:\n${JSON.stringify(detailedCustomers, null, 2)}\n\n`;
+      // フリーテキスト（メモ・好み等）に混じる電話/メールをマスク（PII ガード・Day12）
+      context += `## 言及された顧客の詳細:\n${JSON.stringify(maskDeep(detailedCustomers), null, 2)}\n\n`;
     }
 
     context += `## 全顧客サマリー（名前・タグ・ランク・売上のみ）:\n${JSON.stringify(summaries, null, 2)}`;
