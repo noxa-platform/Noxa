@@ -1,9 +1,9 @@
 /**
  * FCM 送信ヘルパー。
- * - `crm_push_tokens/{uid}` からトークンを取得
+ * - `notification_push_tokens/{uid}` からトークンを取得
  * - 無効トークンは自動削除
  * - iOS (APNs) / Android / Web 共通フォーマット
- * - 各送信結果を crm_push_stats / crm_push_failures に集計
+ * - 各送信結果を notification_push_stats / notification_push_failures に集計
  */
 import { FirebaseError } from 'firebase-admin/app';
 import * as logger from 'firebase-functions/logger';

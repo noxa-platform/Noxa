@@ -14,9 +14,15 @@
  *   - 既存フィールドの上書きはしない（欠けているキーだけ set(merge)）
  *
  * 前提: `gcloud auth application-default login` 済み（ADC）。
- * 使い方（noxa/ で・functions の node_modules を利用）:
- *   NODE_PATH=functions/node_modules node scripts/backfill-personal-sales.mjs            # dry-run
- *   NODE_PATH=functions/node_modules node scripts/backfill-personal-sales.mjs --apply    # 書込実行（人間承認後）
+ * firebase-admin はリポジトリ直下の dependencies にあるため `npm ci` 済みならそのまま動く
+ * （Node の ESM 解決は NODE_PATH を見ないので functions/node_modules は使わない）。
+ * 使い方（noxa/ で）:
+ *   node scripts/backfill-personal-sales.mjs            # dry-run
+ *   node scripts/backfill-personal-sales.mjs --apply    # 書込実行（人間承認後）
+ *
+ * 注意: collectionGroup('items') + where(source) を初めて使う場合、Firestore が
+ * コレクショングループ用の単一フィールド index 作成を求めることがある
+ * （エラーメッセージ内のリンクから1クリックで作成→再実行）。
  */
 
 import admin from 'firebase-admin';

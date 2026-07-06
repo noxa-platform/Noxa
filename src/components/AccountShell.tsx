@@ -314,7 +314,7 @@ function EmailVerifyBanner({ user }: { user: User }) {
     <div role="alert" style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', margin: '0 0 16px', padding: '10px 14px', borderRadius: 12, background: 'rgba(245,212,114,0.08)', border: '1px solid var(--noxa-status-warning)' }}>
       <span style={{ flex: 1, minWidth: 200, fontSize: 13 }}>
         メールアドレス（{user.email}）が未確認です。受信箱の確認リンクを開いてください。
-        {sent && <span style={{ color: 'var(--noxa-status-success)', marginLeft: 6 }}>再送しました。</span>}
+        {sent && <span style={{ color: 'var(--noxa-status-success)', marginLeft: 6 }}>再送しました。確認後はこのページを再読み込みすると表示が消えます。</span>}
       </span>
       <button type="button" disabled={busy || sent}
         onClick={async () => {
