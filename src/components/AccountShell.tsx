@@ -4,7 +4,7 @@ import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { doc, getDoc } from 'firebase/firestore';
 import type { User } from 'firebase/auth';
-import { signOut } from '@/lib/auth';
+import { signOut, needsEmailVerification, resendVerificationEmail } from '@/lib/auth';
 import { db } from '@/lib/firebase/config';
 import { useShopContext, useDeviceClaims } from '@/lib/useShopContext';
 import { useTheme } from '@/lib/useTheme';
@@ -291,11 +291,43 @@ export function AccountShell({ user, children }: { user: User; children: React.R
 
       {/* Main */}
       <main className="flex-1 overflow-auto px-5 md:px-10 pt-20 md:pt-9 pb-24 md:pb-10">
+        {!device.isDevice && <EmailVerifyBanner user={user} />}
         {children}
       </main>
 
       {/* モバイル下部ナビ（スマホでメニューに到達できるように。端末kioskでは非表示） */}
       {!device.isDevice && <BottomTabBar />}
+    </div>
+  );
+}
+
+/**
+ * メール未検証バナー（Day11）。password プロバイダかつ未検証のときだけ表示。
+ * 現状は注意喚起＋再送のみ（機能ブロックはしない＝既存ユーザーの動線を退化させない）。
+ */
+function EmailVerifyBanner({ user }: { user: User }) {
+  const [sent, setSent] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [hidden, setHidden] = useState(false);
+  if (hidden || !needsEmailVerification(user)) return null;
+  return (
+    <div role="alert" style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', margin: '0 0 16px', padding: '10px 14px', borderRadius: 12, background: 'rgba(245,212,114,0.08)', border: '1px solid var(--noxa-status-warning)' }}>
+      <span style={{ flex: 1, minWidth: 200, fontSize: 13 }}>
+        メールアドレス（{user.email}）が未確認です。受信箱の確認リンクを開いてください。
+        {sent && <span style={{ color: 'var(--noxa-status-success)', marginLeft: 6 }}>再送しました。</span>}
+      </span>
+      <button type="button" disabled={busy || sent}
+        onClick={async () => {
+          setBusy(true);
+          try { await resendVerificationEmail(user); setSent(true); }
+          catch (e) { window.alert('確認メールの送信に失敗しました（しばらくおいて再試行してください）。\n' + String((e as Error)?.message ?? e)); }
+          finally { setBusy(false); }
+        }}
+        style={{ minHeight: 34, padding: '4px 14px', borderRadius: 9999, cursor: 'pointer', fontSize: 12, fontWeight: 600, background: 'var(--noxa-accent-primary)', color: '#fff', border: 'none', opacity: busy || sent ? 0.6 : 1 }}>
+        {sent ? '送信済み' : '確認メールを再送'}
+      </button>
+      <button type="button" title="今回は閉じる" onClick={() => setHidden(true)}
+        style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--noxa-text-faint)', fontSize: 15 }}>×</button>
     </div>
   );
 }
