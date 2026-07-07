@@ -60,20 +60,33 @@ export async function POST(request: NextRequest) {
       if (x.uid) castByUid.set(x.uid, { name: x.name ?? '', wage: numOr0(x.hourlyWage) });
     }
 
-    // 当月の勤務を castUid 別に集計
-    const shiftsSnap = await db.collection(`shop_shops/${shopId}/shifts`).get();
+    // 当月の勤務を castUid 別に集計。
+    // 期間クエリ化（Day14 バグハント）: 旧実装は shifts 全件取得＋メモリ側フィルタで、
+    // 蓄積すると毎回の確定/プレビューの read 数が破綻する（単一フィールド index で足りる）
+    const nextPeriod = month === 12 ? `${year + 1}-01` : `${year}-${String(month + 1).padStart(2, '0')}`;
+    const shiftsSnap = await db.collection(`shop_shops/${shopId}/shifts`)
+      .where('date', '>=', `${period}-01`)
+      .where('date', '<', `${nextPeriod}-01`)
+      .get();
     const minutesByUid = new Map<string, number>();
+    const staleOpensByUid = new Map<string, number>(); // 退勤忘れ（未計上時間）の件数
     for (const s of shiftsSnap.docs) {
       const x = s.data() as { castUid?: string; date?: string; startAt?: unknown; endAt?: unknown };
       if (!x.castUid || !(x.date ?? '').startsWith(period)) continue;
       const st = toMs(x.startAt), en = toMs(x.endAt);
       if (st && en && en > st) minutesByUid.set(x.castUid, (minutesByUid.get(x.castUid) ?? 0) + (en - st) / 60000);
+      // 退勤打刻の無い勤務は 0 分＝黙って落とすと過少支給事故になるため件数で警告する
+      else if (st && !en) {
+        staleOpensByUid.set(x.castUid, (staleOpensByUid.get(x.castUid) ?? 0) + 1);
+        if (!minutesByUid.has(x.castUid)) minutesByUid.set(x.castUid, 0); // 完了勤務ゼロでも行に出す
+      }
     }
 
-    const rows: { castUid: string; name: string; hours: number; wage: number; base: number; total: number }[] = [];
+    const rows: { castUid: string; name: string; hours: number; wage: number; base: number; total: number; staleOpens: number }[] = [];
     const batch = db.batch();
     for (const [castUid, mins] of minutesByUid) {
-      if (mins <= 0) continue;
+      const staleOpens = staleOpensByUid.get(castUid) ?? 0;
+      if (mins <= 0 && staleOpens === 0) continue;
       const info = castByUid.get(castUid) ?? { name: '', wage: 0 };
       let name = info.name;
       if (!name) {
@@ -99,7 +112,7 @@ export async function POST(request: NextRequest) {
       if (bonus) breakdown.push({ label: 'ボーナス', amount: bonus });
       if (penalty) breakdown.push({ label: '控除', amount: -Math.abs(penalty) });
       const total = base + back + bonus - Math.abs(penalty);
-      rows.push({ castUid, name, hours: Number(hours.toFixed(2)), wage, base, total });
+      rows.push({ castUid, name, hours: Number(hours.toFixed(2)), wage, base, total, staleOpens });
 
       if (!dryRun) {
         batch.set(db.doc(`shop_shops/${shopId}/payrolls/${castUid}/items/${period}`), {

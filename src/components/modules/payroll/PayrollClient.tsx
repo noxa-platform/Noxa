@@ -77,7 +77,8 @@ export function PayrollClient({ user }: { user: User }) {
         if (!shopId) { if (alive) { setNoShop(true); setLoading(false); } return; }
         const snap = await getDocs(collection(db, `shop_shops/${shopId}/payrolls/${user.uid}/items`));
         const list: Period[] = []; snap.forEach((d) => list.push(mapPeriod(d.id, d.data())));
-        list.sort((a, b) => b.label.localeCompare(a.label));
+        // id（YYYY-MM）降順。label（"2026年12月" 等）の文字列比較だと 12月が 7月より下に並ぶ
+        list.sort((a, b) => b.id.localeCompare(a.id));
         // 当月の確定明細が無ければ、勤務実績からの見込みを先頭に表示
         const draft = await computeDraft(shopId, user.uid);
         const merged = draft && !list.some((p) => p.id === draft.id) ? [draft, ...list] : list;
@@ -131,7 +132,7 @@ export function PayrollClient({ user }: { user: User }) {
 // ─────────────────────────────────────────────
 // オーナー専用: 月次給与の確定
 // ─────────────────────────────────────────────
-type FinRow = { castUid: string; name: string; hours: number; wage: number; base: number; total: number };
+type FinRow = { castUid: string; name: string; hours: number; wage: number; base: number; total: number; staleOpens?: number };
 type Adj = { back: string; bonus: string; penalty: string };
 
 async function finalizePost(body: unknown): Promise<{ period: string; rows: FinRow[] }> {
@@ -230,7 +231,10 @@ function PayrollFinalize({ user }: { user: User }) {
                 const total = effBase + (Number(a.back) || 0) + (Number(a.bonus) || 0) - Math.abs(Number(a.penalty) || 0);
                 return (
                   <tr key={r.castUid}>
-                    <td style={{ ...cell, fontFamily: 'var(--noxa-font-sans-jp)' }}>{r.name}{r.wage === 0 && <span title="席回し名簿と未紐付け（時給0）。時給を直接入力するか、席回しのキャスト編集で紐付けてください" style={{ color: 'var(--noxa-status-error)', marginLeft: 4 }}>⚠</span>}</td>
+                    <td style={{ ...cell, fontFamily: 'var(--noxa-font-sans-jp)' }}>{r.name}
+                      {r.wage === 0 && <span title="席回し名簿と未紐付け（時給0）。時給を直接入力するか、席回しのキャスト編集で紐付けてください" style={{ color: 'var(--noxa-status-error)', marginLeft: 4 }}>⚠</span>}
+                      {(r.staleOpens ?? 0) > 0 && <span title={`退勤打刻の無い勤務が ${r.staleOpens} 件あり、給与時間に入っていません。本人の勤怠画面で締めてから再計算してください`} style={{ fontSize: 10, fontFamily: mono, color: 'var(--noxa-status-warning)', marginLeft: 4 }}>打刻漏れ{r.staleOpens}</span>}
+                    </td>
                     <td style={cell}>{r.hours}h</td>
                     <td style={cell}>
                       {r.wage === 0
@@ -248,6 +252,11 @@ function PayrollFinalize({ user }: { user: User }) {
             </tbody>
           </table>
           <p style={{ fontSize: 11, color: 'var(--noxa-text-faint)', margin: '8px 0 0' }}>※ 基本給＝当月の勤務(shifts)×時給。調整を入れたら「確定する」で各キャストの明細に保存されます（再確定で上書き）。</p>
+          {rows.some((r) => (r.staleOpens ?? 0) > 0) && (
+            <p role="alert" style={{ fontSize: 12, color: 'var(--noxa-status-warning)', margin: '6px 0 0' }}>
+              ⚠ 「打刻漏れ」のあるキャストは退勤打刻の無い勤務が時間に入っていません。本人の勤怠画面（退勤忘れカード）で締めてから再計算すると正確になります。
+            </p>
+          )}
         </div>
       ))}
     </section>
