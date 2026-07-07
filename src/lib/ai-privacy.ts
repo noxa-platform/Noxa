@@ -25,8 +25,10 @@ export const AI_CUSTOMER_FIELDS = [
 /** 来店ログから AI に渡してよいフィールド */
 export const AI_LOG_FIELDS = ['type', 'date', 'datetime', 'salesAmount', 'memo', 'note', 'countAsGroup'] as const;
 
-// 日本の電話番号（0始まり10-11桁・ハイフン/空白区切り許容・+81 形式）
-const PHONE_RE = /(?:\+81[-\s]?|0)\d{1,4}[-\s]?\d{1,4}[-\s]?\d{3,4}(?!\d)/g;
+// 日本の電話番号（0始まり10-11桁・区切りはハイフン/空白/長音「ー」/各種ダッシュ類を許容・+81 形式）。
+// U+2212(−)・U+2010(‐)・U+2015(―) は NFKC 正規化でも '-' にならないため個別に含める
+const PHONE_SEP = '[-\\sー−‐―]';
+const PHONE_RE = new RegExp(`(?:\\+81${PHONE_SEP}?|0)\\d{1,4}${PHONE_SEP}?\\d{1,4}${PHONE_SEP}?\\d{3,4}(?!\\d)`, 'g');
 // メールアドレス（一般形）
 const EMAIL_RE = /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g;
 
@@ -34,9 +36,12 @@ const EMAIL_RE = /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g;
  * フリーテキスト中の電話番号・メールアドレスをマスクする。
  * 数値の誤爆を抑えるため、電話は「0 または +81 始まり・計10桁以上」のみ対象
  * （金額・日付・時刻・％等は対象外になる）。
+ * 全角入力（０９０−１２３４…・＠）を取りこぼさないよう NFKC 正規化してから検出する
+ * （AI 送信用テキストの変換なので、正規化された文字列を返してよい）。
  */
 export function maskContactInfo(text: string): string {
   return text
+    .normalize('NFKC')
     .replace(EMAIL_RE, '[メール非表示]')
     .replace(PHONE_RE, (m) => {
       const digits = m.replace(/\D/g, '');

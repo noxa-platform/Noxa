@@ -19,6 +19,12 @@ describe('maskContactInfo', () => {
     expect(maskContactInfo(s)).toBe(s);
   });
 
+  it('全角数字・全角＠・長音区切りの連絡先もマスクする（NFKC 正規化）', () => {
+    expect(maskContactInfo('ケータイ０９０−１２３４−５６７８')).toBe('ケータイ[電話番号非表示]');
+    expect(maskContactInfo('090ー1234ー5678 に連絡')).toBe('[電話番号非表示] に連絡');
+    expect(maskContactInfo('メール ｔａｒｏ＠ｅｘａｍｐｌｅ.ｃｏｍ')).toBe('メール [メール非表示]');
+  });
+
   it('複数の連絡先が混在しても全てマスクする', () => {
     const out = maskContactInfo('tel:080-1111-2222 mail:a@b.com 予備:070-3333-4444');
     expect(out).not.toContain('080');
