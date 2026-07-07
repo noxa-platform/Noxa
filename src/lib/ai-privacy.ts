@@ -9,6 +9,11 @@
  *   3. 氏名は接客 AI の中核文脈のため送る（源氏名/ニックネーム推奨を UI 文言で促す）。
  */
 
+/** AI 機能の初回利用時に表示する同意文言（docs/ai-privacy-policy.md の文言案と同一） */
+export const AI_CONSENT_TEXT =
+  'AI 機能は、顧客メモ・来店履歴などの情報を AI サービス（外部 API）に送信して提案を生成します。'
+  + '電話番号・メールアドレスは自動的に伏せ字にされますが、メモにはお客様の本名・住所・LINE ID を書かないことをおすすめします。';
+
 /** 顧客 doc から AI に渡してよいフィールド（接客文脈に必要な最小集合） */
 export const AI_CUSTOMER_FIELDS = [
   'name', 'rank', 'tags', 'totalSales', 'visitCount', 'lastContactAt', 'birthday',

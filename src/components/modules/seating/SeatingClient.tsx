@@ -11,6 +11,7 @@ import { PosClient } from '@/components/modules/pos/PosClient';
 import { generateSmartProposals, getSourcingCandidates, sanitizeAiPlan, ASSIST_MODE_LABEL, type AiPlanItem, type AssistMode } from '@/lib/seating/ai';
 import { computeSetTimer, orderedRotationQueue, moveInOrder, firstVisitPickupSet } from '@/lib/seating/logic';
 import { calculateResult, type CalculatorState } from '@/lib/pos/engine';
+import { AI_CONSENT_TEXT } from '@/lib/ai-privacy';
 import { createDefaultStoreConfig } from '@/lib/pos/defaultConfig';
 import type { StoreConfig } from '@/lib/pos/types';
 import type { Cast, FloorTable, TableType, Customer, CastStatus, Rank } from '@/lib/seating/types';
@@ -188,6 +189,14 @@ export function SeatingClient({ user }: { user: User }) {
   // AI 席回し: 盤面＋要望をサーバへ送り、返ってきた提案を純ロジックで検証して表示
   const askAi = async () => {
     if (!store.shopId || aiBusy) return;
+    // 初回利用時の同意（Day13・docs/ai-privacy-policy.md の文言。端末単位で記録）
+    try {
+      const CONSENT_KEY = 'noxa-ai-consent-v1';
+      if (!window.localStorage.getItem(CONSENT_KEY)) {
+        if (!window.confirm(`${AI_CONSENT_TEXT}\n\n続行しますか？`)) return;
+        window.localStorage.setItem(CONSENT_KEY, new Date().toISOString());
+      }
+    } catch { /* localStorage 不可（プライベートモード等）でも続行は妨げない */ }
     setAiBusy(true); setAiError(null); setAiPlan(null); setAiNote('');
     try {
       const nowMs = Date.now();
