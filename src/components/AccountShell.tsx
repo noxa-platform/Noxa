@@ -75,6 +75,15 @@ const NAV_SERVICE: { label: string; href: string; external?: boolean; tint?: str
   { label: '退会',       href: '/account/delete' },
 ];
 
+/** サイドバーのセクション見出し（render ごとの再定義を避けるためトップレベル定義） */
+function SectionLabel({ easy, children }: { easy: boolean; children: React.ReactNode }) {
+  return (
+    <div className={easy ? 'px-2.5 pb-2' : 'noxa-mono px-2.5 pb-2'} style={easy
+      ? { fontSize: 13, color: 'var(--noxa-text-muted)', fontWeight: 700, fontFamily: 'var(--noxa-font-display-jp)' }
+      : { fontSize: 10, color: 'var(--noxa-text-faint)', letterSpacing: '0.12em', textTransform: 'uppercase' }}>{children}</div>
+  );
+}
+
 export function AccountShell({ user, children }: { user: User; children: React.ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
@@ -113,11 +122,6 @@ export function AccountShell({ user, children }: { user: User; children: React.R
   }
 
   // ── 描画ヘルパー ──
-  const SectionLabel = ({ children }: { children: React.ReactNode }) => (
-    <div className={easy ? 'px-2.5 pb-2' : 'noxa-mono px-2.5 pb-2'} style={easy
-      ? { fontSize: 13, color: 'var(--noxa-text-muted)', fontWeight: 700, fontFamily: 'var(--noxa-font-display-jp)' }
-      : { fontSize: 10, color: 'var(--noxa-text-faint)', letterSpacing: '0.12em', textTransform: 'uppercase' }}>{children}</div>
-  );
   const navLink = (it: { label: string; href: string; external?: boolean; tint?: string }) => {
     const active = pathname === it.href;
     return (
@@ -162,7 +166,7 @@ export function AccountShell({ user, children }: { user: User; children: React.R
         {device.isDevice ? (
           /* 店舗端末: 許可された店舗モジュールのみ */
           <div className="flex flex-col" style={{ gap: 2 }}>
-            <SectionLabel>店舗の端末{device.label ? ` · ${device.label}` : ''}</SectionLabel>
+            <SectionLabel easy={easy}>店舗の端末{device.label ? ` · ${device.label}` : ''}</SectionLabel>
             {storeNav.map(navLink)}
           </div>
         ) : (
@@ -170,7 +174,7 @@ export function AccountShell({ user, children }: { user: User; children: React.R
             {/* お店の運営（店舗を選択中のみ表示。個人選択中は隠す） */}
             {storeActive ? (
               <div className="flex flex-col" style={{ gap: 2 }}>
-                <SectionLabel>お店の運営</SectionLabel>
+                <SectionLabel easy={easy}>お店の運営</SectionLabel>
                 {storeNav.map(navLink)}
                 {navLink({ label: '店舗設定', href: '/store/settings' })}
               </div>
@@ -183,31 +187,31 @@ export function AccountShell({ user, children }: { user: User; children: React.R
 
             {/* 売上・顧客（個人/店舗どちらでも） */}
             <div className="flex flex-col" style={{ gap: 2 }}>
-              <SectionLabel>売上・顧客</SectionLabel>
+              <SectionLabel easy={easy}>売上・顧客</SectionLabel>
               {NAV_MONEY.map(navLink)}
             </div>
 
             {/* マイページ */}
             <div className="flex flex-col" style={{ gap: 2 }}>
-              <SectionLabel>マイページ</SectionLabel>
+              <SectionLabel easy={easy}>マイページ</SectionLabel>
               {NAV_ACCOUNT.map(navLink)}
             </div>
 
             {/* 個人ツール */}
             <div className="flex flex-col" style={{ gap: 2 }}>
-              <SectionLabel>個人ツール</SectionLabel>
+              <SectionLabel easy={easy}>個人ツール</SectionLabel>
               {NAV_TOOLS.map(navLink)}
             </div>
 
             {/* NOXA / おしらせ */}
             <div className="flex flex-col" style={{ gap: 2 }}>
-              <SectionLabel>NOXA・おしらせ</SectionLabel>
+              <SectionLabel easy={easy}>NOXA・おしらせ</SectionLabel>
               {NAV_CHANNEL.map(navLink)}
             </div>
 
             {/* 連携・契約 */}
             <div className="flex flex-col" style={{ gap: 2 }}>
-              <SectionLabel>連携・契約</SectionLabel>
+              <SectionLabel easy={easy}>連携・契約</SectionLabel>
               {NAV_SERVICE.map(navLink)}
             </div>
           </>

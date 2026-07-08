@@ -669,7 +669,10 @@ export function RiskClient({ user }: { user: User }) {
                               </button>
                               <button
                                 type="button"
-                                onClick={() => remove(entry.id)}
+                                onClick={() => {
+                                  // 出禁客等の共有記録＝誤タップ消失は安全事故に直結（確認必須）
+                                  if (window.confirm(`「${entry.label}」のリスク記録を削除しますか？（店全体の共有情報から消えます）`)) remove(entry.id);
+                                }}
                                 disabled={busy}
                                 style={{
                                   background: 'none',

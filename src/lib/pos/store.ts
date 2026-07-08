@@ -177,7 +177,9 @@ export function usePosStore(user: User): UsePosStore {
     return () => { unsubT(); unsubC(); unsubCust(); };
   }, [shopId]);
 
-  configRef.current = config;
+  // render 中の ref 書込は react-hooks/refs 違反（並行レンダーで巻き戻り得る）→ effect で同期。
+  // useRef(config) の初期値があるため、effect 反映前の read も既定 config で安全
+  useEffect(() => { configRef.current = config; }, [config]);
 
   const tableRef = useCallback((id: string) => doc(db, `shop_shops/${shopId}/seating_tables/${id}`), [shopId]);
 

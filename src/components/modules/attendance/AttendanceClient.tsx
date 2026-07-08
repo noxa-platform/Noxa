@@ -45,9 +45,10 @@ export function AttendanceClient({ user }: { user: User }) {
   const [shopId, setShopId] = useState<string | null>(null);
   const [shifts, setShifts] = useState<Shift[]>([]);
   const [busy, setBusy] = useState(false);
-  const [, setTick] = useState(0);
+  // 30秒ティック。render 中の Date.now() 直呼び（react-hooks/purity）を避けるため now を state で持つ
+  const [now, setTick] = useState(() => Date.now());
 
-  useEffect(() => { const t = setInterval(() => setTick((n) => n + 1), 30000); return () => clearInterval(t); }, []);
+  useEffect(() => { const t = setInterval(() => setTick(Date.now()), 30000); return () => clearInterval(t); }, []);
 
   const [loadError, setLoadError] = useState<string | null>(null);
   const reload = async (sid: string) => {
@@ -113,7 +114,7 @@ export function AttendanceClient({ user }: { user: User }) {
             <div>
               <div className="noxa-eyebrow" style={{ fontSize: 11, marginBottom: 6 }}>今日の勤務</div>
               {openToday ? (
-                <div style={{ fontSize: 15 }}>出勤中 <span style={{ fontFamily: mono, color: 'var(--noxa-accent-primary-ink)' }}>{hhmm(openToday.startMs)}〜</span> <span style={{ fontFamily: mono, fontSize: 12, color: 'var(--noxa-text-muted)' }}>（{dur(openToday.startMs, Date.now())}）</span></div>
+                <div style={{ fontSize: 15 }}>出勤中 <span style={{ fontFamily: mono, color: 'var(--noxa-accent-primary-ink)' }}>{hhmm(openToday.startMs)}〜</span> <span style={{ fontFamily: mono, fontSize: 12, color: 'var(--noxa-text-muted)' }}>（{dur(openToday.startMs, now)}）</span></div>
               ) : <div style={{ fontSize: 14, color: 'var(--noxa-text-muted)' }}>未出勤</div>}
             </div>
             {openToday
