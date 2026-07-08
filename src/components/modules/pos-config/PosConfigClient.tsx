@@ -5,6 +5,7 @@ import { useEffect, useState } from 'react';
 import { collection, doc, getDoc, getDocs, query, where, serverTimestamp, setDoc } from 'firebase/firestore';
 import type { User } from 'firebase/auth';
 import { db } from '@/lib/firebase/config';
+import { getActiveShop, pickShopId } from '@/lib/workspace';
 import type { StoreConfig, MenuItemDef, MenuCategoryDef, PinnedOrderDef } from '@/lib/pos/types';
 import { createDefaultStoreConfig } from '@/lib/pos/defaultConfig';
 
@@ -22,7 +23,16 @@ export function PosConfigClient({ user }: { user: User }) {
   const [cfg, setCfg] = useState<StoreConfig | null>(null);
   const [saving, setSaving] = useState(false);
   const [savedAt, setSavedAt] = useState<string | null>(null);
+  const [dirty, setDirty] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+
+  // 未保存の変更がある間はタブ閉じ/リロードを確認（料金表の編集途中の入力消失防止）
+  useEffect(() => {
+    if (!dirty) return;
+    const h = (e: BeforeUnloadEvent) => { e.preventDefault(); };
+    window.addEventListener('beforeunload', h);
+    return () => window.removeEventListener('beforeunload', h);
+  }, [dirty]);
 
   useEffect(() => {
     let alive = true;
@@ -31,10 +41,15 @@ export function PosConfigClient({ user }: { user: User }) {
         const shops = await getDocs(query(collection(db, 'shop_shops'), where('ownerUid', '==', user.uid)));
         if (!alive) return;
         if (shops.empty) { setLoading(false); return; }
-        const id = shops.docs[0].id;
+        // アクティブ店舗を尊重（WorkspaceSwitcher）。旧実装は「最初の店」固定で、
+        // 複数店舗オーナーが選択中でない店の料金設定を書き換える事故があった
+        const ownedIds = shops.docs.map((d) => d.id);
+        const { shopId: picked } = pickShopId(ownedIds, [], getActiveShop());
+        const id = picked && ownedIds.includes(picked) ? picked : ownedIds[0];
         setShopId(id);
+        const shopDoc = shops.docs.find((d) => d.id === id);
         const snap = await getDoc(doc(db, `shop_shops/${id}/pos_config/active`));
-        const base = createDefaultStoreConfig('active', shops.docs[0].data().name as string | undefined);
+        const base = createDefaultStoreConfig('active', shopDoc?.data().name as string | undefined);
         setCfg(snap.exists() ? ({ ...base, ...(snap.data() as Partial<StoreConfig>) } as StoreConfig) : base);
       } catch (e) { if (alive) setErr(String((e as Error)?.message ?? e)); }
       finally { if (alive) setLoading(false); }
@@ -42,7 +57,7 @@ export function PosConfigClient({ user }: { user: User }) {
     return () => { alive = false; };
   }, [user.uid]);
 
-  const update = (patch: Partial<StoreConfig>) => setCfg((c) => (c ? { ...c, ...patch } : c));
+  const update = (patch: Partial<StoreConfig>) => { setCfg((c) => (c ? { ...c, ...patch } : c)); setDirty(true); setSavedAt(null); };
 
   const save = async () => {
     if (!shopId || !cfg) return;
@@ -51,6 +66,7 @@ export function PosConfigClient({ user }: { user: User }) {
       await setDoc(doc(db, `shop_shops/${shopId}/pos_config/active`), { ...cfg, id: 'active', updatedAt: serverTimestamp() }, { merge: true });
       const d = new Date();
       setSavedAt(`${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`);
+      setDirty(false);
     } catch (e) { setErr('保存に失敗（権限をご確認ください）: ' + String((e as Error)?.message ?? e)); }
     finally { setSaving(false); }
   };
@@ -65,7 +81,8 @@ export function PosConfigClient({ user }: { user: User }) {
       {/* 保存バー */}
       <div style={{ position: 'sticky', top: 0, zIndex: 5, display: 'flex', gap: 10, alignItems: 'center', justifyContent: 'flex-end', padding: '8px 0', marginBottom: 12, background: 'var(--noxa-bg-base)' }}>
         {err && <span style={{ fontSize: 12, color: 'var(--noxa-status-error)', marginRight: 'auto' }}>{err}</span>}
-        {savedAt && <span style={{ fontSize: 11, color: 'var(--noxa-status-success)', fontFamily: mono }}>保存しました {savedAt}</span>}
+        {dirty && !err && <span style={{ fontSize: 11, color: 'var(--noxa-status-warning)', fontFamily: mono, marginRight: 'auto' }}>● 未保存の変更があります</span>}
+        {savedAt && !dirty && <span style={{ fontSize: 11, color: 'var(--noxa-status-success)', fontFamily: mono }}>保存しました {savedAt}</span>}
         <button type="button" onClick={save} disabled={saving} className="noxa-btn noxa-btn-primary"
           style={{ ...primaryBtn, width: 'auto', padding: '0 22px', opacity: saving ? 0.7 : 1 }}>{saving ? '保存中…' : '保存'}</button>
       </div>
