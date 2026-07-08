@@ -190,7 +190,10 @@ function PayrollFinalize({ user }: { user: User }) {
   };
   const finalize = async () => {
     if (!rows || busy) return;
-    if (!window.confirm(`${ym} の給与を${rows.length}名分 確定します。よろしいですか？（再確定で上書き）`)) return;
+    // 打刻漏れ（未計上時間）があるまま確定すると過少額で確定される——件数を明示して判断させる
+    const stale = rows.reduce((s, r) => s + (r.staleOpens ?? 0), 0);
+    const staleWarn = stale > 0 ? `\n\n⚠ 退勤打刻の無い勤務が ${stale} 件あり、給与時間に入っていません。このまま確定すると少ない額で確定されます（勤怠を締めてから再計算を推奨）。` : '';
+    if (!window.confirm(`${ym} の給与を${rows.length}名分 確定します。よろしいですか？（再確定で上書き）${staleWarn}`)) return;
     setBusy(true); setErr(null); setMsg(null);
     try { const r = await finalizePost({ shopId: shop.shopId, year: y, month: m, adjustments: adjustmentsPayload(), wageOverrides: wageOverridesPayload() }); setMsg(`✓ ${r.period} を ${r.rows.length}名分 確定しました`); setRows(r.rows); }
     catch (e) { setErr(e instanceof Error ? e.message : '確定に失敗しました'); }
