@@ -97,8 +97,8 @@ const today = () => new Date().toISOString().slice(0, 10);
 export function RiskClient({ user }: { user: User }) {
   const shop = useShopRole(user);
   const [filter, setFilter] = useState<FilterKey>('all');
-  const [entries, setEntries] = useState<RiskEntry[]>([]);
-  const [loading, setLoading] = useState(true);
+  // 出所（path）つきスナップショットから entries/loading を導出（set-state-in-effect 返済・Day18）
+  const [entriesSnap, setEntriesSnap] = useState<{ path: string; list: RiskEntry[] } | null>(null);
   const [busy, setBusy] = useState(false);
 
   // 追加フォーム
@@ -118,29 +118,23 @@ export function RiskClient({ user }: { user: User }) {
   // 機微: owner/manager/accounting（rules の isShopMemberWithSalesEdit と一致）
   const canView = hasShopRole(shop, ['manager', 'accounting']);
   const path = shop.shopId && canView ? `shop_shops/${shop.shopId}/risk_customers` : null;
+  const entries = useMemo(() => (path && entriesSnap?.path === path ? entriesSnap.list : []), [entriesSnap, path]);
+  const loading = shop.loading || (!!path && entriesSnap?.path !== path);
 
   useEffect(() => {
-    if (shop.loading) return;
-    if (!path) {
-      setEntries([]);
-      setLoading(false);
-      return;
-    }
-    setLoading(true);
+    if (!path) return;
     const unsub = onSnapshot(
       collection(db, path),
       (snap) => {
         const out: RiskEntry[] = [];
         snap.forEach((d) => out.push(toEntry(d.id, d.data())));
         out.sort((a, b) => (b.date || '').localeCompare(a.date || ''));
-        setEntries(out);
-        setLoading(false);
+        setEntriesSnap({ path, list: out });
       },
-      () => setLoading(false),
+      () => setEntriesSnap({ path, list: [] }), // エラーでも出所を確定し loading を解く
     );
     return () => unsub();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [shop.loading, path]);
+  }, [path]);
 
   const filtered = useMemo(
     () => (filter === 'all' ? entries : entries.filter((r) => r.category === filter)),

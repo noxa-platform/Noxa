@@ -138,13 +138,15 @@ const fieldLabel: React.CSSProperties = {
 
 export function UnpaidClient({ user }: { user: User }) {
   const shop = useShopRole(user);
-  const [records, setRecords] = useState<UnpaidRecord[]>([]);
-  const [loading, setLoading] = useState(true);
+  // 出所（path）つきスナップショットから records/loading を導出（set-state-in-effect 返済・Day18）
+  const [recordsSnap, setRecordsSnap] = useState<{ path: string; list: UnpaidRecord[] } | null>(null);
   const [busy, setBusy] = useState(false);
 
   // 機微: owner/manager/accounting（rules の isShopMemberWithSalesEdit と一致。店長が未収を見られない問題の解消）
   const allowed = hasShopRole(shop, ['manager', 'accounting']);
   const path = shop.shopId && allowed ? `shop_shops/${shop.shopId}/unpaid` : null;
+  const records = useMemo(() => (path && recordsSnap?.path === path ? recordsSnap.list : []), [recordsSnap, path]);
+  const loading = shop.loading || (!!path && recordsSnap?.path !== path);
 
   // 追加フォーム
   const [fName, setFName] = useState('');
@@ -158,26 +160,19 @@ export function UnpaidClient({ user }: { user: User }) {
   const [collectAmount, setCollectAmount] = useState('');
 
   useEffect(() => {
-    if (shop.loading) return;
-    if (!path) {
-      setRecords([]);
-      setLoading(false);
-      return;
-    }
-    setLoading(true);
+    if (!path) return;
     const unsub = onSnapshot(
       collection(db, path),
       (snap) => {
         const out: UnpaidRecord[] = [];
         snap.forEach((d) => out.push(mapRecord(d.id, d.data())));
         out.sort((a, b) => (b.date < a.date ? -1 : b.date > a.date ? 1 : 0));
-        setRecords(out);
-        setLoading(false);
+        setRecordsSnap({ path, list: out });
       },
-      () => setLoading(false),
+      () => setRecordsSnap({ path, list: [] }), // エラーでも出所を確定し loading を解く
     );
     return () => unsub();
-  }, [shop.loading, path]);
+  }, [path]);
 
   const active = useMemo(() => records.filter((r) => r.status !== '回収済'), [records]);
   const totalAmount = useMemo(() => active.reduce((s, r) => s + balanceOf(r), 0), [active]);

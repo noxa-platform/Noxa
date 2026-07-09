@@ -106,9 +106,9 @@ export function ReservationClient({ user }: { user: User }) {
   const shop = useShopId(user);
   const { t } = useShopConfig(user);
   const [activeTab, setActiveTab] = useState<'timeline' | 'vip'>('timeline');
-  const [reservations, setReservations] = useState<Reservation[]>([]);
+  // 出所（resPath）つきスナップショットから reservations/loading を導出（set-state-in-effect 返済・Day18）
+  const [resSnap, setResSnap] = useState<{ path: string; list: Reservation[] } | null>(null);
   const [vips, setVips] = useState<VipGuest[]>([]);
-  const [loading, setLoading] = useState(true);
   const [dateFilter, setDateFilter] = useState<string>(todayStr());
   const [showForm, setShowForm] = useState(false);
   const [editId, setEditId] = useState<string | null>(null);
@@ -145,19 +145,19 @@ export function ReservationClient({ user }: { user: User }) {
     return () => unsubs.forEach((u) => u());
   }, [shop.shopId]);
 
-  // 予約のリアルタイム購読
+  // 予約のリアルタイム購読（出所つきスナップショット。loading/一覧は下の導出で決まる）
   useEffect(() => {
-    if (shop.loading) return;
-    if (!resPath) { setLoading(false); return; }
-    setLoading(true);
+    if (!resPath) return;
     const unsub = onSnapshot(collection(db, resPath), (snap) => {
       const out: Reservation[] = [];
       snap.forEach((d) => out.push(mapReservation(d.id, d.data())));
-      setReservations(out);
-      setLoading(false);
-    }, () => setLoading(false));
+      setResSnap({ path: resPath, list: out });
+    }, () => setResSnap({ path: resPath, list: [] })); // エラーでも出所を確定し loading を解く
     return () => unsub();
-  }, [shop.loading, resPath]);
+  }, [resPath]);
+
+  const reservations = useMemo(() => (resPath && resSnap?.path === resPath ? resSnap.list : []), [resSnap, resPath]);
+  const loading = shop.loading || (!!resPath && resSnap?.path !== resPath);
 
   // 顧客（VIP/常連）のリアルタイム購読
   useEffect(() => {

@@ -689,23 +689,19 @@ function Editor({
 
 export function TrialClient({ user }: { user: User }) {
   const shop = useShopId(user);
-  const [candidates, setCandidates] = useState<Candidate[]>([]);
-  const [loading, setLoading] = useState(true);
+  // 出所（path）つきスナップショットから candidates/loading を導出（set-state-in-effect 返済・Day18）
+  const [candSnap, setCandSnap] = useState<{ path: string; list: Candidate[] } | null>(null);
   const [filterStatus, setFilterStatus] = useState<TrialStatus | 'all'>('all');
   const [busy, setBusy] = useState(false);
   // null=非表示, 'new'=新規, それ以外=編集対象 id
   const [editorKey, setEditorKey] = useState<DraftKey | null>(null);
 
   const path = shop.shopId ? `shop_shops/${shop.shopId}/trials` : null;
+  const candidates = useMemo(() => (path && candSnap?.path === path ? candSnap.list : []), [candSnap, path]);
+  const loading = shop.loading || (!!path && candSnap?.path !== path);
 
   useEffect(() => {
-    if (shop.loading) return;
-    if (!path) {
-      setCandidates([]);
-      setLoading(false);
-      return;
-    }
-    setLoading(true);
+    if (!path) return;
     const unsub = onSnapshot(
       collection(db, path),
       (snap) => {
@@ -718,13 +714,12 @@ export function TrialClient({ user }: { user: User }) {
           if (b.scheduledAt) return 1;
           return a.name.localeCompare(b.name);
         });
-        setCandidates(out);
-        setLoading(false);
+        setCandSnap({ path, list: out });
       },
-      () => setLoading(false),
+      () => setCandSnap({ path, list: [] }), // エラーでも出所を確定し loading を解く
     );
     return () => unsub();
-  }, [shop.loading, path]);
+  }, [path]);
 
   // 追加／編集の保存（undefined を書き込まない）
   const saveDraft = async (key: DraftKey, d: Draft) => {

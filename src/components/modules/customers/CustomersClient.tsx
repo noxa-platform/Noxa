@@ -60,8 +60,10 @@ type Sort = 'sales' | 'recent' | 'visits';
 export function CustomersClient({ user }: { user: User }) {
   const shop = useShopId(user);
   const colPath = shop.shopId ? `shop_shops/${shop.shopId}/customers` : `personal_customers/${user.uid}/items`;
-  const [custs, setCusts] = useState<Cust[]>([]);
-  const [loading, setLoading] = useState(true);
+  // 出所（colPath）つきスナップショットから custs/loading を導出（set-state-in-effect 返済・Day18）
+  const [custsSnap, setCustsSnap] = useState<{ path: string; list: Cust[] } | null>(null);
+  const custs = useMemo(() => (custsSnap?.path === colPath ? custsSnap.list : []), [custsSnap, colPath]);
+  const loading = shop.loading || custsSnap?.path !== colPath;
   const [sort, setSort] = useState<Sort>('sales');
   const [q, setQ] = useState('');
   const [starFilter, setStarFilter] = useState<number>(0); // 0=全部
@@ -101,11 +103,10 @@ export function CustomersClient({ user }: { user: User }) {
 
   useEffect(() => {
     if (shop.loading) return;
-    setLoading(true);
     const unsub = onSnapshot(collection(db, colPath), (snap) => {
       const list: Cust[] = []; snap.forEach((d) => list.push(mapCust(d.id, d.data())));
-      setCusts(list); setLoading(false);
-    }, () => setLoading(false));
+      setCustsSnap({ path: colPath, list });
+    }, () => setCustsSnap({ path: colPath, list: [] })); // エラーでも出所を確定し loading を解く
     return () => unsub();
   }, [colPath, shop.loading]);
 
