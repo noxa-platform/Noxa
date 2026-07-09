@@ -7,6 +7,7 @@ import { resolveAccessContext } from '../../lib/access-context';
 import { resolveWorkspaceContext, composePlaybookAndSelf } from '@/lib/ai-knowledge/prompt-helpers';
 import { getGlobalSuccessPatterns, getAggregateHint } from '@/lib/ai-knowledge/global-patterns';
 import { AI_CONFIG } from '@/lib/ai-knowledge/constants';
+import { maskContactInfo } from '@/lib/ai-privacy';
 
 // 顧客データ + 最新ログを取得してコンテキスト文字列を生成
 async function getCustomerContext(workspaceId: string, customerId: string): Promise<string> {
@@ -66,7 +67,8 @@ async function getCustomerContext(workspaceId: string, customerId: string): Prom
       communicationStyle: d.communicationStyle || '',
     };
 
-    let contextStr = JSON.stringify(context, null, 2);
+    // フリーテキスト（メモ・好み・ログ）に混じる電話/メールをマスク（PII ガード・Day12）
+    let contextStr = maskContactInfo(JSON.stringify(context, null, 2));
 
     // MBTI 別接客ヒント
     const mbtiHintTable: Record<string, string> = {

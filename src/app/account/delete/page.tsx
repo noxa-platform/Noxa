@@ -24,7 +24,9 @@ function DeleteAccount({ user }: { user: User }) {
       const idToken = await user.getIdToken();
       const apiBase =
         process.env.NEXT_PUBLIC_NOXA_FUNCTIONS_URL ??
-        'https://asia-northeast1-minami-bar-guide.cloudfunctions.net';
+        // 旧既定は minami-bar-guide を指しており env 未設定時に退会が旧プロジェクトへ飛ぶバグ
+        // だった（他ファイルと同じ noxa-platform に統一・docs/firebase-project-reference.md）
+        'https://asia-northeast1-noxa-platform.cloudfunctions.net';
       const res = await fetch(`${apiBase}/deleteNoxaAccount`, {
         method: 'POST',
         headers: { Authorization: `Bearer ${idToken}` },

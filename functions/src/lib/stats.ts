@@ -1,13 +1,13 @@
 /**
  * Push 配信統計の集計ヘルパー。
  *
- * crm_push_stats/{YYYY-MM-DD} に以下のフィールドを累積する:
+ * notification_push_stats/{YYYY-MM-DD} に以下のフィールドを累積する:
  *   - sent              : 送信成功数（種別不問）
  *   - failed            : 送信失敗数（無効トークン以外のエラー）
  *   - invalidTokenDeleted: 無効トークン検知で token doc を削除した数
  *   - byFn.{fnName}.sent / .failed : function 別内訳
  *
- * 失敗詳細は crm_push_failures/{YYYY-MM-DD}/items/{autoId} にも個別記録。
+ * 失敗詳細は notification_push_failures/{YYYY-MM-DD}/items/{autoId} にも個別記録。
  * リトライ判断や問題切り分けの用途。
  */
 import { FieldValue } from 'firebase-admin/firestore';
@@ -52,7 +52,7 @@ export async function incrementStat(
   }
 }
 
-/** 配信失敗の詳細を crm_push_failures に記録（リトライ判断用） */
+/** 配信失敗の詳細を notification_push_failures に記録（リトライ判断用） */
 export async function recordFailure(params: {
   fnName: string;
   uid: string;

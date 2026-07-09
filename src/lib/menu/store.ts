@@ -12,7 +12,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
-  addDoc, collection, deleteDoc, doc, onSnapshot, serverTimestamp, setDoc, updateDoc,
+  addDoc, collection, deleteDoc, doc, onSnapshot, runTransaction, serverTimestamp, setDoc, updateDoc,
   type DocumentData,
 } from 'firebase/firestore';
 import type { User } from 'firebase/auth';
@@ -22,6 +22,7 @@ import {
   DEFAULT_MENU_CONFIG, type InfoCard, type MenuColor, type MenuConfig, type MenuOrder,
   type MenuOrderCast, type MenuPanel,
 } from './types';
+import { buildFirstVisitPatch, type FirstVisitTableDoc } from './logic';
 
 type RawCast = DocumentData & {
   id: string; name?: string; rank?: string; ruby?: string; title?: string;
@@ -74,14 +75,17 @@ export function useMenuStore(user: User): UseMenuStore {
   const shop = useShopId(user);
   const shopId = shop.shopId;
 
-  const [casts, setCasts] = useState<RawCast[]>([]);
+  // casts は出所（shopId）つきで保持し loading を導出（set-state-in-effect 返済・Day19。subsReady 廃止）
+  const [castsSnap, setCastsSnap] = useState<{ shopId: string; list: RawCast[] } | null>(null);
   const [infoCards, setInfoCards] = useState<InfoCard[]>([]);
   const [images, setImages] = useState<Record<string, string>>({});
   const [orders, setOrders] = useState<MenuOrder[]>([]);
   const [tables, setTables] = useState<ShopTable[]>([]);
-  const [tableDocs, setTableDocs] = useState<Record<string, DocumentData>>({});
   const [config, setConfig] = useState<MenuConfig>(DEFAULT_MENU_CONFIG);
-  const [subsReady, setSubsReady] = useState(false);
+  const casts = useMemo(
+    () => (shopId && castsSnap?.shopId === shopId ? castsSnap.list : []),
+    [castsSnap, shopId],
+  );
 
   useEffect(() => {
     if (shop.loading || !shopId) return;
@@ -90,8 +94,8 @@ export function useMenuStore(user: User): UseMenuStore {
     const unsubs = [
       onSnapshot(collection(db, `${base}/seating_casts`), (snap) => {
         const list: RawCast[] = []; snap.forEach((d) => list.push({ id: d.id, ...(d.data() as DocumentData) }));
-        setCasts(list);
-      }, onErr('casts')),
+        setCastsSnap({ shopId, list });
+      }, (e) => { console.warn('[noxa:menu] casts 購読エラー', e?.message ?? e); setCastsSnap({ shopId, list: [] }); }),
       onSnapshot(collection(db, `${base}/menu_info_cards`), (snap) => {
         const list: InfoCard[] = []; snap.forEach((d) => list.push({ id: d.id, ...(d.data() as Omit<InfoCard, 'id'>) }));
         setInfoCards(list);
@@ -115,17 +119,16 @@ export function useMenuStore(user: User): UseMenuStore {
         setOrders(list);
       }, onErr('orders')),
       onSnapshot(collection(db, `${base}/seating_tables`), (snap) => {
-        const t: ShopTable[] = []; const docs: Record<string, DocumentData> = {};
-        snap.forEach((d) => { const v = d.data() as DocumentData; t.push({ id: d.id, name: (v.name as string) ?? d.id }); docs[d.id] = v; });
+        const t: ShopTable[] = [];
+        snap.forEach((d) => { const v = d.data() as DocumentData; t.push({ id: d.id, name: (v.name as string) ?? d.id }); });
         t.sort((a, b) => a.name.localeCompare(b.name, 'ja'));
-        setTables(t); setTableDocs(docs);
+        setTables(t);
       }, onErr('tables')),
       onSnapshot(doc(db, `${base}/menu_config/main`), (d) => {
         setConfig(d.exists() ? { ...DEFAULT_MENU_CONFIG, ...(d.data() as Partial<MenuConfig>) } : DEFAULT_MENU_CONFIG);
       }, onErr('config')),
     ];
-    setSubsReady(true);
-    return () => { unsubs.forEach((u) => u()); setSubsReady(false); };
+    return () => unsubs.forEach((u) => u());
   }, [shop.loading, shopId]);
 
   // パネル合成（cast + info）→ 表示順ソート
@@ -202,39 +205,30 @@ export function useMenuStore(user: User): UseMenuStore {
   const submitOrders = useCallback<UseMenuStore['submitOrders']>(async (groups, source) => {
     if (!shopId) return;
     const now = Date.now();
+    // 候補プール（表示中のキャストパネル）。未選択パネルはこの卓の除外に入れる
+    const pool = visiblePanels.filter((p) => p.kind !== 'info').map((p) => p.id);
     for (const g of groups) {
       const table = tables.find((t) => t.name === g.seat);
-      await addDoc(collection(db, `shop_shops/${shopId}/menu_orders`), {
+      const orderRef = doc(collection(db, `shop_shops/${shopId}/menu_orders`));
+      const orderData = {
         seat: g.seat, tableId: table?.id ?? null, customerName: g.customerName, memo: g.memo,
         color: g.color, casts: g.casts, source, createdAt: serverTimestamp(),
+      };
+      if (!table) { await setDoc(orderRef, orderData); continue; }
+      // 席回し連携: オーダー記録と卓反映を単一トランザクションに。
+      // 卓は tx 内で最新を読み直してパッチ（変更フィールドのみ）を作る
+      // （旧実装は画面キャッシュ由来の全体像を非Txで merge 書きしており、
+      //   席回し/POS 側の同時操作を古い値で巻き戻す事故があった）。
+      await runTransaction(db, async (tx) => {
+        const tref = doc(db, `shop_shops/${shopId}/seating_tables/${table.id}`);
+        const snap = await tx.get(tref);
+        tx.set(orderRef, orderData);
+        if (!snap.exists()) return;
+        const patch = buildFirstVisitPatch(snap.data() as FirstVisitTableDoc, g.casts.map((c) => c.id), pool, now);
+        tx.set(tref, { ...patch, updatedAt: serverTimestamp() }, { merge: true });
       });
-      // 席回し連携: 選ばれたキャストを指名(requested)＋現着に反映。
-      // 表示パネルのうち選ばれなかったキャストはこの卓の除外(excluded)に入れ、ローテ／AI候補から外す。
-      if (table) {
-        const tdoc = tableDocs[table.id] ?? {};
-        const cur: string[] = Array.isArray(tdoc.currentHostIds) ? tdoc.currentHostIds : [];
-        const hist: string[] = Array.isArray(tdoc.assignedHistory) ? tdoc.assignedHistory : [];
-        const req: string[] = Array.isArray(tdoc.requestedHostIds) ? tdoc.requestedHostIds : [];
-        const prevEx: string[] = Array.isArray(tdoc.excludedHostIds) ? tdoc.excludedHostIds : [];
-        const starts: Record<string, number> = (tdoc.castStartTimes as Record<string, number>) ?? {};
-        const ids = g.casts.map((c) => c.id);
-        const nextCur = Array.from(new Set([...cur, ...ids]));
-        const nextHist = Array.from(new Set([...hist, ...ids]));
-        const nextReq = Array.from(new Set([...req, ...ids]));
-        // 候補プール（表示中のキャストパネル）から未選択を除外に追加。選択された人は除外から外す。
-        const pool = visiblePanels.filter((p) => p.kind !== 'info').map((p) => p.id);
-        const nextEx = Array.from(new Set([...prevEx, ...pool.filter((id) => !ids.includes(id))])).filter((id) => !ids.includes(id));
-        for (const id of ids) if (!starts[id]) starts[id] = now;
-        // 空席卓に指名が入ったら開卓（席回しが ACTIVE で表示され、残り時間カウントも開始）
-        const wasEmpty = !tdoc.status || tdoc.status === 'EMPTY';
-        await setDoc(doc(db, `shop_shops/${shopId}/seating_tables/${table.id}`), {
-          currentHostIds: nextCur, requestedHostIds: nextReq, excludedHostIds: nextEx,
-          assignedHistory: nextHist, castStartTimes: starts, updatedAt: serverTimestamp(),
-          ...(wasEmpty ? { status: 'ACTIVE', startTime: now, entryTime: now } : {}),
-        }, { merge: true });
-      }
     }
-  }, [shopId, tables, tableDocs, visiblePanels]);
+  }, [shopId, tables, visiblePanels]);
 
   const updateOrder = useCallback<UseMenuStore['updateOrder']>(async (id, patch) => {
     if (!shopId) return;
@@ -263,7 +257,7 @@ export function useMenuStore(user: User): UseMenuStore {
   }, [shopId]);
 
   return {
-    loading: shop.loading || (!!shopId && !subsReady),
+    loading: shop.loading || (!!shopId && castsSnap?.shopId !== shopId),
     shopId, canManage: shop.canManage, isDevice: shop.isDevice,
     panels, visiblePanels, tables, orders, config,
     addCastPanel, savePanelMeta, removePanel, setPanelImage, reorderPanel, addInfoCard,

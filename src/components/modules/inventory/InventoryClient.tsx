@@ -243,10 +243,23 @@ export function InventoryClient({ user }: { user: User }) {
     } finally { setBusy(false); }
   };
 
-  const removeKeep = async (id: string) => {
+  const removeKeep = async (k: BottleKeep) => {
     if (!keepPath || busy) return;
+    // 顧客の預かり資産の記録＝誤タップ削除は事故（Day12: 確認ダイアログ追加）
+    if (!window.confirm(`${k.customerName} 様の「${k.item}」のキープ記録を削除しますか？（飲み切り・期限切れの整理用）`)) return;
     setBusy(true);
-    try { await deleteDoc(doc(db, `${keepPath}/${id}`)); }
+    try { await deleteDoc(doc(db, `${keepPath}/${k.id}`)); }
+    finally { setBusy(false); }
+  };
+
+  // 残量の更新（±10% ステッパー。未入力（数値化不能）の場合は 100% から開始）
+  const adjustKeepRemaining = async (k: BottleKeep, delta: number) => {
+    if (!keepPath || busy) return;
+    const cur = k.remainingPct ?? 100;
+    const next = Math.max(0, Math.min(100, cur + delta));
+    if (next === cur && k.remainingPct !== null) return;
+    setBusy(true);
+    try { await updateDoc(doc(db, `${keepPath}/${k.id}`), { remaining: `${next}%`, remainingUpdatedAt: serverTimestamp() }); }
     finally { setBusy(false); }
   };
 
@@ -837,13 +850,16 @@ export function InventoryClient({ user }: { user: User }) {
                           </span>
                         )}
                       </td>
-                      {/* 残量バー */}
-                      <td style={{ padding: '12px 16px', minWidth: 120 }}>
+                      {/* 残量バー＋±10% 更新（Day12: 追加時から更新できなかった断線の解消） */}
+                      <td style={{ padding: '12px 16px', minWidth: 168 }}>
                         {k.remainingPct !== null ? (
                           <div
-                            style={{ display: 'flex', alignItems: 'center', gap: 10 }}
+                            style={{ display: 'flex', alignItems: 'center', gap: 8 }}
                             aria-label={`残量 ${k.remainingPct}%`}
                           >
+                            <button type="button" title="残量 -10%" disabled={busy || k.remainingPct <= 0}
+                              onClick={() => adjustKeepRemaining(k, -10)}
+                              style={{ ...keepStepBtn, opacity: busy || k.remainingPct <= 0 ? 0.4 : 1 }}>−</button>
                             {/* プログレスバー */}
                             <div
                               aria-hidden
@@ -884,10 +900,18 @@ export function InventoryClient({ user }: { user: User }) {
                             >
                               {k.remainingPct}%
                             </span>
+                            <button type="button" title="残量 +10%" disabled={busy || k.remainingPct >= 100}
+                              onClick={() => adjustKeepRemaining(k, 10)}
+                              style={{ ...keepStepBtn, opacity: busy || k.remainingPct >= 100 ? 0.4 : 1 }}>＋</button>
                           </div>
                         ) : (
-                          <span style={{ fontFamily: mono, fontSize: 12, color: 'var(--noxa-text-faint)' }}>
-                            {k.remaining || '—'}
+                          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+                            <span style={{ fontFamily: mono, fontSize: 12, color: 'var(--noxa-text-faint)' }}>
+                              {k.remaining || '—'}
+                            </span>
+                            <button type="button" title="残量の記録を始める（100%から）" disabled={busy}
+                              onClick={() => adjustKeepRemaining(k, 0)}
+                              style={{ ...keepStepBtn, width: 'auto', padding: '0 8px', fontSize: 10 }}>記録開始</button>
                           </span>
                         )}
                       </td>
@@ -895,8 +919,8 @@ export function InventoryClient({ user }: { user: User }) {
                       <td style={{ padding: '12px 16px', textAlign: 'right', whiteSpace: 'nowrap' }}>
                         <button
                           type="button"
-                          onClick={() => removeKeep(k.id)}
-                          title="削除"
+                          onClick={() => removeKeep(k)}
+                          title="削除（確認あり）"
                           style={{ ...iconBtnStyle, color: 'var(--noxa-text-faint)' }}
                         >
                           ×
@@ -1059,6 +1083,14 @@ const stepBtnStyle: React.CSSProperties = {
   fontFamily: mono,
   lineHeight: 1,
   flex: 'none',
+};
+
+/** ボトルキープ残量の ±10% ステッパー */
+const keepStepBtn: React.CSSProperties = {
+  appearance: 'none', cursor: 'pointer', width: 24, height: 24, borderRadius: 7, flex: 'none',
+  background: 'var(--noxa-bg-base)', border: '1px solid var(--noxa-border)',
+  color: 'var(--noxa-text-muted)', fontSize: 13, lineHeight: 1,
+  display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
 };
 
 const iconBtnStyle: React.CSSProperties = {

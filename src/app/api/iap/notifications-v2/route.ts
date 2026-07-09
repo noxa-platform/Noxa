@@ -14,8 +14,10 @@
 //   https://noxa.egshugy.com/api/iap/notifications-v2
 //
 // セキュリティ:
-//   - signedPayload の JWS 署名検証は Apple の公開鍵で行うべき（v1 では payload 検証のみ）
-//   - 本実装は最小限。本番運用前に node-jose や jose ライブラリで完全検証必要
+//   - signedPayload / signedTransactionInfo の JWS は verifyAppleJws
+//     （x5c チェーン + Apple Root CA G3 ピン）で署名検証する。
+//   - 本番(NODE_ENV==='production')では検証必須＝偽造ペイロードは 401。
+//     非本番のみ decode フォールバック（Sandbox 通知テスト用）。
 //
 // 関連:
 //   - 付与は /api/iap/grant
@@ -23,6 +25,7 @@
 //     + account_subscriptions/{uid}.purchasedCredits を減算
 import { NextRequest, NextResponse } from 'next/server';
 import { getAdminDb } from '../../lib/firebase-admin';
+import { verifyAppleJws, decodeAppleJwsPayload } from '@/lib/iap/verify-apple-jws';
 import { FieldValue } from 'firebase-admin/firestore';
 
 interface NotificationV2Body {
@@ -49,14 +52,20 @@ interface TransactionInfo {
   revocationReason?: number;
 }
 
+/**
+ * JWS を署名検証してから payload を返す。
+ * 本番: 検証必須（失敗は null → 呼び出し側で 401）。
+ * 非本番: 検証失敗時のみ decode にフォールバック（Sandbox 通知テスト用）。
+ */
 function decodeJws(jws: string): Record<string, unknown> | null {
-  try {
-    const parts = jws.split('.');
-    if (parts.length !== 3) return null;
-    return JSON.parse(Buffer.from(parts[1], 'base64url').toString('utf-8'));
-  } catch {
+  const verified = verifyAppleJws(jws);
+  if (verified.ok) return verified.payload;
+  if (process.env.NODE_ENV === 'production') {
+    console.warn(`[iap/notifications-v2] JWS 署名検証失敗 (${verified.reason})`);
     return null;
   }
+  console.warn(`[iap/notifications-v2] 非本番のため署名未検証で続行 (verify=${verified.reason})`);
+  return decodeAppleJwsPayload(jws);
 }
 
 export async function POST(request: NextRequest) {

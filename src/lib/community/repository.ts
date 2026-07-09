@@ -8,6 +8,16 @@
 
 import type { AreaTag, Board, JobTag, Reply, Thread, ThreadFilter } from './types';
 
+/**
+ * コミュニティのバックエンド判定（Day10 本番化）。
+ * 既定は Firestore（本番）。ローカルで実データに触りたくない場合のみ
+ * NEXT_PUBLIC_COMMUNITY_BACKEND=mock で明示的にモックへ切り替える。
+ * 判定はここ1箇所に集約し、Gate / Client / store の条件食い違いを防ぐ。
+ */
+export function isFirestoreCommunityBackend(): boolean {
+  return process.env.NEXT_PUBLIC_COMMUNITY_BACKEND !== 'mock';
+}
+
 export interface CreateThreadInput {
   boardId: string;
   title: string;

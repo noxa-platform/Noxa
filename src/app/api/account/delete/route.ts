@@ -12,6 +12,14 @@ export async function POST(request: Request) {
     const db = getAdminDb();
 
     // 1. Firestore データ削除
+    // profile_pages/{handle}（退会後も公開ページが残るのを防ぐ・privacy・F1）
+    // account_users 削除より前に handle を読む（順序を入れ替えないこと）。
+    const userSnap = await db.doc(`account_users/${uid}`).get();
+    const handle = userSnap.exists ? userSnap.data()?.handle : undefined;
+    if (handle) {
+      await db.doc(`profile_pages/${handle}`).delete();
+    }
+
     // account_users/{uid}
     await db.doc(`account_users/${uid}`).delete();
     // account_subscriptions/{uid}（IAP 経由の purchasedCredits 残も同時に消える）

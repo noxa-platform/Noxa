@@ -6,9 +6,12 @@ import {
   collection,
   deleteDoc,
   doc,
+  getDocs,
   onSnapshot,
+  query,
   serverTimestamp,
   updateDoc,
+  where,
   type DocumentData,
 } from 'firebase/firestore';
 import type { User } from 'firebase/auth';
@@ -686,23 +689,19 @@ function Editor({
 
 export function TrialClient({ user }: { user: User }) {
   const shop = useShopId(user);
-  const [candidates, setCandidates] = useState<Candidate[]>([]);
-  const [loading, setLoading] = useState(true);
+  // 出所（path）つきスナップショットから candidates/loading を導出（set-state-in-effect 返済・Day18）
+  const [candSnap, setCandSnap] = useState<{ path: string; list: Candidate[] } | null>(null);
   const [filterStatus, setFilterStatus] = useState<TrialStatus | 'all'>('all');
   const [busy, setBusy] = useState(false);
   // null=非表示, 'new'=新規, それ以外=編集対象 id
   const [editorKey, setEditorKey] = useState<DraftKey | null>(null);
 
   const path = shop.shopId ? `shop_shops/${shop.shopId}/trials` : null;
+  const candidates = useMemo(() => (path && candSnap?.path === path ? candSnap.list : []), [candSnap, path]);
+  const loading = shop.loading || (!!path && candSnap?.path !== path);
 
   useEffect(() => {
-    if (shop.loading) return;
-    if (!path) {
-      setCandidates([]);
-      setLoading(false);
-      return;
-    }
-    setLoading(true);
+    if (!path) return;
     const unsub = onSnapshot(
       collection(db, path),
       (snap) => {
@@ -715,13 +714,12 @@ export function TrialClient({ user }: { user: User }) {
           if (b.scheduledAt) return 1;
           return a.name.localeCompare(b.name);
         });
-        setCandidates(out);
-        setLoading(false);
+        setCandSnap({ path, list: out });
       },
-      () => setLoading(false),
+      () => setCandSnap({ path, list: [] }), // エラーでも出所を確定し loading を解く
     );
     return () => unsub();
-  }, [shop.loading, path]);
+  }, [path]);
 
   // 追加／編集の保存（undefined を書き込まない）
   const saveDraft = async (key: DraftKey, d: Draft) => {
@@ -763,7 +761,59 @@ export function TrialClient({ user }: { user: User }) {
     const next = nextStatus(c.status);
     if (next) void patchStatus(c, next);
   };
-  const hire = (c: Candidate) => void patchStatus(c, 'hired');
+  // 本入店の連動結果（名簿反映・招待URL）を表示するモーダル
+  const [hiredInfo, setHiredInfo] = useState<{ name: string; castCreated: boolean; inviteUrl: string | null; inviteError: string | null } | null>(null);
+
+  // 本入店: ステータス変更に加えて ①席回し名簿(seating_casts)へ登録（同名スキップ）
+  // ②メンバー招待コードを発行して本人へ渡せる URL を表示（手動二重登録の解消）。
+  // 招待発行は owner/manager のみ API が許可。失敗しても名簿反映は成立させる。
+  const hire = async (c: Candidate) => {
+    if (!path || !shop.shopId || busy) return;
+    setBusy(true);
+    try {
+      // ① 名簿へ（同名キャストが既にいれば作らない）
+      let castCreated = false;
+      let castId: string | null = null;
+      try {
+        const existing = await getDocs(query(collection(db, `shop_shops/${shop.shopId}/seating_casts`), where('name', '==', c.name)));
+        if (existing.empty) {
+          const ref = await addDoc(collection(db, `shop_shops/${shop.shopId}/seating_casts`), {
+            name: c.name, rank: '新人', hourlyWage: c.wage && c.wage > 0 ? c.wage : 0,
+            isLocked: false, baseStatus: 'Free', uid: null, fromTrialId: c.id, createdAt: serverTimestamp(),
+          });
+          castId = ref.id; castCreated = true;
+        } else {
+          castId = existing.docs[0].id;
+        }
+      } catch { /* 名簿権限なし等でも本入店自体は続行 */ }
+
+      // ② メンバー招待コード（cast ロール）。権限が無ければ案内文言に切替
+      let inviteUrl: string | null = null;
+      let inviteError: string | null = null;
+      try {
+        const token = await user.getIdToken();
+        const res = await fetch('/api/team/issue-invite', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+          body: JSON.stringify({ shopId: shop.shopId, role: 'cast' }),
+        });
+        const data = (await res.json().catch(() => ({}))) as { url?: string; error?: string };
+        if (res.ok && data.url) inviteUrl = data.url;
+        else inviteError = data.error ?? `招待コードの発行に失敗（${res.status}）`;
+      } catch (e) {
+        inviteError = String((e as Error)?.message ?? e);
+      }
+
+      await updateDoc(doc(db, `${path}/${c.id}`), {
+        status: 'hired', hiredAt: serverTimestamp(), ...(castId ? { seatingCastId: castId } : {}),
+      });
+      setHiredInfo({ name: c.name, castCreated, inviteUrl, inviteError });
+    } catch (e) {
+      window.alert('本入店処理に失敗しました: ' + String((e as Error)?.message ?? e));
+    } finally {
+      setBusy(false);
+    }
+  };
   const reject = (c: Candidate) => void patchStatus(c, 'rejected');
 
   const remove = async (c: Candidate) => {
@@ -1125,6 +1175,36 @@ export function TrialClient({ user }: { user: User }) {
           onClose={() => setEditorKey(null)}
           busy={busy}
         />
+      )}
+
+      {/* 本入店の連動結果（名簿反映＋招待URL） */}
+      {hiredInfo && (
+        <div role="dialog" aria-label="本入店" onClick={() => setHiredInfo(null)} style={{ position: 'fixed', inset: 0, zIndex: 220, background: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}>
+          <div onClick={(e) => e.stopPropagation()} style={{ width: '100%', maxWidth: 440, background: 'var(--noxa-surface-card)', border: '1px solid var(--noxa-border)', borderRadius: 16, padding: 20, display: 'flex', flexDirection: 'column', gap: 12 }}>
+            <h3 style={{ margin: 0, fontFamily: 'var(--noxa-font-display-jp)', fontSize: 17 }}>🎉 {hiredInfo.name} さんを本入店にしました</h3>
+            <p style={{ margin: 0, fontSize: 13, color: 'var(--noxa-text-muted)', lineHeight: 1.7 }}>
+              {hiredInfo.castCreated
+                ? '席回しの名簿に「新人」として追加しました（時給は体験時の値。名簿の ✎ から変更できます）。'
+                : '同名のキャストが名簿に既にいるため、名簿への追加はスキップしました。'}
+            </p>
+            {hiredInfo.inviteUrl ? (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                <span style={{ fontFamily: mono, fontSize: 10, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--noxa-text-faint)' }}>本人に渡すメンバー招待URL（7日で失効）</span>
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <input readOnly value={hiredInfo.inviteUrl} onFocus={(e) => e.currentTarget.select()} style={{ flex: 1, minHeight: 40, padding: '8px 10px', borderRadius: 10, background: 'var(--noxa-bg-base)', border: '1px solid var(--noxa-border)', color: 'var(--noxa-text-primary)', fontSize: 12, fontFamily: mono }} />
+                  <button type="button" onClick={() => { void navigator.clipboard?.writeText(hiredInfo.inviteUrl!).then(() => window.alert('コピーしました')); }}
+                    style={{ minHeight: 40, padding: '0 14px', borderRadius: 10, cursor: 'pointer', background: 'var(--noxa-accent-primary)', color: '#fff', border: 'none', fontSize: 13, fontWeight: 600 }}>コピー</button>
+                </div>
+                <p style={{ margin: 0, fontSize: 11, color: 'var(--noxa-text-faint)', lineHeight: 1.6 }}>参加後、席回し名簿の ✎ からアカウント連携すると勤怠×時給が給与計算に乗ります。</p>
+              </div>
+            ) : (
+              <p style={{ margin: 0, fontSize: 12, color: 'var(--noxa-status-warning)' }}>
+                招待URLは発行できませんでした（{hiredInfo.inviteError ?? '権限は owner/manager のみ'}）。店舗設定の「メンバーと招待」から発行できます。
+              </p>
+            )}
+            <button type="button" onClick={() => setHiredInfo(null)} style={{ alignSelf: 'flex-end', minHeight: 40, padding: '0 18px', borderRadius: 10, cursor: 'pointer', background: 'transparent', color: 'var(--noxa-text-muted)', border: '1px solid var(--noxa-border)', fontSize: 13 }}>閉じる</button>
+          </div>
+        </div>
       )}
     </div>
   );

@@ -9,6 +9,7 @@
 import {
   signInWithEmailAndPassword,
   createUserWithEmailAndPassword,
+  sendEmailVerification,
   signInWithPopup,
   signOut as fbSignOut,
   GoogleAuthProvider,
@@ -48,7 +49,24 @@ export function isAllowedRedirect(redirectUrl: string | null | undefined): boole
 export async function signupWithEmail(email: string, password: string, displayName?: string): Promise<User> {
   const cred = await createUserWithEmailAndPassword(auth, email, password);
   await ensureAccountUser(cred.user, displayName);
+  // メール検証（Day11）: 送信失敗でもサインアップ自体は成立させる（バナーから再送可能）
+  try { await sendEmailVerification(cred.user); } catch { /* 再送導線あり */ }
   return cred.user;
+}
+
+/** 検証メールの再送（未検証バナー用） */
+export async function resendVerificationEmail(user: User): Promise<void> {
+  await sendEmailVerification(user);
+}
+
+/**
+ * メール検証バナーを出すべきか。
+ * password プロバイダ（自己申告メール）かつ未検証のときのみ。
+ * Google/Apple 等の IdP 経由は IdP 側で検証済みとして扱う。
+ */
+export function needsEmailVerification(user: User): boolean {
+  if (user.emailVerified || !user.email) return false;
+  return user.providerData.some((p) => p.providerId === 'password');
 }
 
 /** Email/Password ログイン */

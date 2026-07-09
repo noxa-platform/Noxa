@@ -54,7 +54,10 @@ service cloud.firestore {
     // ========================================
 
     match /account_users/{uid} {
-      allow read: if true; // 公開プロフィール（displayName, handle, avatar 等）
+      // PII（lineLoginUserId / platformRole / 内部フラグ等）を含むため公開 read は禁止。
+      // 公開プロフィール表示は profile_pages/{handle}（visibility 制御つき）へ一本化済み。
+      // ※クライアントの読取は全箇所 self のみ（2026-07-03 棚卸し）。iOS も同様前提（要確認は LOG に記録）。
+      allow read: if isSelf(uid) || isAdmin();
       allow create: if isSelf(uid);
       // platformRole は server-side のみで変更可
       allow update: if isAdmin() || (isSelf(uid)
@@ -153,15 +156,22 @@ service cloud.firestore {
 
       match /members/{uid} {
         allow read: if isShopMember(shopId);
-        allow write: if isShopOwnerLike(shopId) || isSelf(uid);
+        // 参加は招待 redeem API (Admin SDK) 経由のみ。旧 `isSelf で write 可` は
+        // 「誰でも任意の店へ任意 role で自己登録」できる穴だったため封鎖（2026-07-03）。
+        // 例外: 店舗作成直後のオーナー自己登録（shop.ownerUid 一致）のみ許可。
+        allow create, update: if isShopOwnerLike(shopId)
+          || (isSelf(uid)
+              && get(/databases/$(database)/documents/shop_shops/$(shopId)).data.ownerUid == request.auth.uid);
+        // 除名は owner/manager、自主退店は本人
+        allow delete: if isShopOwnerLike(shopId) || isSelf(uid);
       }
 
       match /sales/{saleId} {
         allow read: if isShopMember(shopId);
-        allow create: if isShopMemberWithSalesEdit(shopId)
-          || (isShopMember(shopId) && request.resource.data.castUid == request.auth.uid);
-        allow update: if isShopMemberWithSalesEdit(shopId)
-          || (isShopMember(shopId) && resource.data.castUid == request.auth.uid);
+        // POS 会計は店舗内の共同作業＝メンバー全ロールが登録/修正できる。
+        // 旧「castUid==自分」条件は、一般キャストが他人担当伝票の会計をすると
+        // permission-denied になり現場が詰まるため役割ベースへ変更（2026-07-03）。
+        allow create, update: if isShopMember(shopId);
         allow delete: if isShopOwnerLike(shopId);
       }
 
@@ -231,11 +241,12 @@ service cloud.firestore {
       }
 
       match /invites/{code} {
-        allow read: if isAuth();
+        // 招待コードの閲覧/管理は owner/manager のみ（旧 `read: isAuth` は
+        // 任意ユーザーがコード一覧を列挙→無断参加できる穴だった）。
+        // 受諾側の検証・使用済みマークは redeem API (Admin SDK) が行う。
+        allow read: if isShopOwnerLike(shopId);
         allow create: if isShopOwnerLike(shopId);
-        allow update: if isAuth()
-          && (resource.data.createdBy == request.auth.uid
-              || !resource.data.keys().hasAny(['usedBy']));
+        allow update: if isShopOwnerLike(shopId);
         allow delete: if isShopOwnerLike(shopId);
       }
 
@@ -453,7 +464,9 @@ service cloud.firestore {
 
     match /notification_inbox/{docId} {
       allow read: if isAuth() && resource.data.userId == request.auth.uid;
-      allow create: if isAuth();
+      // 他人の受信箱への偽通知（スパム/フィッシング）防止: 本人宛のみ作成可。
+      // システム発の通知は API/CF (Admin SDK) 経由＝ルール対象外。
+      allow create: if isAuth() && request.resource.data.userId == request.auth.uid;
       allow update: if isAuth() && resource.data.userId == request.auth.uid;
       allow delete: if isAuth() && resource.data.userId == request.auth.uid;
     }
@@ -544,6 +557,26 @@ service cloud.firestore {
       allow update: if isAuth() && (resource.data.ownerUid == request.auth.uid || isShopOwnerLike(resource.data.barId));
       allow delete: if false;
     }
+
+    // bar_analytics（公開バーページの PV カウンタ。docId = barId_date）
+    // 書き込み: 公開ページ訪問者の PV トラッキング（未ログイン含む）。barId 必須＋項目を PV 系に限定
+    //          （ゴミ項目の注入を防止。値の改ざん完全防止は将来サーバ側集計で対応）。
+    // 読み取り: オーナーのダッシュボード（AnalyticsPanel）のみ。
+    match /bar_analytics/{docId} {
+      allow read: if isAuth()
+        && (resource.data.ownerUid == request.auth.uid || isShopOwnerLike(resource.data.barId));
+      allow create: if request.resource.data.barId is string
+        && request.resource.data.keys().hasOnly(
+             ['barId', 'date', 'pageViews', 'uniqueVisitors', 'uniqueUids', 'referrers', 'ownerUid', 'createdAt', 'updatedAt']);
+      allow update: if request.resource.data.barId is string
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(
+             ['pageViews', 'uniqueVisitors', 'uniqueUids', 'referrers', 'updatedAt']);
+      allow delete: if isAdmin();
+    }
+
+    // bar_goals は廃止。月間売上目標は shop_shops.salesGoalsByMonth["YYYY-MM"] に統合（YoruLog と共有）。
+    //   既存 bar_goals データは移行スクリプトで shop_shops へ転記後に削除。client 直アクセスは無し
+    //   （= ルールを置かず既定拒否のまま）。目標の読み書きは shop_shops の update ルールで担保。
 
     // bar_spotjobs (公認バーテン進化形 = 双方向スポット労働)
     match /bar_spotjobs/{docId} {
@@ -739,9 +772,17 @@ service cloud.firestore {
     // 誰でも閲覧可（リンク集は公開）。作成/編集は本人（ownerUid）のみ。
     // claim はトランザクションの create（既存なら失敗）でユニーク性を担保。
     match /profile_pages/{handle} {
-      allow read: if true;
+      // 公開範囲: public/unlisted は誰でも read 可（unlisted は noindex で検索除外＝軽いlink-only）。
+      // private は本人/admin のみ。visibility 無しの既存doc は published==true を public 扱いでフォールバック。
+      allow read: if resource.data.visibility == 'public'
+        || resource.data.visibility == 'unlisted'
+        || (!('visibility' in resource.data) && resource.data.published == true)
+        || (isAuth() && resource.data.ownerUid == request.auth.uid)
+        || isAdmin();
       allow create: if isAuth() && request.resource.data.ownerUid == request.auth.uid;
-      allow update, delete: if isAuth() && resource.data.ownerUid == request.auth.uid;
+      // 本人 or admin（admin は通報対応の takedown 用）
+      allow update, delete: if isAuth()
+        && (resource.data.ownerUid == request.auth.uid || isAdmin());
     }
 
     // ========================================
@@ -758,9 +799,16 @@ service cloud.firestore {
 
     // スレッド(post): 作成は本人 uid・カウンタ 0・本文 1000 字以内。
     // 更新は likeCount/commentCount/lastActivityAt のみ誰でも（認証必須）か、本人による本文編集。
+    // 会員判定: 招待制コミュニティのメンバー（noxa_users に doc がある）or admin
+    function isCommunityMember() {
+      return isAuth()
+        && (exists(/databases/$(database)/documents/noxa_users/$(request.auth.uid)) || isAdmin());
+    }
+
     match /noxa_posts/{postId} {
       allow read: if isAuth();
-      allow create: if isAuth()
+      // 投稿は招待済み会員のみ（API 経由の招待で noxa_users が作られる）
+      allow create: if isCommunityMember()
         && request.resource.data.authorUid == request.auth.uid
         && request.resource.data.likeCount == 0
         && request.resource.data.commentCount == 0
@@ -786,7 +834,8 @@ service cloud.firestore {
     // レス(comment): 作成は本人 uid・本文 1000 字以内。更新は likeCount のみ or 本人。
     match /noxa_comments/{commentId} {
       allow read: if isAuth();
-      allow create: if isAuth()
+      // レスも招待済み会員のみ
+      allow create: if isCommunityMember()
         && request.resource.data.authorUid == request.auth.uid
         && request.resource.data.likeCount == 0
         && request.resource.data.body is string

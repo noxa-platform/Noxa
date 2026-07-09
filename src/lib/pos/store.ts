@@ -30,6 +30,8 @@ import {
 } from './engine';
 import type { FloorTable, Cast } from '@/lib/seating/types';
 import { createEmptyTable } from '@/lib/seating/types';
+import { resolveSaleAttribution } from './attribution';
+import { buildUnpaidEntry } from './unpaid';
 
 const SLIP_NAMES = ['①', '②', '③', '④', '⑤', '⑥', '⑦', '⑧', '⑨', '⑩'];
 function nextSlipName(slips: PosSlip[]): string {
@@ -93,7 +95,7 @@ export type UsePosStore = {
   dispatchSlip: (tableId: string, slipId: string, action: Action) => Promise<void>;
   renameSlip: (tableId: string, slipId: string, name: string) => Promise<void>;
   removeSlip: (tableId: string, slipId: string) => Promise<void>;
-  checkoutSlip: (tableId: string, slipId: string, opts: { amount: number; castName?: string; customerName?: string; guests?: number }) => Promise<void>;
+  checkoutSlip: (tableId: string, slipId: string, opts: { amount: number; castName?: string; customerName?: string; guests?: number; unpaidAmount?: number }) => Promise<void>;
   resultFor: (slip: PosSlip) => CalculationResult;
 };
 
@@ -102,10 +104,15 @@ export function usePosStore(user: User): UsePosStore {
   const shopId = shop.shopId;
 
   const [config, setConfig] = useState<StoreConfig>(() => createDefaultStoreConfig());
-  const [tables, setTables] = useState<FloorTable[]>([]);
+  // 卓は出所（shopId）つきで保持し loading を導出（Day17: set-state-in-effect 返済・seating store と同型）
+  const [tablesSnap, setTablesSnap] = useState<{ shopId: string; list: FloorTable[] } | null>(null);
   const [casts, setCasts] = useState<Cast[]>([]);
   const [customers, setCustomers] = useState<ShopCustomer[]>([]);
-  const [loadingData, setLoadingData] = useState(true);
+  const tables = useMemo(
+    () => (shopId && tablesSnap?.shopId === shopId ? tablesSnap.list : []),
+    [shopId, tablesSnap],
+  );
+  const loadingData = !!shopId && tablesSnap?.shopId !== shopId;
   const configRef = useRef(config);
   // 売上の付け方（店舗設定 config/settings.salesAttribution）。会計時の帰属に使用
   const attributionRef = useRef<'mainCast' | 'operator'>('mainCast');
@@ -147,15 +154,13 @@ export function usePosStore(user: User): UsePosStore {
 
   // 卓（seating_tables）購読
   useEffect(() => {
-    if (!shopId) { setLoadingData(false); return; }
-    setLoadingData(true);
+    if (!shopId) return;
     const unsubT = onSnapshot(collection(db, `shop_shops/${shopId}/seating_tables`), (snap) => {
       const list: FloorTable[] = [];
       snap.forEach((d) => list.push({ ...createEmptyTable(d.id, d.id), ...(d.data() as Partial<FloorTable>), id: d.id } as FloorTable));
       list.sort((a, b) => a.name.localeCompare(b.name, 'ja'));
-      setTables(list);
-      setLoadingData(false);
-    }, () => setLoadingData(false));
+      setTablesSnap({ shopId, list });
+    }, () => setTablesSnap({ shopId, list: [] }));
     const unsubC = onSnapshot(collection(db, `shop_shops/${shopId}/seating_casts`), (snap) => {
       const list: Cast[] = [];
       snap.forEach((d) => {
@@ -175,7 +180,9 @@ export function usePosStore(user: User): UsePosStore {
     return () => { unsubT(); unsubC(); unsubCust(); };
   }, [shopId]);
 
-  configRef.current = config;
+  // render 中の ref 書込は react-hooks/refs 違反（並行レンダーで巻き戻り得る）→ effect で同期。
+  // useRef(config) の初期値があるため、effect 反映前の read も既定 config で安全
+  useEffect(() => { configRef.current = config; }, [config]);
 
   const tableRef = useCallback((id: string) => doc(db, `shop_shops/${shopId}/seating_tables/${id}`), [shopId]);
 
@@ -186,8 +193,14 @@ export function usePosStore(user: User): UsePosStore {
       const tn = configRef.current.tableNames;
       if (Array.isArray(tn) && tn.length) names = tn;
     } catch { /* ignore */ }
-    await Promise.all(names.map((name, i) =>
-      setDoc(doc(db, `shop_shops/${shopId}/seating_tables/tbl_${i + 1}`), { ...createEmptyTable(`tbl_${i + 1}`, name), updatedAt: serverTimestamp() })));
+    // 既存卓は上書きしない（席回し側と同じガード。二度押しで稼働中フロア・伝票を白紙化しない）
+    const existing = await getDocs(collection(db, `shop_shops/${shopId}/seating_tables`));
+    const existingIds = new Set(existing.docs.map((d) => d.id));
+    await Promise.all(names.map((name, i) => {
+      const id = `tbl_${i + 1}`;
+      if (existingIds.has(id)) return Promise.resolve();
+      return setDoc(doc(db, `shop_shops/${shopId}/seating_tables/${id}`), { ...createEmptyTable(id, name), updatedAt: serverTimestamp() });
+    }));
   }, [shopId, configRef]);
 
   // Firestore は undefined を拒否するため、書込前に undefined を除去（JSON 往復）
@@ -279,13 +292,46 @@ export function usePosStore(user: User): UsePosStore {
       const lineItems = (Array.isArray(slip.state.orders) ? slip.state.orders : [])
         .filter((o) => (o?.count ?? 0) > 0)
         .map((o) => ({ name: o.name, baseName: o.baseName, unitPrice: o.price, count: o.count, amount: o.price * o.count }));
+      // 帰属解決（純ロジック）: castUid 未保存の伝票でも castId/castName から名簿の uid を
+      // 解決し、担当キャスト本人の個人売上へ正しく帰属させる（旧実装は操作者へ誤帰属）。
+      // 本指名/場内/フリーの指名区分・同伴も会計時点で確定して保存する。
+      const attr = resolveSaleAttribution({
+        mode: attributionRef.current,
+        operatorUid: user.uid,
+        slip,
+        casts,
+        overrideCastName: opts.castName,
+        mainHostIds: Array.isArray(data.mainHostIds) ? (data.mainHostIds as string[]) : [],
+      });
       const saleRef = doc(collection(db, `shop_shops/${shopId}/sales`));
+      // ツケ（未収）会計: 同一トランザクションで unpaid 台帳へ起票（二重管理の解消）。
+      // 書込権限は rules の owner/manager/accounting のまま。権限の無いロールには UI が入力を出さない
+      const unpaidEntry = opts.unpaidAmount && opts.unpaidAmount > 0
+        ? buildUnpaidEntry({
+            customerName: opts.customerName ?? slip.customerName,
+            castName: attr.castName,
+            tableName: (data.name as string) ?? '',
+            slipName: slip.name,
+            totalAmount: opts.amount,
+            unpaidAmount: opts.unpaidAmount,
+            dayKey: dayKey(),
+            saleId: saleRef.id,
+            operatorUid: user.uid,
+          })
+        : null;
+      if (unpaidEntry) {
+        tx.set(doc(collection(db, `shop_shops/${shopId}/unpaid`)), { ...unpaidEntry, createdAt: serverTimestamp() });
+      }
       tx.set(saleRef, {
+        ...(unpaidEntry ? { unpaidAmount: unpaidEntry.amount } : {}),
         source: 'pos', entryMode: 'breakdown', amount: opts.amount, tableId, tableName: (data.name as string) ?? '', slipName: slip.name,
         customerType: slip.state.customerType, customerName: opts.customerName ?? slip.customerName ?? null,
         customerId: slip.customerId ?? null,
-        castName: opts.castName ?? slip.castName ?? null,
-        castUid: attributionRef.current === 'operator' ? user.uid : (slip.castUid ?? user.uid),
+        castName: attr.castName,
+        castUid: attr.castUid,
+        castId: attr.castId,
+        nomination: attr.nomination,
+        dohan: attr.dohan,
         operatorUid: user.uid,
         guests: opts.guests ?? null,
         lineItems,
@@ -300,12 +346,15 @@ export function usePosStore(user: User): UsePosStore {
       const nextSlips = JSON.parse(JSON.stringify(slips.filter((s) => s.id !== slipId)));
       tx.set(ref, { slips: nextSlips, updatedAt: serverTimestamp() }, { merge: true });
     });
-  }, [shopId, tableRef, user.uid]);
+  }, [shopId, tableRef, user.uid, casts]);
 
+  // render 中に呼ばれるため ref ではなく config を直接参照する。
+  // （configRef は effect 同期＝設定変更後の最初の re-render では1世代古く、
+  //   ref 更新は再レンダーを起こさないため次の tick まで古い金額が表示されてしまう）
   const resultFor = useCallback<UsePosStore['resultFor']>((slip) => {
     const live: CalculatorState = slip.state.isDebugMode ? slip.state : { ...slip.state, currentTime: nowHHMM() };
-    return calculateResult(live, configRef.current);
-  }, [configRef]);
+    return calculateResult(live, config);
+  }, [config]);
 
   const needsSeed = !loadingData && !!shopId && tables.length === 0;
 

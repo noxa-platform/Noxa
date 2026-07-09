@@ -35,15 +35,36 @@ noxa-delta.vercel.app/account/delete    ← 退会
 
 ## Firebase
 
-`minami-bar-guide` プロジェクトを yorulog / nomishugy と共有。
+**`noxa-platform`** プロジェクトを yorulog / nomishugy と共有（旧 `minami-bar-guide` は legacy エイリアスのみ・未使用）。
 - account_users / account_subscriptions / account_iap_transactions 等の共通 doc を直接読み書き
-- Cloud Functions は yorulog/functions に集約（`exchangeAuthToken` / `deleteNoxaAccount` 等）
+- **firestore.rules / Cloud Functions の正本はこのリポ**（`firestore.rules`・`functions/`）。
+  デプロイ: `firebase deploy --only firestore:rules` / `firebase deploy --only functions:<name>`（一括デプロイ禁止・名指しのみ）
+- ルールテスト: `npm run test:rules`（要 Java エミュレータ。ローカルに無ければ CI が実行）
 
 ## 開発
 
 ```bash
 npm install
+cp .env.example .env.local   # 値を埋める（NEXT_PUBLIC_* 以外は秘密。コミット禁止）
 NEXT_PUBLIC_USE_EMULATOR=true npm run dev  # port 3100
+```
+
+### 環境変数
+
+必要な環境変数は `.env.example` に用途コメント付きで全 27 件を列挙。`.env.local` にコピーして設定する。
+
+- `NEXT_PUBLIC_*` はクライアントへ露出（秘密を入れない）。それ以外はサーバ専用。
+- 秘密系（`FIREBASE_SERVICE_ACCOUNT_KEY` / `*_SECRET` / `*_SERVICE_ACCOUNT_KEY` / `OPENROUTER_API_KEY` 等）はコミットしない。
+- `IAP_ALLOW_UNVERIFIED` は本番で必ず空/false（未検証 grant 防止）。
+- 一覧の同期確認: `grep -rhoE 'process\.env\.[A-Z0-9_]+' src | sed 's/process\.env\.//' | sort -u` と `.env.example` のキー集合が一致すること。
+
+### Lint / テスト
+
+```bash
+npm run lint          # ESLint 9 flat config（eslint.config.mjs）。src を検査
+npm run test          # vitest（純関数の単体テスト）
+npm run test:rules    # Firestore ルールテスト（要 Java エミュレータ。WSL 未導入時は CI で実行）
+npm run build         # 本番ビルド（WSL で lightningcss 欠落時は補完が必要）
 ```
 
 ## デプロイ

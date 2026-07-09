@@ -13,7 +13,7 @@ import {
 } from 'firebase/firestore';
 import type { User } from 'firebase/auth';
 import { db } from '@/lib/firebase/config';
-import { useShopId } from '@/lib/useShopId';
+import { useShopRole, hasShopRole } from '@/lib/useShopRole';
 
 /**
  * リスク客共有 — Noxa OS モジュール（機微・オーナー専用）
@@ -95,10 +95,10 @@ function toEntry(id: string, data: DocumentData): RiskEntry {
 const today = () => new Date().toISOString().slice(0, 10);
 
 export function RiskClient({ user }: { user: User }) {
-  const shop = useShopId(user);
+  const shop = useShopRole(user);
   const [filter, setFilter] = useState<FilterKey>('all');
-  const [entries, setEntries] = useState<RiskEntry[]>([]);
-  const [loading, setLoading] = useState(true);
+  // 出所（path）つきスナップショットから entries/loading を導出（set-state-in-effect 返済・Day18）
+  const [entriesSnap, setEntriesSnap] = useState<{ path: string; list: RiskEntry[] } | null>(null);
   const [busy, setBusy] = useState(false);
 
   // 追加フォーム
@@ -115,31 +115,26 @@ export function RiskClient({ user }: { user: User }) {
   const [eDetail, setEDetail] = useState('');
   const [eDate, setEDate] = useState('');
 
-  const canView = shop.canManage; // 機微：オーナーのみ
+  // 機微: owner/manager/accounting（rules の isShopMemberWithSalesEdit と一致）
+  const canView = hasShopRole(shop, ['manager', 'accounting']);
   const path = shop.shopId && canView ? `shop_shops/${shop.shopId}/risk_customers` : null;
+  const entries = useMemo(() => (path && entriesSnap?.path === path ? entriesSnap.list : []), [entriesSnap, path]);
+  const loading = shop.loading || (!!path && entriesSnap?.path !== path);
 
   useEffect(() => {
-    if (shop.loading) return;
-    if (!path) {
-      setEntries([]);
-      setLoading(false);
-      return;
-    }
-    setLoading(true);
+    if (!path) return;
     const unsub = onSnapshot(
       collection(db, path),
       (snap) => {
         const out: RiskEntry[] = [];
         snap.forEach((d) => out.push(toEntry(d.id, d.data())));
         out.sort((a, b) => (b.date || '').localeCompare(a.date || ''));
-        setEntries(out);
-        setLoading(false);
+        setEntriesSnap({ path, list: out });
       },
-      () => setLoading(false),
+      () => setEntriesSnap({ path, list: [] }), // エラーでも出所を確定し loading を解く
     );
     return () => unsub();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [shop.loading, path]);
+  }, [path]);
 
   const filtered = useMemo(
     () => (filter === 'all' ? entries : entries.filter((r) => r.category === filter)),
@@ -668,7 +663,10 @@ export function RiskClient({ user }: { user: User }) {
                               </button>
                               <button
                                 type="button"
-                                onClick={() => remove(entry.id)}
+                                onClick={() => {
+                                  // 出禁客等の共有記録＝誤タップ消失は安全事故に直結（確認必須）
+                                  if (window.confirm(`「${entry.label}」のリスク記録を削除しますか？（店全体の共有情報から消えます）`)) remove(entry.id);
+                                }}
                                 disabled={busy}
                                 style={{
                                   background: 'none',

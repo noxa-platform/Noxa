@@ -5,6 +5,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { collection, onSnapshot, addDoc, doc, updateDoc, deleteDoc, serverTimestamp, Timestamp, type DocumentData } from 'firebase/firestore';
 import { db } from '@/lib/firebase/config';
 import { useShopId } from '@/lib/useShopId';
+import { useShopRole, hasShopRole } from '@/lib/useShopRole';
 import { rankToStars, starsToRank } from '@/lib/customerRank';
 import type { User } from 'firebase/auth';
 
@@ -59,21 +60,53 @@ type Sort = 'sales' | 'recent' | 'visits';
 export function CustomersClient({ user }: { user: User }) {
   const shop = useShopId(user);
   const colPath = shop.shopId ? `shop_shops/${shop.shopId}/customers` : `personal_customers/${user.uid}/items`;
-  const [custs, setCusts] = useState<Cust[]>([]);
-  const [loading, setLoading] = useState(true);
+  // 出所（colPath）つきスナップショットから custs/loading を導出（set-state-in-effect 返済・Day18）
+  const [custsSnap, setCustsSnap] = useState<{ path: string; list: Cust[] } | null>(null);
+  const custs = useMemo(() => (custsSnap?.path === colPath ? custsSnap.list : []), [custsSnap, colPath]);
+  const loading = shop.loading || custsSnap?.path !== colPath;
   const [sort, setSort] = useState<Sort>('sales');
   const [q, setQ] = useState('');
   const [starFilter, setStarFilter] = useState<number>(0); // 0=全部
   const [adding, setAdding] = useState(false);
   const [editId, setEditId] = useState<string | null>(null);
 
+  // Day9: 担当割当・キャスト別成績（owner/manager のみ。API 側も同権限を検証）
+  const roleCtx = useShopRole(user);
+  const canTeam = !!shop.shopId && hasShopRole(roleCtx, ['manager']);
+  const [tab, setTab] = useState<'list' | 'team'>('list');
+  const [members, setMembers] = useState<{ uid: string; label: string }[]>([]);
+  useEffect(() => {
+    if (!shop.shopId || !canTeam) return;
+    // 割当先候補 = 人間メンバー（端末を除く）。owner が接客する運用も許容（API と同基準）
+    const unsub = onSnapshot(collection(db, `shop_shops/${shop.shopId}/members`), (snap) => {
+      const list: { uid: string; label: string }[] = [];
+      snap.forEach((d) => {
+        const m = d.data() as { role?: string; castDisplayName?: string; kind?: string };
+        if (m.kind === 'device') return;
+        list.push({ uid: d.id, label: `${m.castDisplayName || d.id.slice(0, 8)}（${m.role ?? '?'}）` });
+      });
+      setMembers(list);
+    }, () => setMembers([]));
+    return () => unsub();
+  }, [shop.shopId, canTeam]);
+
+  const assignCustomer = async (customerId: string, castUid: string) => {
+    const token = await user.getIdToken();
+    const res = await fetch('/api/team/assign-customer', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ shopId: shop.shopId, customerId, castUid }),
+    });
+    const data = (await res.json().catch(() => ({}))) as { error?: string };
+    if (!res.ok) throw new Error(data.error ?? `担当の割り当てに失敗しました（${res.status}）`);
+  };
+
   useEffect(() => {
     if (shop.loading) return;
-    setLoading(true);
     const unsub = onSnapshot(collection(db, colPath), (snap) => {
       const list: Cust[] = []; snap.forEach((d) => list.push(mapCust(d.id, d.data())));
-      setCusts(list); setLoading(false);
-    }, () => setLoading(false));
+      setCustsSnap({ path: colPath, list });
+    }, () => setCustsSnap({ path: colPath, list: [] })); // エラーでも出所を確定し loading を解く
     return () => unsub();
   }, [colPath, shop.loading]);
 
@@ -104,6 +137,18 @@ export function CustomersClient({ user }: { user: User }) {
         <button type="button" onClick={() => setAdding(true)} className="noxa-btn noxa-btn-primary">＋ 顧客を追加</button>
       </div>
 
+      {/* 一覧 / キャスト別成績 タブ（owner/manager のみ） */}
+      {canTeam && (
+        <div role="tablist" style={{ display: 'flex', gap: 6, marginBottom: 14 }}>
+          <button type="button" role="tab" aria-selected={tab === 'list'} onClick={() => setTab('list')} style={chip(tab === 'list')}>顧客一覧</button>
+          <button type="button" role="tab" aria-selected={tab === 'team'} onClick={() => setTab('team')} style={chip(tab === 'team')}>キャスト別成績</button>
+        </div>
+      )}
+
+      {tab === 'team' && canTeam && shop.shopId ? (
+        <TeamStatsPanel shopId={shop.shopId} user={user} />
+      ) : (
+      <>
       {/* 検索＋並び＋星フィルタ */}
       <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 12 }}>
         <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="名前で検索" className="noxa-input" style={{ flex: '1 1 200px' }} />
@@ -154,6 +199,8 @@ export function CustomersClient({ user }: { user: User }) {
           onClose={() => { setAdding(false); setEditId(null); }}
           onSave={async (name, stars) => { if (editing) await saveCustomer(editing.id, name, stars); else await addCustomer(name, stars); setAdding(false); setEditId(null); }}
           onDelete={editing ? async () => { if (window.confirm(`${editing.name} を削除しますか？`)) { await removeCustomer(editing.id); setEditId(null); } } : undefined}
+          assignTargets={canTeam && editing ? members : undefined}
+          onAssign={canTeam && editing ? async (castUid) => { await assignCustomer(editing.id, castUid); setEditId(null); } : undefined}
         />
       )}
 
@@ -161,16 +208,125 @@ export function CustomersClient({ user }: { user: User }) {
         ※ {place}の台帳（noxa-platform 共有）。評価は★（SS〜C）。カードをタップで編集。
         {!shop.shopId && <> 店舗で使うには上部の <Link href="/seating" style={{ color: 'var(--noxa-accent-primary-ink)' }}>店舗</Link> に切替。</>}
       </p>
+      </>
+      )}
     </div>
   );
 }
 
-function CustomerDialog({ initial, title, onClose, onSave, onDelete }: {
+// ─────────────────────── キャスト別成績（owner/manager・Admin API 経由）
+
+type MemberStat = { uid: string; name: string; role: string; customerCount: number; monthSales: number; monthGroupCount: number };
+type CastCustomer = { id: string; name: string; rank: string | null; lastContactAt: string | null; totalSales: number };
+
+function TeamStatsPanel({ shopId, user }: { shopId: string; user: User }) {
+  const [ym, setYm] = useState(() => { const d = new Date(); return { y: d.getFullYear(), m: d.getMonth() + 1 }; });
+  const [rows, setRows] = useState<MemberStat[] | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [sel, setSel] = useState<string | null>(null); // 展開中のキャスト uid
+  const [selCustomers, setSelCustomers] = useState<CastCustomer[] | null>(null);
+  const [selBusy, setSelBusy] = useState(false);
+
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      setBusy(true); setErr(null);
+      try {
+        const token = await user.getIdToken();
+        const res = await fetch('/api/team/member-stats', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+          body: JSON.stringify({ shopId, year: ym.y, month: ym.m }),
+        });
+        const data = (await res.json().catch(() => ({}))) as { members?: MemberStat[]; error?: string };
+        if (!alive) return;
+        if (!res.ok) { setErr(data.error ?? `成績の取得に失敗しました（${res.status}）`); setRows([]); }
+        else setRows(Array.isArray(data.members) ? data.members : []);
+      } catch (e) {
+        if (alive) { setErr(String((e as Error)?.message ?? e)); setRows([]); }
+      } finally { if (alive) setBusy(false); }
+    })();
+    return () => { alive = false; };
+  }, [shopId, ym.y, ym.m, user]);
+
+  const toggleCast = async (uid: string) => {
+    if (sel === uid) { setSel(null); setSelCustomers(null); return; }
+    setSel(uid); setSelCustomers(null); setSelBusy(true);
+    try {
+      const token = await user.getIdToken();
+      const res = await fetch('/api/team/cast-customers', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ shopId, castUid: uid }),
+      });
+      const data = (await res.json().catch(() => ({}))) as { customers?: CastCustomer[] };
+      setSelCustomers(res.ok && Array.isArray(data.customers) ? data.customers : []);
+    } catch { setSelCustomers([]); }
+    finally { setSelBusy(false); }
+  };
+
+  const move = (dir: -1 | 1) => setYm((c) => { const d = new Date(c.y, c.m - 1 + dir, 1); return { y: d.getFullYear(), m: d.getMonth() + 1 }; });
+
+  return (
+    <section aria-label="キャスト別成績" style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+        <button type="button" onClick={() => move(-1)} style={chip(false)}>‹ 前月</button>
+        <span style={{ fontFamily: 'var(--noxa-font-display-en)', fontSize: 18, fontWeight: 600 }}>{ym.y}.{String(ym.m).padStart(2, '0')}</span>
+        <button type="button" onClick={() => move(1)} style={chip(false)}>翌月 ›</button>
+        {busy && <span style={{ fontSize: 12, color: 'var(--noxa-text-faint)' }}>集計中…</span>}
+      </div>
+      {err && <p role="alert" style={{ margin: 0, fontSize: 12, color: 'var(--noxa-status-error)' }}>{err}</p>}
+      {rows && rows.length === 0 && !busy && !err && (
+        <p style={{ margin: 0, fontSize: 13, color: 'var(--noxa-text-muted)' }}>キャスト（cast ロールのメンバー）がいません。店舗設定の「メンバーと招待」から招待できます。</p>
+      )}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+        {(rows ?? []).map((m) => (
+          <div key={m.uid} style={{ borderRadius: 12, border: '1px solid var(--noxa-border)', background: 'var(--noxa-surface-card)' }}>
+            <button type="button" onClick={() => toggleCast(m.uid)}
+              style={{ appearance: 'none', cursor: 'pointer', width: '100%', display: 'flex', alignItems: 'center', gap: 12, padding: '12px 14px', background: 'none', border: 'none', color: 'var(--noxa-text-primary)', textAlign: 'left' }}>
+              <span style={{ fontSize: 14, fontWeight: 600, flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{m.name}
+                <span style={{ fontFamily: mono, fontSize: 10, color: 'var(--noxa-text-faint)', marginLeft: 6 }}>{m.role}</span>
+              </span>
+              <Stat label="担当顧客" value={`${m.customerCount}`} />
+              <Stat label="月間組数" value={`${m.monthGroupCount}`} />
+              <Stat label="月間売上" value={yen(m.monthSales)} accent />
+              <span aria-hidden style={{ color: 'var(--noxa-text-faint)' }}>{sel === m.uid ? '▲' : '▼'}</span>
+            </button>
+            {sel === m.uid && (
+              <div style={{ borderTop: '1px solid var(--noxa-divider)', padding: '10px 14px', display: 'flex', flexDirection: 'column', gap: 6 }}>
+                {selBusy ? <span style={{ fontSize: 12, color: 'var(--noxa-text-faint)' }}>読み込み中…</span>
+                  : (selCustomers ?? []).length === 0 ? <span style={{ fontSize: 12, color: 'var(--noxa-text-faint)' }}>担当顧客はまだいません。</span>
+                  : (selCustomers ?? []).slice(0, 30).map((c) => (
+                    <div key={c.id} style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: 13 }}>
+                      <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c.name}</span>
+                      <Stars rank={c.rank} size={12} />
+                      <span style={{ fontFamily: mono, fontSize: 11, color: 'var(--noxa-text-faint)', minWidth: 46 }}>{c.lastContactAt ? c.lastContactAt.slice(5, 10).replace('-', '/') : '—'}</span>
+                      <span style={{ fontFamily: mono, fontSize: 12, fontVariantNumeric: 'tabular-nums', minWidth: 84, textAlign: 'right' }}>{yen(c.totalSales)}</span>
+                    </div>
+                  ))}
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+      <p style={{ margin: 0, fontSize: 11, color: 'var(--noxa-text-faint)', lineHeight: 1.6 }}>
+        ※ 集計は各キャストの個人顧客台帳＋顧客なし日売（POS会計の自動転記を含む）。顧客の担当割当は「顧客一覧」タブのカード→「担当キャストへ割当」。
+      </p>
+    </section>
+  );
+}
+
+function CustomerDialog({ initial, title, onClose, onSave, onDelete, assignTargets, onAssign }: {
   initial: { name: string; stars: number }; title: string;
   onClose: () => void; onSave: (name: string, stars: number) => Promise<void>; onDelete?: () => Promise<void>;
+  /** 担当キャストへの割当（owner/manager・店舗の未担当顧客のみ） */
+  assignTargets?: { uid: string; label: string }[];
+  onAssign?: (castUid: string) => Promise<void>;
 }) {
   const [name, setName] = useState(initial.name);
   const [stars, setStars] = useState(initial.stars);
+  const [assignUid, setAssignUid] = useState('');
   const [busy, setBusy] = useState(false);
   return (
     <div role="dialog" aria-label={title} onClick={onClose} style={{ position: 'fixed', inset: 0, zIndex: 60, background: 'rgba(0,0,0,0.55)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }}>
@@ -183,6 +339,26 @@ function CustomerDialog({ initial, title, onClose, onSave, onDelete }: {
           <button type="button" disabled={!name.trim() || busy} onClick={async () => { setBusy(true); try { await onSave(name, stars); } finally { setBusy(false); } }} className="noxa-btn noxa-btn-primary" style={{ flex: 1 }}>{busy ? '保存中…' : '保存'}</button>
           <button type="button" onClick={onClose} className="noxa-btn noxa-btn-secondary" style={{ width: 90 }}>閉じる</button>
         </div>
+        {/* 担当キャストへ割当（顧客台帳ごとキャストの個人台帳へ移動＝不可逆） */}
+        {onAssign && (assignTargets?.length ?? 0) > 0 && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6, borderTop: '1px solid var(--noxa-divider)', paddingTop: 12 }}>
+            <span className="noxa-label" style={{ margin: 0 }}>担当キャストへ割当</span>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <select value={assignUid} onChange={(e) => setAssignUid(e.target.value)} className="noxa-input" style={{ flex: 1 }}>
+                <option value="">— キャストを選択 —</option>
+                {assignTargets!.map((m) => <option key={m.uid} value={m.uid}>{m.label}</option>)}
+              </select>
+              <button type="button" disabled={!assignUid || busy} className="noxa-btn noxa-btn-secondary" style={{ width: 110, opacity: !assignUid || busy ? 0.6 : 1 }}
+                onClick={async () => {
+                  if (!assignUid) return;
+                  if (!window.confirm(`${name || 'この顧客'} を担当キャストの台帳へ移動します（この一覧からは消えます）。よろしいですか？`)) return;
+                  setBusy(true);
+                  try { await onAssign(assignUid); } catch (e) { window.alert(String((e as Error)?.message ?? e)); } finally { setBusy(false); }
+                }}>割り当てる</button>
+            </div>
+            <span style={{ fontSize: 10, color: 'var(--noxa-text-faint)', lineHeight: 1.6 }}>来店履歴・ギフトごとキャストの個人台帳へ移動し、以後の成績は「キャスト別成績」タブに反映されます。</span>
+          </div>
+        )}
         {onDelete && <button type="button" onClick={onDelete} style={{ background: 'none', border: 'none', color: 'var(--noxa-status-error)', cursor: 'pointer', fontSize: 13 }}>この顧客を削除</button>}
       </div>
     </div>

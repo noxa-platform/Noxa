@@ -3,13 +3,20 @@
 import Link from 'next/link';
 import { useEffect, useMemo, useState } from 'react';
 import {
-  addDoc, collection, deleteDoc, doc, onSnapshot, serverTimestamp, updateDoc,
+  addDoc, collection, deleteDoc, doc, getDoc, onSnapshot, runTransaction, serverTimestamp, updateDoc,
   type DocumentData,
 } from 'firebase/firestore';
 import type { User } from 'firebase/auth';
 import { db } from '@/lib/firebase/config';
 import { useShopId } from '@/lib/useShopId';
 import { useShopConfig } from '@/lib/shopConfig';
+import { createEmptyTable, type FloorTable } from '@/lib/seating/types';
+import { canStartSet, nextDailySequence } from '@/lib/seating/logic';
+import { buildReservationCheckin, type CheckinCast } from '@/lib/seating/checkin';
+import { createInitialState } from '@/lib/pos/engine';
+import { createDefaultStoreConfig } from '@/lib/pos/defaultConfig';
+import type { StoreConfig } from '@/lib/pos/types';
+import { businessDayKey } from '@/lib/datetime';
 
 /**
  * 予約モジュール（実データ）
@@ -99,9 +106,9 @@ export function ReservationClient({ user }: { user: User }) {
   const shop = useShopId(user);
   const { t } = useShopConfig(user);
   const [activeTab, setActiveTab] = useState<'timeline' | 'vip'>('timeline');
-  const [reservations, setReservations] = useState<Reservation[]>([]);
+  // 出所（resPath）つきスナップショットから reservations/loading を導出（set-state-in-effect 返済・Day18）
+  const [resSnap, setResSnap] = useState<{ path: string; list: Reservation[] } | null>(null);
   const [vips, setVips] = useState<VipGuest[]>([]);
-  const [loading, setLoading] = useState(true);
   const [dateFilter, setDateFilter] = useState<string>(todayStr());
   const [showForm, setShowForm] = useState(false);
   const [editId, setEditId] = useState<string | null>(null);
@@ -111,19 +118,46 @@ export function ReservationClient({ user }: { user: User }) {
   const resPath = shop.shopId ? `shop_shops/${shop.shopId}/reservations` : null;
   const custPath = shop.shopId ? `shop_shops/${shop.shopId}/customers` : null;
 
-  // 予約のリアルタイム購読
+  // 席回しの実データ（担当/卓セレクトと「来店済→開卓」連携用）
+  const [seatCasts, setSeatCasts] = useState<CheckinCast[]>([]);
+  const [seatTables, setSeatTables] = useState<{ id: string; name: string }[]>([]);
+  const [posCfg, setPosCfg] = useState<StoreConfig>(() => createDefaultStoreConfig('active'));
   useEffect(() => {
-    if (shop.loading) return;
-    if (!resPath) { setLoading(false); return; }
-    setLoading(true);
+    if (!shop.shopId) return;
+    const sid = shop.shopId;
+    const unsubs = [
+      onSnapshot(collection(db, `shop_shops/${sid}/seating_casts`), (snap) => {
+        const list: CheckinCast[] = [];
+        snap.forEach((d) => { const v = d.data() as DocumentData; list.push({ id: d.id, name: (v.name as string) ?? d.id, uid: (v.uid as string) ?? null }); });
+        list.sort((a, b) => a.name.localeCompare(b.name, 'ja'));
+        setSeatCasts(list);
+      }, () => { /* 読めないロールはセレクト非表示のまま */ }),
+      onSnapshot(collection(db, `shop_shops/${sid}/seating_tables`), (snap) => {
+        const list: { id: string; name: string }[] = [];
+        snap.forEach((d) => { const v = d.data() as DocumentData; list.push({ id: d.id, name: (v.name as string) ?? d.id }); });
+        list.sort((a, b) => a.name.localeCompare(b.name, 'ja'));
+        setSeatTables(list);
+      }, () => { /* 同上 */ }),
+    ];
+    getDoc(doc(db, `shop_shops/${sid}/pos_config/active`))
+      .then((s) => { if (s.exists()) setPosCfg({ ...createDefaultStoreConfig('active'), ...(s.data() as Partial<StoreConfig>) } as StoreConfig); })
+      .catch(() => { /* 既定料金のまま */ });
+    return () => unsubs.forEach((u) => u());
+  }, [shop.shopId]);
+
+  // 予約のリアルタイム購読（出所つきスナップショット。loading/一覧は下の導出で決まる）
+  useEffect(() => {
+    if (!resPath) return;
     const unsub = onSnapshot(collection(db, resPath), (snap) => {
       const out: Reservation[] = [];
       snap.forEach((d) => out.push(mapReservation(d.id, d.data())));
-      setReservations(out);
-      setLoading(false);
-    }, () => setLoading(false));
+      setResSnap({ path: resPath, list: out });
+    }, () => setResSnap({ path: resPath, list: [] })); // エラーでも出所を確定し loading を解く
     return () => unsub();
-  }, [shop.loading, resPath]);
+  }, [resPath]);
+
+  const reservations = useMemo(() => (resPath && resSnap?.path === resPath ? resSnap.list : []), [resSnap, resPath]);
+  const loading = shop.loading || (!!resPath && resSnap?.path !== resPath);
 
   // 顧客（VIP/常連）のリアルタイム購読
   useEffect(() => {
@@ -207,6 +241,50 @@ export function ReservationClient({ user }: { user: User }) {
   const changeStatus = async (id: string, status: ReservationStatus) => {
     if (!resPath) return;
     await updateDoc(doc(db, `${resPath}/${id}`), { status });
+  };
+
+  // 来店済み: 予約の卓が空いていれば同一トランザクションで開卓＋POS初期伝票を作成
+  // （予約→来店→会計の一気通貫。卓未指定/不一致/使用中はステータスのみ更新して知らせる）
+  const checkIn = async (r: Reservation) => {
+    if (!resPath || !shop.shopId || busy) return;
+    const table = seatTables.find((t) => t.name === r.seat);
+    if (!table) {
+      await changeStatus(r.id, '来店済');
+      if (r.seat) window.alert(`卓「${r.seat}」が席回しに見つからないため、開卓せずステータスのみ更新しました。`);
+      return;
+    }
+    const sid = shop.shopId;
+    setBusy(true);
+    try {
+      await runTransaction(db, async (tx) => {
+        const now = Date.now(); // tx リトライ時は取り直す（render 外）
+        const todayKey = businessDayKey();
+        const tref = doc(db, `shop_shops/${sid}/seating_tables/${table.id}`);
+        const metaR = doc(db, `shop_shops/${sid}/seating_meta/state`);
+        const [tSnap, mSnap] = [await tx.get(tref), await tx.get(metaR)];
+        if (!tSnap.exists()) throw new Error('卓が見つかりません');
+        const t = { ...createEmptyTable(table.id, table.name), ...(tSnap.data() as Partial<FloorTable>), id: table.id } as FloorTable;
+        if (!canStartSet(t.status)) throw new Error(`USED:${t.name}`);
+        const meta = mSnap.exists() ? (mSnap.data() as { dailySequence?: number; dayKey?: string }) : undefined;
+        const seq = nextDailySequence(meta, todayKey);
+        const cast = r.cast ? (seatCasts.find((c) => c.name === r.cast) ?? null) : null;
+        const payload = buildReservationCheckin({
+          table: t, seq, now, guests: r.guests || 1, customerName: r.customerName === '（無名）' ? '' : r.customerName,
+          cast, slipId: `s_res_${now}`, slipState: createInitialState(posCfg),
+        });
+        tx.set(metaR, { dailySequence: seq, dayKey: todayKey, updatedAt: serverTimestamp() }, { merge: true });
+        tx.update(tref, { ...payload, updatedAt: serverTimestamp() });
+        tx.update(doc(db, `${resPath}/${r.id}`), { status: '来店済', checkedInAt: serverTimestamp(), openedTableId: table.id });
+      });
+    } catch (e) {
+      const msg = String((e as Error)?.message ?? e);
+      if (msg.startsWith('USED:')) {
+        await changeStatus(r.id, '来店済');
+        window.alert(`卓「${r.seat}」は使用中のため開卓せず、ステータスのみ来店済にしました。`);
+      } else {
+        window.alert('来店処理に失敗しました: ' + msg);
+      }
+    } finally { setBusy(false); }
   };
   const remove = async (id: string) => {
     if (!resPath) return;
@@ -427,8 +505,11 @@ export function ReservationClient({ user }: { user: User }) {
                       <FormInput label="日付" value={form.date} onChange={(v) => setF('date', v)} type="date" />
                       <FormInput label="時刻" value={form.time} onChange={(v) => setF('time', v)} type="time" />
                       <FormInput label="人数" value={form.guests} onChange={(v) => setF('guests', v)} type="number" />
-                      <FormInput label="担当" value={form.cast} onChange={(v) => setF('cast', v)} placeholder={`${t('nomination')}${t('cast')}`} />
-                      <FormInput label="席" value={form.seat} onChange={(v) => setF('seat', v)} placeholder="卓番号" />
+                      {/* 担当/席は席回しの実データから選択（来店済→開卓連携のため名前一致が必要） */}
+                      <FormSelect label="担当" value={form.cast} onChange={(v) => setF('cast', v)}
+                        options={seatCasts.map((c) => c.name)} placeholder={`${t('nomination')}なし`} />
+                      <FormSelect label="席" value={form.seat} onChange={(v) => setF('seat', v)}
+                        options={seatTables.map((tb) => tb.name)} placeholder="卓未指定" />
                     </div>
                     <FormInput label="メモ" value={form.memo} onChange={(v) => setF('memo', v)} placeholder="誕生日サプライズ など" />
                     <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
@@ -559,7 +640,9 @@ export function ReservationClient({ user }: { user: User }) {
                             {/* アクション：ステータス遷移 + 編集/削除 */}
                             <div style={{ display: 'flex', gap: 8, flexShrink: 0, flexWrap: 'wrap', alignItems: 'center' }}>
                               {STATUSES.filter((st) => st !== r.status).map((st) => (
-                                <ActionButton key={st} label={`→ ${st}`} onClick={() => changeStatus(r.id, st)} secondary={st !== '来店済'} />
+                                <ActionButton key={st} label={`→ ${st}`}
+                                  onClick={() => (st === '来店済' ? checkIn(r) : changeStatus(r.id, st))}
+                                  secondary={st !== '来店済'} />
                               ))}
                               <ActionButton label="編集" onClick={() => openEdit(r)} secondary />
                               <button type="button" onClick={() => remove(r.id)} title="削除" aria-label="削除"
@@ -716,6 +799,42 @@ export function ReservationClient({ user }: { user: User }) {
 }
 
 // ---- サブコンポーネント ----
+
+/** 実データセレクト（席回しのキャスト/卓）。既存値がリストに無くても保持して表示する */
+function FormSelect({
+  label, value, onChange, options, placeholder, flex,
+}: {
+  label: string;
+  value: string;
+  onChange: (v: string) => void;
+  options: string[];
+  placeholder?: string;
+  flex?: number;
+}) {
+  const extras = value && !options.includes(value) ? [value] : [];
+  return (
+    <label style={{ display: 'flex', flexDirection: 'column', gap: 4, flex: `${flex ?? 1} 1 120px` }}>
+      <span style={{ fontFamily: mono, fontSize: 10, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--noxa-text-faint)' }}>{label}</span>
+      <select
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        style={{
+          minHeight: 40,
+          padding: '8px 12px',
+          borderRadius: 10,
+          background: 'var(--noxa-bg-base)',
+          border: '1px solid var(--noxa-border)',
+          color: value ? 'var(--noxa-text-primary)' : 'var(--noxa-text-faint)',
+          fontSize: 16,
+        }}
+      >
+        <option value="">{placeholder ?? '—'}</option>
+        {extras.map((o) => <option key={`x-${o}`} value={o}>{o}（旧データ）</option>)}
+        {options.map((o) => <option key={o} value={o}>{o}</option>)}
+      </select>
+    </label>
+  );
+}
 
 function FormInput({
   label, value, onChange, type, placeholder, flex,

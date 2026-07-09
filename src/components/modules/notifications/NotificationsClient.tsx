@@ -59,7 +59,7 @@ export function NotificationsClient({ user }: { user: User }) {
     <Shell title="通知センター" eyebrow="ノクサ · おしらせ" crumb="notifications">
       {loading ? <Eyebrow>読み込み中…</Eyebrow> : list.length === 0 ? (
         <Section label="通知">
-          <Empty>通知はまだありません。誕生日リマインド・売上サマリ等がここに届きます。</Empty>
+          <Empty>通知はまだありません。運営からのお知らせや重要な更新がここに届きます。</Empty>
         </Section>
       ) : (
         <Section label={`通知${unread.length > 0 ? `（未読 ${unread.length}）` : ''}`}>

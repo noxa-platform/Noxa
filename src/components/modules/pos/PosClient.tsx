@@ -5,6 +5,7 @@ import { useEffect, useMemo, useState } from 'react';
 import type { User } from 'firebase/auth';
 import { usePosStore, type ShopCustomer } from '@/lib/pos/store';
 import { useShopConfig } from '@/lib/shopConfig';
+import { useShopRole, hasShopRole } from '@/lib/useShopRole';
 import type { CustomerType, OrderItem, BreakdownItem, PosSlip, Action, CalculationResult } from '@/lib/pos/engine';
 import type { FloorTable, Cast } from '@/lib/seating/types';
 
@@ -29,6 +30,9 @@ export function PosClient({ user, focusTableId, embedded }: { user: User; focusT
   const store = usePosStore(user);
   const { config, tables, casts } = store;
   const checkoutLabel = useShopConfig(user).t('checkout');
+  // ツケ（未収）会計は unpaid 台帳の書込権限がある役割のみ（rules の isShopMemberWithSalesEdit と一致）
+  const roleCtx = useShopRole(user);
+  const canUnpaid = hasShopRole(roleCtx, ['manager', 'accounting']);
 
   const [selectedTableId, setSelectedTableId] = useState<string | null>(focusTableId ?? null);
   const [selectedSlipId, setSelectedSlipId] = useState<string | null>(null);
@@ -211,6 +215,7 @@ export function PosClient({ user, focusTableId, embedded }: { user: User; focusT
               casts={(selectedTable?.currentHostIds ?? []).map((cid) => castById.get(cid) ?? '?')}
               slip={selectedSlip}
               result={result}
+              canUnpaid={canUnpaid}
               onDispatch={(a) => store.dispatchSlip(selectedTableId, selectedSlip.id, a)}
               onRename={(name) => store.renameSlip(selectedTableId, selectedSlip.id, name)}
               onRemove={() => { if (window.confirm('この伝票を破棄しますか？（売上に計上されません）')) { store.removeSlip(selectedTableId, selectedSlip.id); setSelectedSlipId(null); } }}
@@ -423,10 +428,10 @@ function SlipControls({ slip, initialSetPriceOptions, onDispatch }: { slip: PosS
 
 // ───────────────────────── 会計パネル
 
-function BillPanel({ tableName, casts, slip, result, onDispatch, onRename, onRemove, onCheckout }: {
-  tableName: string; casts: string[]; slip: PosSlip; result: CalculationResult;
+function BillPanel({ tableName, casts, slip, result, canUnpaid, onDispatch, onRename, onRemove, onCheckout }: {
+  tableName: string; casts: string[]; slip: PosSlip; result: CalculationResult; canUnpaid: boolean;
   onDispatch: (a: Action) => void; onRename: (name: string) => void; onRemove: () => void;
-  onCheckout: (opts: { amount: number; castName?: string; customerName?: string; guests?: number }) => Promise<void>;
+  onCheckout: (opts: { amount: number; castName?: string; customerName?: string; guests?: number; unpaidAmount?: number }) => Promise<void>;
 }) {
   const activeOrders = slip.state.orders.filter((o) => o.count > 0);
   const [checkingOut, setCheckingOut] = useState(false);
@@ -434,8 +439,12 @@ function BillPanel({ tableName, casts, slip, result, onDispatch, onRename, onRem
   const [castName, setCastName] = useState(slip.castName ?? casts[0] ?? '');
   const [customerName, setCustomerName] = useState(slip.customerName ?? '');
   const [guests, setGuests] = useState<number>(1);
+  // ツケ（未収）: ON にすると未収額を入力できる（既定=全額ツケ）
+  const [unpaidOn, setUnpaidOn] = useState(false);
+  const [unpaidAmount, setUnpaidAmount] = useState<number>(0);
   const [busy, setBusy] = useState(false);
   useEffect(() => { setAmount(result.currentTotal); }, [result.currentTotal]);
+  const unpaidInvalid = unpaidOn && (unpaidAmount <= 0 || unpaidAmount > amount);
 
   return (
     <div style={{ background: 'var(--noxa-surface-card)', border: '1px solid var(--noxa-border)', borderRadius: 16, padding: 16, display: 'flex', flexDirection: 'column', gap: 12 }}>
@@ -492,10 +501,27 @@ function BillPanel({ tableName, casts, slip, result, onDispatch, onRename, onRem
             <span style={miniLabel}>担当キャスト（任意）</span>
             <input value={castName} onChange={(e) => setCastName(e.target.value)} style={fieldStyle} />
           </label>
+          {/* ツケ（未収）: unpaid 台帳の書込権限がある役割のみ表示（rules と一致） */}
+          {canUnpaid && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6, padding: '8px 10px', borderRadius: 10, border: `1px dashed ${unpaidOn ? 'var(--noxa-status-warning)' : 'var(--noxa-border)'}` }}>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}>
+                <input type="checkbox" checked={unpaidOn} onChange={(e) => { setUnpaidOn(e.target.checked); if (e.target.checked && unpaidAmount === 0) setUnpaidAmount(amount); }} />
+                <span style={{ fontSize: 13 }}>ツケ（未収あり）</span>
+                <span style={{ fontSize: 10, color: 'var(--noxa-text-faint)', fontFamily: mono }}>売掛管理へ自動起票</span>
+              </label>
+              {unpaidOn && (
+                <label style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                  <span style={miniLabel}>未収額（うち回収できていない額）</span>
+                  <input type="number" value={unpaidAmount} onChange={(e) => setUnpaidAmount(Math.max(0, Number(e.target.value)))} style={fieldStyle} inputMode="numeric" />
+                  {unpaidInvalid && <span style={{ fontSize: 11, color: 'var(--noxa-status-error)' }}>未収額は 1〜確定金額（{yen(amount)}）の範囲で入力してください。</span>}
+                </label>
+              )}
+            </div>
+          )}
           <div style={{ display: 'flex', gap: 8 }}>
-            <button type="button" disabled={busy} className="noxa-btn noxa-btn-primary" style={{ ...primaryBtn, flex: 1, opacity: busy ? 0.7 : 1 }}
-              onClick={async () => { setBusy(true); try { await onCheckout({ amount, castName: castName || undefined, customerName: customerName || undefined, guests }); setCheckingOut(false); } catch (e) { window.alert('会計に失敗しました（通信状態をご確認ください）。\n' + ((e as Error)?.message ?? String(e))); } finally { setBusy(false); } }}>
-              {busy ? '計上中…' : `${yen(amount)} で確定`}
+            <button type="button" disabled={busy || unpaidInvalid} className="noxa-btn noxa-btn-primary" style={{ ...primaryBtn, flex: 1, opacity: busy || unpaidInvalid ? 0.7 : 1 }}
+              onClick={async () => { setBusy(true); try { await onCheckout({ amount, castName: castName || undefined, customerName: customerName || undefined, guests, unpaidAmount: unpaidOn ? unpaidAmount : undefined }); setCheckingOut(false); } catch (e) { window.alert('会計に失敗しました（通信状態をご確認ください）。\n' + ((e as Error)?.message ?? String(e))); } finally { setBusy(false); } }}>
+              {busy ? '計上中…' : `${yen(amount)} で確定${unpaidOn && unpaidAmount > 0 ? `（うちツケ${yen(unpaidAmount)}）` : ''}`}
             </button>
             <button type="button" onClick={() => setCheckingOut(false)} className="noxa-btn noxa-btn-ghost" style={{ ...ghostBtn, width: 80 }}>戻る</button>
           </div>

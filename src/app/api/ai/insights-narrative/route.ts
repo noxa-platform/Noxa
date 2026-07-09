@@ -7,6 +7,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { verifyRequest, AuthError } from '../../lib/firebase-admin';
 import { resolveAccessContext } from '../../lib/access-context';
 import { generateText } from '../ai-provider';
+import { withReservedCredits } from '../with-credits';
+import { estimateAiCost } from '@/lib/ai-cost';
 import { resolveWorkspaceContext, composePlaybookAndSelf } from '@/lib/ai-knowledge/prompt-helpers';
 
 interface NarrativeRequestBody {
@@ -88,28 +90,39 @@ ${(['vip', 'needs_follow', 'growing', 'new_or_dormant'] as const)
 
 上記から「今週やるべき動き」を JSON で返してください。`;
 
-    const raw = await generateText(userPrompt, {
-      systemInstruction,
-      maxOutputTokens: 600,
-      temperature: 0.4,
-      responseMimeType: 'application/json',
+    // クレジット消費（従来は無料で叩き放題だった漏れを修正）
+    const cost = estimateAiCost({
+      inputText: userPrompt,
+      expectedOutputTokens: 600,
+      featureMultiplier: 0.5,
+      maxCap: 3,
     });
 
-    let parsed: NarrativeResponse = { summary: '', actions: [] };
-    try {
-      parsed = JSON.parse(raw);
-    } catch {
-      const m = raw.match(/\{[\s\S]*\}/);
-      if (m) {
-        try {
-          parsed = JSON.parse(m[0]);
-        } catch {
-          /* noop */
+    return await withReservedCredits(uid, cost, async ({ ack, remaining }) => {
+      const raw = await generateText(userPrompt, {
+        systemInstruction,
+        maxOutputTokens: 600,
+        temperature: 0.4,
+        responseMimeType: 'application/json',
+      });
+
+      let parsed: NarrativeResponse = { summary: '', actions: [] };
+      try {
+        parsed = JSON.parse(raw);
+      } catch {
+        const m = raw.match(/\{[\s\S]*\}/);
+        if (m) {
+          try {
+            parsed = JSON.parse(m[0]);
+          } catch {
+            /* noop */
+          }
         }
       }
-    }
 
-    return NextResponse.json(parsed);
+      ack(); // 生成成功＝消費確定
+      return NextResponse.json({ ...parsed, creditsRemaining: remaining });
+    }, 'insights-narrative');
   } catch (error) {
     if (error instanceof AuthError) {
       return NextResponse.json({ error: '認証が必要です' }, { status: 401 });

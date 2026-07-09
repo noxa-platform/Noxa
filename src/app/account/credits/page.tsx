@@ -11,6 +11,8 @@ interface LedgerEntry {
   amount: number;
   service?: string;
   feature?: string;
+  createdAt?: { seconds: number };
+  /** 旧 field（書込側は createdAt を書く。過去互換の表示用） */
   consumedAt?: { seconds: number };
 }
 
@@ -26,9 +28,11 @@ function CreditsView({ user }: { user: User }) {
 
   useEffect(() => {
     (async () => {
+      // 書込側(logAiLedger)は createdAt を書く。旧実装は存在しない consumedAt で orderBy
+      // していたため履歴が常に空になっていた（field 不一致バグ）。
       const q = query(
         collection(db, `account_credit_ledger/${user.uid}/entries`),
-        orderBy('consumedAt', 'desc'),
+        orderBy('createdAt', 'desc'),
         limit(50),
       );
       const snap = await getDocs(q);
@@ -81,7 +85,7 @@ function CreditsView({ user }: { user: User }) {
                     style={{ color: 'var(--noxa-text-muted)', fontSize: 11 }}
                   >
                     <span style={{ color: tint }}>●</span> {e.service ?? 'Noxa'}
-                    {e.consumedAt && ` · ${new Date(e.consumedAt.seconds * 1000).toLocaleString('ja-JP')}`}
+                    {(e.createdAt ?? e.consumedAt) && ` · ${new Date((e.createdAt ?? e.consumedAt)!.seconds * 1000).toLocaleString('ja-JP')}`}
                   </div>
                 </div>
                 <div

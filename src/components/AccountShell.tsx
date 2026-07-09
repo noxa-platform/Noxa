@@ -4,7 +4,7 @@ import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { doc, getDoc } from 'firebase/firestore';
 import type { User } from 'firebase/auth';
-import { signOut } from '@/lib/auth';
+import { signOut, needsEmailVerification, resendVerificationEmail } from '@/lib/auth';
 import { db } from '@/lib/firebase/config';
 import { useShopContext, useDeviceClaims } from '@/lib/useShopContext';
 import { useTheme } from '@/lib/useTheme';
@@ -75,6 +75,15 @@ const NAV_SERVICE: { label: string; href: string; external?: boolean; tint?: str
   { label: '退会',       href: '/account/delete' },
 ];
 
+/** サイドバーのセクション見出し（render ごとの再定義を避けるためトップレベル定義） */
+function SectionLabel({ easy, children }: { easy: boolean; children: React.ReactNode }) {
+  return (
+    <div className={easy ? 'px-2.5 pb-2' : 'noxa-mono px-2.5 pb-2'} style={easy
+      ? { fontSize: 13, color: 'var(--noxa-text-muted)', fontWeight: 700, fontFamily: 'var(--noxa-font-display-jp)' }
+      : { fontSize: 10, color: 'var(--noxa-text-faint)', letterSpacing: '0.12em', textTransform: 'uppercase' }}>{children}</div>
+  );
+}
+
 export function AccountShell({ user, children }: { user: User; children: React.ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
@@ -113,11 +122,6 @@ export function AccountShell({ user, children }: { user: User; children: React.R
   }
 
   // ── 描画ヘルパー ──
-  const SectionLabel = ({ children }: { children: React.ReactNode }) => (
-    <div className={easy ? 'px-2.5 pb-2' : 'noxa-mono px-2.5 pb-2'} style={easy
-      ? { fontSize: 13, color: 'var(--noxa-text-muted)', fontWeight: 700, fontFamily: 'var(--noxa-font-display-jp)' }
-      : { fontSize: 10, color: 'var(--noxa-text-faint)', letterSpacing: '0.12em', textTransform: 'uppercase' }}>{children}</div>
-  );
   const navLink = (it: { label: string; href: string; external?: boolean; tint?: string }) => {
     const active = pathname === it.href;
     return (
@@ -162,7 +166,7 @@ export function AccountShell({ user, children }: { user: User; children: React.R
         {device.isDevice ? (
           /* 店舗端末: 許可された店舗モジュールのみ */
           <div className="flex flex-col" style={{ gap: 2 }}>
-            <SectionLabel>店舗の端末{device.label ? ` · ${device.label}` : ''}</SectionLabel>
+            <SectionLabel easy={easy}>店舗の端末{device.label ? ` · ${device.label}` : ''}</SectionLabel>
             {storeNav.map(navLink)}
           </div>
         ) : (
@@ -170,7 +174,7 @@ export function AccountShell({ user, children }: { user: User; children: React.R
             {/* お店の運営（店舗を選択中のみ表示。個人選択中は隠す） */}
             {storeActive ? (
               <div className="flex flex-col" style={{ gap: 2 }}>
-                <SectionLabel>お店の運営</SectionLabel>
+                <SectionLabel easy={easy}>お店の運営</SectionLabel>
                 {storeNav.map(navLink)}
                 {navLink({ label: '店舗設定', href: '/store/settings' })}
               </div>
@@ -183,31 +187,31 @@ export function AccountShell({ user, children }: { user: User; children: React.R
 
             {/* 売上・顧客（個人/店舗どちらでも） */}
             <div className="flex flex-col" style={{ gap: 2 }}>
-              <SectionLabel>売上・顧客</SectionLabel>
+              <SectionLabel easy={easy}>売上・顧客</SectionLabel>
               {NAV_MONEY.map(navLink)}
             </div>
 
             {/* マイページ */}
             <div className="flex flex-col" style={{ gap: 2 }}>
-              <SectionLabel>マイページ</SectionLabel>
+              <SectionLabel easy={easy}>マイページ</SectionLabel>
               {NAV_ACCOUNT.map(navLink)}
             </div>
 
             {/* 個人ツール */}
             <div className="flex flex-col" style={{ gap: 2 }}>
-              <SectionLabel>個人ツール</SectionLabel>
+              <SectionLabel easy={easy}>個人ツール</SectionLabel>
               {NAV_TOOLS.map(navLink)}
             </div>
 
             {/* NOXA / おしらせ */}
             <div className="flex flex-col" style={{ gap: 2 }}>
-              <SectionLabel>NOXA・おしらせ</SectionLabel>
+              <SectionLabel easy={easy}>NOXA・おしらせ</SectionLabel>
               {NAV_CHANNEL.map(navLink)}
             </div>
 
             {/* 連携・契約 */}
             <div className="flex flex-col" style={{ gap: 2 }}>
-              <SectionLabel>連携・契約</SectionLabel>
+              <SectionLabel easy={easy}>連携・契約</SectionLabel>
               {NAV_SERVICE.map(navLink)}
             </div>
           </>
@@ -291,11 +295,43 @@ export function AccountShell({ user, children }: { user: User; children: React.R
 
       {/* Main */}
       <main className="flex-1 overflow-auto px-5 md:px-10 pt-20 md:pt-9 pb-24 md:pb-10">
+        {!device.isDevice && <EmailVerifyBanner user={user} />}
         {children}
       </main>
 
       {/* モバイル下部ナビ（スマホでメニューに到達できるように。端末kioskでは非表示） */}
       {!device.isDevice && <BottomTabBar />}
+    </div>
+  );
+}
+
+/**
+ * メール未検証バナー（Day11）。password プロバイダかつ未検証のときだけ表示。
+ * 現状は注意喚起＋再送のみ（機能ブロックはしない＝既存ユーザーの動線を退化させない）。
+ */
+function EmailVerifyBanner({ user }: { user: User }) {
+  const [sent, setSent] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [hidden, setHidden] = useState(false);
+  if (hidden || !needsEmailVerification(user)) return null;
+  return (
+    <div role="alert" style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', margin: '0 0 16px', padding: '10px 14px', borderRadius: 12, background: 'rgba(245,212,114,0.08)', border: '1px solid var(--noxa-status-warning)' }}>
+      <span style={{ flex: 1, minWidth: 200, fontSize: 13 }}>
+        メールアドレス（{user.email}）が未確認です。受信箱の確認リンクを開いてください。
+        {sent && <span style={{ color: 'var(--noxa-status-success)', marginLeft: 6 }}>再送しました。確認後はこのページを再読み込みすると表示が消えます。</span>}
+      </span>
+      <button type="button" disabled={busy || sent}
+        onClick={async () => {
+          setBusy(true);
+          try { await resendVerificationEmail(user); setSent(true); }
+          catch (e) { window.alert('確認メールの送信に失敗しました（しばらくおいて再試行してください）。\n' + String((e as Error)?.message ?? e)); }
+          finally { setBusy(false); }
+        }}
+        style={{ minHeight: 34, padding: '4px 14px', borderRadius: 9999, cursor: 'pointer', fontSize: 12, fontWeight: 600, background: 'var(--noxa-accent-primary)', color: '#fff', border: 'none', opacity: busy || sent ? 0.6 : 1 }}>
+        {sent ? '送信済み' : '確認メールを再送'}
+      </button>
+      <button type="button" title="今回は閉じる" onClick={() => setHidden(true)}
+        style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--noxa-text-faint)', fontSize: 15 }}>×</button>
     </div>
   );
 }

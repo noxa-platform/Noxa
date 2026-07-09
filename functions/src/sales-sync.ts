@@ -54,6 +54,17 @@ type SaleData = Record<string, unknown>;
 const num = (v: unknown): number => (typeof v === 'number' ? v : 0);
 const str = (v: unknown): string | null => (typeof v === 'string' ? v : null);
 
+/** 個人側へコピーする売上区分（本指名/場内/フリー・同伴・卓・客層）。会計時に POS が確定した値をそのまま控えへ写す。 */
+function saleClassification(after: SaleData): Record<string, unknown> {
+  return {
+    nomination: str(after.nomination),          // 'main' | 'inTable' | 'free' | null（旧データ）
+    dohan: after.dohan === true,
+    customerType: str(after.customerType),      // 'initial' | 'regular' 等
+    tableId: str(after.tableId),
+    tableName: str(after.tableName),
+  };
+}
+
 // ── 顧客あり: 担当台帳へ ContactLog 転記（顧客 doc upsert＋差額 increment・冪等） ──
 async function writeCustomerLog(shopId: string, cast: string, customerId: string, saleId: string, after: SaleData) {
   const logRef = customerLogRef(cast, customerId, saleId);
@@ -103,6 +114,7 @@ async function writeCustomerLog(shopId: string, cast: string, customerId: string
       posSaleRef: `shop_shops/${shopId}/sales/${saleId}`,
       shopId,
       customerName: str(after.customerName),
+      ...saleClassification(after),
       ...(prevLogged ? {} : { createdAt: FieldValue.serverTimestamp() }),
       updatedAt: FieldValue.serverTimestamp(),
     }, { merge: true });
@@ -140,10 +152,15 @@ async function writePersonalSale(shopId: string, cast: string, saleId: string, a
     source: 'shop',
     entryMode: str(after.entryMode) ?? 'amount',
     salesAmount: num(after.amount),
+    // 個人売上画面（SalesClient）は amount 表示＋ dayKey 範囲購読のため両方を控えに写す。
+    // 旧実装はどちらも欠けており、POS会計の控えが個人売上画面に一切表示されなかった。
+    amount: num(after.amount),
+    dayKey: str(after.dayKey),
     datetime: after.checkoutAt ?? after.createdAt ?? FieldValue.serverTimestamp(),
     customerId: null,
     customerName: str(after.customerName),
     castName: str(after.castName),
+    ...saleClassification(after),
     lineItems: Array.isArray(after.lineItems) ? after.lineItems : [],
     createdBy: str(after.operatorUid) ?? cast,
     syncedAt: FieldValue.serverTimestamp(),

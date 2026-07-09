@@ -12,10 +12,13 @@
 //   - GOOGLE_PLAY_SERVICE_ACCOUNT_KEY（Service Account JSON 1 行圧縮）と
 //     GOOGLE_PLAY_PACKAGE_NAME（packageName）を env から読む
 //
-// スケルトン状態:
-//   - 現在は env 未設定時に NODE_ENV !== 'production' なら検証 skip で付与（dev 用）
-//   - 実装の最終形は Capacitor IAP プラグイン導入 + Android AAB ビルド完了後の別タスク
-//   - googleapis SDK の `androidpublisher_v3` を使う想定（既に package.json に入っている）
+// 実装状態（Day11 で consume まで完了）:
+//   - 検証: androidpublisher v3 purchases.products.get（本番は Service Account 必須・skip 不可）
+//   - 付与後に purchases.products.consume を呼ぶ（consumable は consume しないと同一商品を
+//     再購入できず、未 acknowledge のまま3日で Play が自動返金する。consume は acknowledge を兼ねる）
+//   - consume 失敗は付与を巻き戻さない（付与済みの方が安全側）。レスポンス consumed で通知し、
+//     クライアント側は次回起動時の購入復元で再度 grant → ALREADY_PROCESSED → consume 再試行できる
+//   - 残: Capacitor IAP プラグイン導入 + Android AAB ビルド（docs/android-rollout-checklist.md）
 
 import { NextRequest, NextResponse } from 'next/server';
 import { verifyRequest, getAdminDb, AuthError } from '../../lib/firebase-admin';
@@ -57,39 +60,66 @@ async function verifyGooglePlayPurchase(
 ): Promise<VerifyResult> {
   const saKey = process.env.GOOGLE_PLAY_SERVICE_ACCOUNT_KEY;
   if (!saKey) {
-    // 検証skipは明示フラグ(IAP_ALLOW_UNVERIFIED=true)が立っているときのみ許可。
-    // NODE_ENV依存だとPreview/staging環境で偽トークンによる不正付与を許してしまうため明示化。
-    if (process.env.IAP_ALLOW_UNVERIFIED === 'true') {
-      console.warn('verifyGooglePlayPurchase: IAP_ALLOW_UNVERIFIED=true のため検証skip（本番では絶対に設定しないこと）');
+    // 検証skipは「明示フラグ + 非本番」の両方を満たすときのみ許可。
+    // 本番(NODE_ENV==='production')では IAP_ALLOW_UNVERIFIED が設定されていても
+    // 絶対に skip しない（誤設定による金銭事故を構造的に防ぐ）。
+    if (process.env.IAP_ALLOW_UNVERIFIED === 'true' && process.env.NODE_ENV !== 'production') {
+      console.warn('verifyGooglePlayPurchase: IAP_ALLOW_UNVERIFIED=true のため検証skip（非本番のみ有効）');
       return { ok: true, purchaseState: 0 };
     }
     return { ok: false, reason: 'Service Account 未設定（検証不可）' };
   }
 
-  // TODO: googleapis SDK で実装
-  //
-  //   import { google } from 'googleapis';
-  //   const auth = new google.auth.GoogleAuth({
-  //     credentials: JSON.parse(saKey),
-  //     scopes: ['https://www.googleapis.com/auth/androidpublisher'],
-  //   });
-  //   const publisher = google.androidpublisher({ version: 'v3', auth });
-  //   const { data } = await publisher.purchases.products.get({
-  //     packageName, productId, token: purchaseToken,
-  //   });
-  //   return {
-  //     ok: data.purchaseState === 0,
-  //     purchaseState: data.purchaseState ?? undefined,
-  //     consumptionState: data.consumptionState ?? undefined,
-  //     acknowledgementState: data.acknowledgementState ?? undefined,
-  //   };
+  // googleapis (androidpublisher v3) で purchaseToken を実検証する
+  try {
+    const { google } = await import('googleapis');
+    const auth = new google.auth.GoogleAuth({
+      credentials: JSON.parse(saKey),
+      scopes: ['https://www.googleapis.com/auth/androidpublisher'],
+    });
+    const publisher = google.androidpublisher({ version: 'v3', auth });
+    const { data } = await publisher.purchases.products.get({
+      packageName,
+      productId,
+      token: purchaseToken,
+    });
+    return {
+      ok: data.purchaseState === 0,
+      purchaseState: data.purchaseState ?? undefined,
+      consumptionState: data.consumptionState ?? undefined,
+      acknowledgementState: data.acknowledgementState ?? undefined,
+      ...(data.purchaseState !== 0 ? { reason: `purchaseState=${data.purchaseState}` } : {}),
+    };
+  } catch (e) {
+    console.error('verifyGooglePlayPurchase: androidpublisher 検証エラー', e);
+    return { ok: false, reason: 'Google Play 検証 API 呼び出しに失敗' };
+  }
+}
 
-  // パラメータは将来の実装時に使うため、形だけ参照しておく（未使用警告回避）
-  void packageName;
-  void productId;
-  void purchaseToken;
-
-  return { ok: false, reason: 'Google Play Developer API 連携未実装' };
+/**
+ * consumable の消費完了化（best-effort）。
+ * Service Account 未設定（dev skip 時）は何もしない。失敗しても付与は成立させる。
+ */
+async function consumeGooglePlayPurchase(
+  packageName: string,
+  productId: string,
+  purchaseToken: string,
+): Promise<boolean> {
+  const saKey = process.env.GOOGLE_PLAY_SERVICE_ACCOUNT_KEY;
+  if (!saKey) return false;
+  try {
+    const { google } = await import('googleapis');
+    const auth = new google.auth.GoogleAuth({
+      credentials: JSON.parse(saKey),
+      scopes: ['https://www.googleapis.com/auth/androidpublisher'],
+    });
+    const publisher = google.androidpublisher({ version: 'v3', auth });
+    await publisher.purchases.products.consume({ packageName, productId, token: purchaseToken });
+    return true;
+  } catch (e) {
+    console.error('consumeGooglePlayPurchase: consume 失敗（付与は成立済み・復元フローで再試行可能）', e);
+    return false;
+  }
 }
 
 export async function POST(request: NextRequest) {
@@ -172,11 +202,18 @@ export async function POST(request: NextRequest) {
     });
 
     if (!result.ok) {
+      // 処理済みでも Play 側が未消費なら consume だけ再試行する
+      // （前回 consume に失敗していても、購入復元→再 grant の流れでここに来て自己修復できる）
+      let consumed = verify.consumptionState === 1;
+      if (!consumed) consumed = await consumeGooglePlayPurchase(packageName, productId, purchaseToken);
       return NextResponse.json(
-        { error: 'このトランザクションは処理済みです' },
+        { error: 'このトランザクションは処理済みです', consumed },
         { status: 409 },
       );
     }
+
+    // Play 側の消費完了化（consumable の再購入ブロック＋3日自動返金の回避。acknowledge を兼ねる）
+    const consumed = await consumeGooglePlayPurchase(packageName, productId, purchaseToken);
 
     // 付与後の残高を返す
     const subSnap = await subRef.get();
@@ -184,16 +221,12 @@ export async function POST(request: NextRequest) {
       ? Math.max(0, Number(subSnap.data()?.purchasedCredits || 0))
       : 0;
 
-    // TODO（本実装時）:
-    //   - Play Developer API の purchases.products.consume を呼んで Play 側で消費完了化
-    //     （consumable IAP は consume しないと再購入できない）
-    //   - 失敗時は別途リトライキュー（Cloud Tasks 等）に積む
-
     return NextResponse.json({
       ok: true,
       granted: product.credits,
       productId: product.productId,
       purchasedCredits,
+      consumed, // false の場合クライアントは購入復元フローで再試行（付与は済んでいる）
     });
   } catch (error) {
     if (error instanceof AuthError) {

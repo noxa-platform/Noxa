@@ -9,7 +9,7 @@
  *   - salesAttribution … 売上の付け方（担当キャスト or 操作者）
  * 料金/税/メニュー/卓名は既存の pos_config（POS設定）で編集（卓は seating_tables 単一の正）。
  */
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { doc, getDoc, onSnapshot, setDoc, serverTimestamp } from 'firebase/firestore';
 import type { User } from 'firebase/auth';
 import { db } from '@/lib/firebase/config';
@@ -131,9 +131,13 @@ export type UseShopConfig = {
 
 export function useShopConfig(user: User): UseShopConfig {
   const shop = useShopId(user);
-  const [config, setConfig] = useState<ShopConfig>(DEFAULT_CONFIG);
+  // 出所（shopId）つきスナップショットから config/loading を導出（set-state-in-effect 返済・Day19）
+  const [cfgSnap, setCfgSnap] = useState<{ shopId: string; config: ShopConfig } | null>(null);
   const [industry, setIndustry] = useState<string | undefined>(undefined);
-  const [loaded, setLoaded] = useState(false);
+  const config = useMemo(
+    () => (shop.shopId && cfgSnap?.shopId === shop.shopId ? cfgSnap.config : DEFAULT_CONFIG),
+    [cfgSnap, shop.shopId],
+  );
 
   useEffect(() => {
     if (!shop.shopId) return;
@@ -143,11 +147,12 @@ export function useShopConfig(user: User): UseShopConfig {
   }, [shop.shopId]);
 
   useEffect(() => {
-    if (shop.loading || !shop.shopId) { if (!shop.loading) setLoaded(true); return; }
-    const ref = doc(db, `shop_shops/${shop.shopId}/config/settings`);
+    const sid = shop.shopId;
+    if (shop.loading || !sid) return;
+    const ref = doc(db, `shop_shops/${sid}/config/settings`);
     const unsub = onSnapshot(ref, (snap) => {
       const d = snap.exists() ? (snap.data() as Partial<ShopConfig>) : {};
-      setConfig({
+      setCfgSnap({ shopId: sid, config: {
         terminology: d.terminology ?? {},
         roles: d.roles?.length ? d.roles : DEFAULT_ROLES,
         modules: mergeModules(d.modules),
@@ -156,9 +161,8 @@ export function useShopConfig(user: User): UseShopConfig {
         rotationTimeLength: typeof d.rotationTimeLength === 'number' && d.rotationTimeLength > 0 ? d.rotationTimeLength : 15,
         transportTypes: d.transportTypes?.length ? d.transportTypes : DEFAULT_TRANSPORT_TYPES,
         inventoryCategories: d.inventoryCategories?.length ? d.inventoryCategories : DEFAULT_INVENTORY_CATEGORIES,
-      });
-      setLoaded(true);
-    }, () => setLoaded(true));
+      } });
+    }, () => setCfgSnap({ shopId: sid, config: DEFAULT_CONFIG })); // エラーでも既定で確定し loading を解く
     return () => unsub();
   }, [shop.loading, shop.shopId]);
 
@@ -169,5 +173,5 @@ export function useShopConfig(user: User): UseShopConfig {
 
   const t = useCallback((key: string) => resolveTerm(config, industry, key), [config, industry]);
 
-  return { loading: shop.loading || !loaded, shopId: shop.shopId, canManage: shop.canManage, industry, config, t, save };
+  return { loading: shop.loading || (!!shop.shopId && cfgSnap?.shopId !== shop.shopId), shopId: shop.shopId, canManage: shop.canManage, industry, config, t, save };
 }

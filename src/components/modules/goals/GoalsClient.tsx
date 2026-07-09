@@ -2,14 +2,17 @@
 
 import Link from 'next/link';
 import { useEffect, useMemo, useState } from 'react';
-import { collection, doc, getDoc, getDocs, query, where, serverTimestamp, setDoc, type DocumentData } from 'firebase/firestore';
+import { collection, doc, getDocs, query, where, serverTimestamp, setDoc, type DocumentData } from 'firebase/firestore';
 import type { User } from 'firebase/auth';
 import { db } from '@/lib/firebase/config';
 import { getActiveShop, pickShopId } from '@/lib/workspace';
+import { computeGoalHistory } from '@/lib/goals/history';
 
 /**
  * 目標管理 — Noxa OS（実データ）
- * 目標は personal_goals/{uid}/items/current に保存（本人のみ・編集可）。
+ * 目標は月別に personal_goals/{uid}/items/{YYYY-MM} に保存（Day13 履歴化）。
+ * items/current は iOS/旧データ互換のため温存し、当月保存時に両方へ書く。
+ * 過去月の達成率は「当時の目標」で計算（未記録の月のみ現在の目標で換算し注記）。
  * 実績は自分の売上（オーナー=店舗全体 / キャスト=自分の castUid）を月別集計。
  */
 
@@ -59,11 +62,36 @@ async function loadPerf(uid: string): Promise<Perf> {
     const { shopId, isOwner } = pickShopId(owned.docs.map((d) => d.id), ms.docs.map((d) => d.id), getActiveShop());
     if (shopId) {
       const col = collection(db, `shop_shops/${shopId}/sales`);
-      const ss = isOwner ? await getDocs(col) : await getDocs(query(col, where('castUid', '==', uid)));
+      // 期間クエリ化（Day13）: グラフに使うのは直近6ヶ月のみ。全件取得は read 数が
+      // 蓄積で破綻する。オーナーは dayKey 範囲（単一フィールド index）、スタッフは
+      // castUid 一致のみで取得しクライアント側で月フィルタ（複合 index を増やさない）
+      const sixAgo = `${last6Months()[0].ym}-01`;
+      const ss = isOwner
+        ? await getDocs(query(col, where('dayKey', '>=', sixAgo)))
+        : await getDocs(query(col, where('castUid', '==', uid)));
       ss.forEach((x) => add(x.data()));
     }
   } catch { /* skip */ }
   return { byMonth, currentTypes };
+}
+
+/** 月別目標の読み込み（items/{YYYY-MM}。current は当月のフォールバック互換） */
+async function loadGoals(uid: string): Promise<{ byYm: Record<string, number>; currentGoal: number }> {
+  const byYm: Record<string, number> = {};
+  let currentGoal = 0;
+  try {
+    const snap = await getDocs(collection(db, `personal_goals/${uid}/items`));
+    snap.forEach((d) => {
+      const v = (d.data() as { goalSales?: number }).goalSales;
+      if (typeof v !== 'number' || v <= 0) return;
+      if (d.id === 'current') currentGoal = v;
+      else if (/^\d{4}-\d{2}$/.test(d.id)) byYm[d.id] = v;
+    });
+  } catch { /* skip */ }
+  // 当月の月別 doc があればそれが正（current は旧クライアント互換のミラー）
+  const cur = ymOf();
+  if (byYm[cur]) currentGoal = byYm[cur];
+  return { byYm, currentGoal };
 }
 
 const TYPE_LABEL: Record<string, string> = { regular: '通常', initial: '初回', r_within: 'R内', r_after: 'R後' };
@@ -72,6 +100,7 @@ const TYPE_COLOR: Record<string, string> = { regular: 'var(--noxa-accent-primary
 export function GoalsClient({ user }: { user: User }) {
   const [loading, setLoading] = useState(true);
   const [goalSales, setGoalSales] = useState<number>(0);
+  const [goalsByYm, setGoalsByYm] = useState<Record<string, number>>({});
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState<number>(0);
   const [perf, setPerf] = useState<Perf>({ byMonth: {}, currentTypes: {} });
@@ -79,10 +108,8 @@ export function GoalsClient({ user }: { user: User }) {
   useEffect(() => {
     let alive = true;
     (async () => {
-      try {
-        const g = await getDoc(doc(db, `personal_goals/${user.uid}/items/current`));
-        if (alive && g.exists()) { const v = (g.data().goalSales as number) ?? 0; setGoalSales(v); setDraft(v); }
-      } catch { /* skip */ }
+      const g = await loadGoals(user.uid);
+      if (alive) { setGoalsByYm(g.byYm); setGoalSales(g.currentGoal); setDraft(g.currentGoal); }
       const p = await loadPerf(user.uid).catch(() => ({ byMonth: {}, currentTypes: {} }));
       if (alive) { setPerf(p); setLoading(false); }
     })();
@@ -93,12 +120,26 @@ export function GoalsClient({ user }: { user: User }) {
   const cur = ymOf();
   const actual = perf.byMonth[cur] ?? 0;
   const rate = goalSales > 0 ? Math.round((actual / goalSales) * 100) : 0;
-  const history = months.map((m) => ({ label: m.label, rate: goalSales > 0 ? Math.round(((perf.byMonth[m.ym] ?? 0) / goalSales) * 100) : 0, current: m.ym === cur }));
+  // 過去月は「当時の目標」で達成率を出す（未記録の月のみ現在の目標で換算・注記つき）
+  const history = useMemo(
+    () => computeGoalHistory(months, perf.byMonth, goalsByYm, goalSales, cur),
+    [months, perf.byMonth, goalsByYm, goalSales, cur],
+  );
+  const hasEstimated = history.some((h) => h.estimated && h.rate > 0);
   const typeEntries = Object.entries(perf.currentTypes).filter(([, v]) => v > 0).sort((a, b) => b[1] - a[1]);
 
   const save = async () => {
-    setGoalSales(draft); setEditing(false);
-    try { await setDoc(doc(db, `personal_goals/${user.uid}/items/current`), { goalSales: draft, updatedAt: serverTimestamp() }, { merge: true }); } catch { /* skip */ }
+    setGoalSales(draft); setGoalsByYm((p) => ({ ...p, [cur]: draft })); setEditing(false);
+    try {
+      // 月別 doc が正本（履歴化・Day13）。current は iOS/旧クライアント互換のミラー
+      await Promise.all([
+        setDoc(doc(db, `personal_goals/${user.uid}/items/${cur}`), { goalSales: draft, ym: cur, updatedAt: serverTimestamp() }, { merge: true }),
+        setDoc(doc(db, `personal_goals/${user.uid}/items/current`), { goalSales: draft, updatedAt: serverTimestamp() }, { merge: true }),
+      ]);
+    } catch (e) {
+      // 保存失敗を握りつぶすと「保存できたつもり」になる → 可視化
+      window.alert(`目標の保存に失敗しました（${(e as { code?: string; message?: string }).code ?? (e as Error).message}）`);
+    }
   };
 
   return (
@@ -185,7 +226,18 @@ export function GoalsClient({ user }: { user: User }) {
             {/* 過去6ヶ月 */}
             <section aria-label="過去6ヶ月の達成率" style={{ background: 'var(--noxa-surface-card)', border: '1px solid var(--noxa-border)', borderRadius: 16, padding: 'clamp(16px, 3vw, 24px)' }}>
               <h2 className="noxa-eyebrow" style={{ fontSize: 11, marginBottom: 20 }}>過去6ヶ月の達成率</h2>
-              {goalSales > 0 ? <HistoryChart data={history} /> : <p style={{ fontSize: 13, color: 'var(--noxa-text-muted)' }}>目標を設定すると達成率が表示されます。</p>}
+              {goalSales > 0 || Object.keys(goalsByYm).length > 0
+                ? (
+                  <>
+                    <HistoryChart data={history} />
+                    {hasEstimated && (
+                      <p style={{ margin: '8px 0 0', fontSize: 10, color: 'var(--noxa-text-faint)', fontFamily: mono }}>
+                        ※ 「~」付きの月は当時の目標が未記録のため、現在の目標額で換算した概算です（今後は毎月の目標が自動で記録されます）。
+                      </p>
+                    )}
+                  </>
+                )
+                : <p style={{ fontSize: 13, color: 'var(--noxa-text-muted)' }}>目標を設定すると達成率が表示されます。</p>}
             </section>
 
             <p style={{ margin: '16px 0 0', fontSize: 11, lineHeight: 1.6, color: 'var(--noxa-text-faint)', fontFamily: mono }}>
@@ -212,7 +264,7 @@ const chip: React.CSSProperties = { appearance: 'none', cursor: 'pointer', minHe
 // ── SVG バーチャート（実データ） ──
 const CHART_W = 320, CHART_H = 100, BAR_W = 32;
 const GAP = (CHART_W - BAR_W * 6) / 7;
-function HistoryChart({ data }: { data: { label: string; rate: number; current: boolean }[] }) {
+function HistoryChart({ data }: { data: { label: string; rate: number; current: boolean; estimated?: boolean }[] }) {
   return (
     <svg viewBox={`0 0 ${CHART_W} ${CHART_H + 24}`} width="100%" role="img" aria-label="過去6ヶ月の達成率" style={{ display: 'block', overflow: 'visible' }}>
       {[100, 50].map((v) => {
@@ -232,7 +284,7 @@ function HistoryChart({ data }: { data: { label: string; rate: number; current: 
           <g key={m.label}>
             <rect x={x} y={0} width={BAR_W} height={CHART_H} rx={4} fill="var(--noxa-surface-muted)" />
             <rect x={x} y={y} width={BAR_W} height={barH} rx={4} fill={m.current ? 'url(#goalGradCurrent)' : 'var(--noxa-surface-raised)'} opacity={m.current ? 1 : 0.75} />
-            <text x={x + BAR_W / 2} y={y - 5} textAnchor="middle" fontSize={9} fontFamily={mono} fill={m.current ? 'var(--noxa-accent-primary-ink)' : 'var(--noxa-text-faint)'} style={{ fontVariantNumeric: 'tabular-nums' }}>{m.rate}%</text>
+            <text x={x + BAR_W / 2} y={y - 5} textAnchor="middle" fontSize={9} fontFamily={mono} fill={m.current ? 'var(--noxa-accent-primary-ink)' : 'var(--noxa-text-faint)'} style={{ fontVariantNumeric: 'tabular-nums' }}>{m.estimated ? '~' : ''}{m.rate}%</text>
             <text x={x + BAR_W / 2} y={CHART_H + 16} textAnchor="middle" fontSize={10} fontFamily={mono} fill={m.current ? 'var(--noxa-text-primary)' : 'var(--noxa-text-faint)'}>{m.label}</text>
           </g>
         );

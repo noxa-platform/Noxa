@@ -7,6 +7,10 @@
  */
 import { doc, getDoc, runTransaction, serverTimestamp } from 'firebase/firestore';
 import { db } from '@/lib/firebase/config';
+import { VISIBILITY, type Visibility, resolveVisibility } from '@/lib/visibility';
+
+export { VISIBILITY, resolveVisibility };
+export type { Visibility };
 
 export const HANDLE_RE = /^[a-z0-9_]{3,20}$/;
 const RESERVED = new Set([
@@ -74,6 +78,7 @@ export async function claimHandle(handleRaw: string, input: ClaimInput): Promise
       bio: '',
       sns: [],
       published: false,
+      visibility: 'private',   // 新規は非公開で作成（published:false と整合）
       createdAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
     });
@@ -90,9 +95,11 @@ export type ProfilePage = {
   refId: string;
   displayName: string;
   avatar: string;
-  bio: string;
-  sns: SnsLink[];
-  published: boolean;
+  bio: string;               // 旧フィールド（blocks 移行後は表示に使わない・fallback 用）
+  sns: SnsLink[];            // 旧フィールド（同上）
+  published: boolean;        // 後方互換のため残す（visibility が正本）
+  visibility?: Visibility;   // 正本（未設定の既存docは published から導出）
+  blocks?: unknown[];        // NOXAページのブロック（正本。normalizeBlocks で安全に読む）
   shopHandle?: string;
 };
 

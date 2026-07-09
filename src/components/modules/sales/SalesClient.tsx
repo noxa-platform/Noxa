@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { useEffect, useMemo, useState } from 'react';
-import { collection, onSnapshot, addDoc, doc, updateDoc, serverTimestamp, increment, Timestamp, type DocumentData } from 'firebase/firestore';
+import { collection, onSnapshot, addDoc, doc, updateDoc, deleteDoc, getDocs, serverTimestamp, increment, query, where, Timestamp, type DocumentData } from 'firebase/firestore';
 import { db } from '@/lib/firebase/config';
 import { useShopId } from '@/lib/useShopId';
 import { businessDayKey } from '@/lib/datetime';
@@ -20,37 +20,56 @@ const yen = (n: number) => `¥${Math.round(n).toLocaleString('ja-JP')}`;
 
 function toMs(v: unknown): number | null { if (v instanceof Timestamp) return v.toMillis(); if (v && typeof v === 'object' && 'seconds' in (v as Record<string, unknown>)) return (v as { seconds: number }).seconds * 1000; return null; }
 
-type Sale = { id: string; amount: number; customerName: string | null; customerId: string | null; castName: string | null; dayKey: string; atMs: number | null; voided: boolean; source: string };
+type Sale = { id: string; amount: number; customerName: string | null; customerId: string | null; castName: string | null; dayKey: string; atMs: number | null; voided: boolean; source: string; nomination: string | null; dohan: boolean; unpaidAmount: number };
 
 export function SalesClient({ user }: { user: User }) {
   const shop = useShopId(user);
   const colPath = shop.shopId ? `shop_shops/${shop.shopId}/sales` : `personal_sales/${user.uid}/items`;
-  const [sales, setSales] = useState<Sale[]>([]);
-  const [customers, setCustomers] = useState<{ id: string; name: string }[]>([]);
-  const [loading, setLoading] = useState(true);
+  // 売上・顧客は「どのパス/店の購読か」つきで保持し、loading と表示リストを導出する
+  // （effect 冒頭の同期 setState は react-hooks/set-state-in-effect 違反。Day17 返済）
+  const [salesSnap, setSalesSnap] = useState<{ colPath: string; list: Sale[] } | null>(null);
+  const [customersSnap, setCustomersSnap] = useState<{ shopId: string; list: { id: string; name: string }[] } | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
   const [opBusy, setOpBusy] = useState(false); // 取消/修正の二重実行防止
 
+  const sales = useMemo(() => (salesSnap?.colPath === colPath ? salesSnap.list : []), [salesSnap, colPath]);
+  const customers = useMemo(
+    () => (shop.shopId && customersSnap?.shopId === shop.shopId ? customersSnap.list : []),
+    [customersSnap, shop.shopId],
+  );
+  const loading = shop.loading || salesSnap?.colPath !== colPath;
+
   // 店舗ワークスペース時のみ顧客台帳を購読（手入力売上の顧客紐付け用）
   useEffect(() => {
-    if (!shop.shopId) { setCustomers([]); return; }
-    const unsub = onSnapshot(collection(db, `shop_shops/${shop.shopId}/customers`), (snap) => {
+    const sid = shop.shopId;
+    if (!sid) return;
+    const unsub = onSnapshot(collection(db, `shop_shops/${sid}/customers`), (snap) => {
       const list: { id: string; name: string }[] = [];
       snap.forEach((d) => { const x = d.data() as DocumentData; list.push({ id: d.id, name: (x.name as string) ?? '（無名）' }); });
       list.sort((a, b) => a.name.localeCompare(b.name, 'ja'));
-      setCustomers(list);
-    }, () => setCustomers([]));
+      setCustomersSnap({ shopId: sid, list });
+    }, () => setCustomersSnap({ shopId: sid, list: [] }));
     return () => unsub();
   }, [shop.shopId]);
 
   useEffect(() => {
     if (shop.loading) return;
-    setLoading(true);
-    const unsub = onSnapshot(collection(db, colPath), (snap) => {
+    // 期間クエリ化: 当月分のみ購読（全件購読は数ヶ月で read 数が破綻する）。
+    // dayKey は businessDayKey 形式（YYYY-MM-DD）なので範囲条件で当月を取る。
+    const monthStart = `${businessDayKey().slice(0, 7)}-01`;
+    const unsub = onSnapshot(query(collection(db, colPath), where('dayKey', '>=', monthStart)), (snap) => {
       const list: Sale[] = [];
-      snap.forEach((d) => { const x = d.data() as DocumentData; list.push({ id: d.id, amount: typeof x.amount === 'number' ? x.amount : 0, customerName: x.customerName ?? null, customerId: x.customerId ?? null, castName: x.castName ?? null, dayKey: x.dayKey ?? '', atMs: toMs(x.checkoutAt) ?? toMs(x.createdAt), voided: x.voided === true, source: x.source ?? 'manual' }); });
-      setSales(list); setLoading(false);
-    }, () => setLoading(false));
+      snap.forEach((d) => { const x = d.data() as DocumentData; list.push({
+        // amount が無い旧 CF 控えは salesAmount を表示に使う（個人控えのスキーマ互換）
+        id: d.id, amount: typeof x.amount === 'number' ? x.amount : (typeof x.salesAmount === 'number' ? x.salesAmount : 0),
+        customerName: x.customerName ?? null, customerId: x.customerId ?? null, castName: x.castName ?? null, dayKey: x.dayKey ?? '',
+        atMs: toMs(x.checkoutAt) ?? toMs(x.datetime) ?? toMs(x.createdAt), voided: x.voided === true, source: x.source ?? 'manual',
+        nomination: typeof x.nomination === 'string' ? x.nomination : null, dohan: x.dohan === true,
+        unpaidAmount: typeof x.unpaidAmount === 'number' ? x.unpaidAmount : 0,
+      }); });
+      setSalesSnap({ colPath, list }); setLoadError(null);
+    }, (e) => { setSalesSnap({ colPath, list: [] }); setLoadError(`売上の読み込みに失敗しました（${e.code ?? e.message}）`); });
     return () => unsub();
   }, [colPath, shop.loading]);
 
@@ -79,6 +98,16 @@ export function SalesClient({ user }: { user: User }) {
       await updateDoc(doc(db, `${colPath}/${s.id}`), { voided: true, voidedAt: serverTimestamp(), voidReason: r });
       // 顧客実績から減算（取消＝集計から外す）
       if (s.customerId) { const ref = custRef(s.customerId); if (ref) await updateDoc(ref, { totalSales: increment(-s.amount), visitCount: increment(-1) }).catch(() => {}); }
+      // ツケ会計の取消: 紐付く未収起票も削除（発生源が消えた台帳を残さない）。
+      // unpaid の権限（owner/manager/accounting）が無いロールでは残るため、その旨を通知する
+      if (shop.shopId && s.unpaidAmount > 0) {
+        try {
+          const linked = await getDocs(query(collection(db, `shop_shops/${shop.shopId}/unpaid`), where('saleId', '==', s.id)));
+          await Promise.all(linked.docs.map((d) => deleteDoc(d.ref)));
+        } catch {
+          window.alert('売上は取消しましたが、紐付く未収（ツケ）の削除権限がありません。売掛管理から削除してください。');
+        }
+      }
     } finally { setOpBusy(false); }
   };
   const editSale = async (s: Sale) => {
@@ -102,11 +131,12 @@ export function SalesClient({ user }: { user: User }) {
         <button type="button" onClick={() => setAdding(true)} className="noxa-btn noxa-btn-primary">＋ 売上を記録</button>
       </div>
 
+      {loadError && <p role="alert" style={{ color: 'var(--noxa-status-error)', fontSize: 13, margin: '0 0 12px', padding: '10px 12px', borderRadius: 10, background: 'rgba(229,115,115,0.08)', border: '1px solid var(--noxa-status-error)' }}>{loadError}</p>}
       <div className="grid grid-cols-2 lg:grid-cols-4" style={{ gap: 12, marginBottom: 18 }}>
         <Kpi label="本日" value={yen(sum.today)} accent />
         <Kpi label="今月" value={yen(sum.month)} />
-        <Kpi label="累計" value={yen(sum.total)} />
-        <Kpi label="件数" value={`${sum.count} 件`} />
+        {/* 期間クエリ化に伴い累計→今月件数へ（全期間集計は月次レポートで） */}
+        <Kpi label="今月件数" value={`${sum.count} 件`} />
       </div>
 
       {loading ? (
@@ -124,6 +154,10 @@ export function SalesClient({ user }: { user: User }) {
               <span style={{ flex: 1, minWidth: 0, fontSize: 13, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                 {s.customerName ?? '（名無し）'}{s.castName && <span style={{ color: 'var(--noxa-text-muted)' }}> / {s.castName}</span>}
                 {s.source === 'pos' && <span style={{ fontSize: 10, color: 'var(--noxa-text-faint)', marginLeft: 6 }}>POS</span>}
+                {s.nomination === 'main' && <span style={{ fontSize: 10, color: 'var(--noxa-accent-primary-ink)', marginLeft: 6 }}>本指名</span>}
+                {s.nomination === 'inTable' && <span style={{ fontSize: 10, color: 'var(--noxa-status-info)', marginLeft: 6 }}>場内</span>}
+                {s.dohan && <span style={{ fontSize: 10, color: 'var(--noxa-status-warning)', marginLeft: 6 }}>同伴</span>}
+                {s.unpaidAmount > 0 && <span title={`うち未収 ¥${s.unpaidAmount.toLocaleString('ja-JP')}`} style={{ fontSize: 10, color: 'var(--noxa-status-error)', marginLeft: 6 }}>ツケ{yen(s.unpaidAmount)}</span>}
                 {s.voided && <span style={{ color: 'var(--noxa-status-error)', fontSize: 11, marginLeft: 6 }}>取消</span>}
               </span>
               <span style={{ fontFamily: mono, fontSize: 14, fontVariantNumeric: 'tabular-nums', textDecoration: s.voided ? 'line-through' : 'none' }}>{yen(s.amount)}</span>
