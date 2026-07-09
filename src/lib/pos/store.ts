@@ -348,10 +348,13 @@ export function usePosStore(user: User): UsePosStore {
     });
   }, [shopId, tableRef, user.uid, casts]);
 
+  // render 中に呼ばれるため ref ではなく config を直接参照する。
+  // （configRef は effect 同期＝設定変更後の最初の re-render では1世代古く、
+  //   ref 更新は再レンダーを起こさないため次の tick まで古い金額が表示されてしまう）
   const resultFor = useCallback<UsePosStore['resultFor']>((slip) => {
     const live: CalculatorState = slip.state.isDebugMode ? slip.state : { ...slip.state, currentTime: nowHHMM() };
-    return calculateResult(live, configRef.current);
-  }, [configRef]);
+    return calculateResult(live, config);
+  }, [config]);
 
   const needsSeed = !loadingData && !!shopId && tables.length === 0;
 
