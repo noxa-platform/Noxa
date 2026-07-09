@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useSyncExternalStore } from 'react';
 import { THEME_KEY, applyTheme } from '@/lib/useTheme';
 
 const OPTIONS: { value: string; label: string; hint: string }[] = [
@@ -9,13 +9,25 @@ const OPTIONS: { value: string; label: string; hint: string }[] = [
   { value: 'concafe', label: 'コンカフェ（ピンク）', hint: '明るい・ポップ' },
 ];
 
+/** 同一タブ内の切替通知（storage イベントは他タブにしか飛ばない） */
+const THEME_EVENT = 'noxa-theme-change';
+const subscribeTheme = (cb: () => void): (() => void) => {
+  window.addEventListener('storage', cb);
+  window.addEventListener(THEME_EVENT, cb);
+  return () => {
+    window.removeEventListener('storage', cb);
+    window.removeEventListener(THEME_EVENT, cb);
+  };
+};
+const getThemeVal = () => (typeof window === 'undefined' ? 'auto' : localStorage.getItem(THEME_KEY) || 'auto');
+
 export function ThemeSwitcher() {
-  const [val, setVal] = useState('auto');
-  useEffect(() => { setVal(localStorage.getItem(THEME_KEY) || 'auto'); }, []);
+  // localStorage を外部ストアとして購読（旧 effect+setState は set-state-in-effect 違反）
+  const val = useSyncExternalStore(subscribeTheme, getThemeVal, () => 'auto');
 
   const choose = (v: string) => {
-    setVal(v);
     localStorage.setItem(THEME_KEY, v);
+    window.dispatchEvent(new Event(THEME_EVENT));
     if (v === 'concafe') applyTheme('concafe');
     else if (v === 'noxa') applyTheme('');
     else applyTheme(''); // auto: 既定に戻す（店舗業態は次回読み込みで解決）

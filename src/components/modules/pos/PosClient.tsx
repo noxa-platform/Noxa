@@ -42,16 +42,14 @@ export function PosClient({ user, focusTableId, embedded }: { user: User; focusT
   const [, setTick] = useState(0);
 
   useEffect(() => { const t = setInterval(() => setTick((n) => n + 1), 30000); return () => clearInterval(t); }, []);
-  useEffect(() => { if (!activeCategory && config.menuCategories[0]) setActiveCategory(config.menuCategories[0].id); }, [config.menuCategories, activeCategory]);
+  // カテゴリ未選択時は先頭カテゴリへ導出（effect での setState 補正は set-state-in-effect 違反）
+  const effCategory = activeCategory || config.menuCategories[0]?.id || '';
 
   const castById = useMemo(() => new Map(casts.map((c) => [c.id, c.name])), [casts]);
   const selectedTable = tables.find((t) => t.id === selectedTableId) ?? null;
   const slips = selectedTable?.slips ?? [];
-  const selectedSlip = slips.find((s) => s.id === selectedSlipId) ?? null;
-
-  useEffect(() => {
-    if (selectedTable && !selectedSlip) setSelectedSlipId(slips[0]?.id ?? null);
-  }, [selectedTable, selectedSlip, slips]);
+  // 選択中の伝票が無ければ先頭伝票へフォールバック（旧 effect の同期補正を導出に）
+  const selectedSlip = slips.find((s) => s.id === selectedSlipId) ?? slips[0] ?? null;
 
   const result = selectedSlip ? store.resultFor(selectedSlip) : null;
 
@@ -77,7 +75,7 @@ export function PosClient({ user, focusTableId, embedded }: { user: User; focusT
   }
 
   const menuItemsByName = new Map(config.menuItems.map((m) => [m.name, m]));
-  const categoryItems = (config.menuCategories.find((c) => c.id === activeCategory)?.items ?? [])
+  const categoryItems = (config.menuCategories.find((c) => c.id === effCategory)?.items ?? [])
     .map((name) => menuItemsByName.get(name)).filter((m): m is NonNullable<typeof m> => !!m);
 
   const addItem = (m: { name: string; price: number; canHalfOff?: boolean; isTaxIncluded?: boolean; isCustom?: boolean }) => {
@@ -154,7 +152,7 @@ export function PosClient({ user, focusTableId, embedded }: { user: User; focusT
               <PaneTitle>{selectedTable?.name} の伝票</PaneTitle>
               <div style={{ display: 'flex', gap: 6, overflowX: 'auto', paddingBottom: 6, marginBottom: 12 }}>
                 {slips.map((sl) => (
-                  <button key={sl.id} type="button" onClick={() => setSelectedSlipId(sl.id)} style={chipStyle(sl.id === selectedSlipId)}>{sl.name}</button>
+                  <button key={sl.id} type="button" onClick={() => setSelectedSlipId(sl.id)} style={chipStyle(sl.id === selectedSlip?.id)}>{sl.name}</button>
                 ))}
                 <button type="button" onClick={() => setNewSlipFor(selectedTableId)} style={{ ...chipStyle(false), borderStyle: 'dashed', color: 'var(--noxa-accent-primary-ink)', borderColor: 'var(--noxa-border-strong)' }}>＋ 伝票</button>
               </div>
@@ -186,7 +184,7 @@ export function PosClient({ user, focusTableId, embedded }: { user: User; focusT
                   <div>
                     <div role="tablist" aria-label="メニューカテゴリ" style={{ display: 'flex', gap: 6, overflowX: 'auto', paddingBottom: 4, marginBottom: 10 }}>
                       {config.menuCategories.map((c) => (
-                        <button key={c.id} type="button" role="tab" aria-selected={c.id === activeCategory} onClick={() => setActiveCategory(c.id)} style={chipStyle(c.id === activeCategory)}>{c.label}</button>
+                        <button key={c.id} type="button" role="tab" aria-selected={c.id === effCategory} onClick={() => setActiveCategory(c.id)} style={chipStyle(c.id === effCategory)}>{c.label}</button>
                       ))}
                     </div>
                     <div className="grid grid-cols-2 sm:grid-cols-3" style={{ gap: 10 }}>
@@ -435,7 +433,10 @@ function BillPanel({ tableName, casts, slip, result, canUnpaid, onDispatch, onRe
 }) {
   const activeOrders = slip.state.orders.filter((o) => o.count > 0);
   const [checkingOut, setCheckingOut] = useState(false);
-  const [amount, setAmount] = useState<number>(result.currentTotal);
+  // 確定金額: 手入力していない間は現在合計に追従する導出（旧 effect の setAmount 同期は
+  // set-state-in-effect 違反。override 無しなら計算値＝時間経過・注文追加にも自動追従）
+  const [amountOverride, setAmountOverride] = useState<number | null>(null);
+  const amount = amountOverride ?? result.currentTotal;
   const [castName, setCastName] = useState(slip.castName ?? casts[0] ?? '');
   const [customerName, setCustomerName] = useState(slip.customerName ?? '');
   const [guests, setGuests] = useState<number>(1);
@@ -443,7 +444,6 @@ function BillPanel({ tableName, casts, slip, result, canUnpaid, onDispatch, onRe
   const [unpaidOn, setUnpaidOn] = useState(false);
   const [unpaidAmount, setUnpaidAmount] = useState<number>(0);
   const [busy, setBusy] = useState(false);
-  useEffect(() => { setAmount(result.currentTotal); }, [result.currentTotal]);
   const unpaidInvalid = unpaidOn && (unpaidAmount <= 0 || unpaidAmount > amount);
 
   return (
@@ -485,7 +485,7 @@ function BillPanel({ tableName, casts, slip, result, canUnpaid, onDispatch, onRe
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8, borderTop: '1px solid var(--noxa-divider)', paddingTop: 10 }}>
           <label style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
             <span style={miniLabel}>確定金額</span>
-            <input type="number" value={amount} onChange={(e) => setAmount(Number(e.target.value))} style={fieldStyle} inputMode="numeric" />
+            <input type="number" value={amount} onChange={(e) => setAmountOverride(Number(e.target.value))} style={fieldStyle} inputMode="numeric" />
           </label>
           <div style={{ display: 'flex', gap: 8 }}>
             <label style={{ display: 'flex', flexDirection: 'column', gap: 4, flex: 1 }}>

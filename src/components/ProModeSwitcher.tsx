@@ -1,14 +1,12 @@
 'use client';
 
-import { useEffect, useState } from 'react';
-import { getUiMode, setUiMode, type UiMode } from '@/lib/useUiMode';
+import { setUiMode, useUiMode, type UiMode } from '@/lib/useUiMode';
 
 /** かんたん / プロ の切替。プロフィール設定に置く。 */
 export function ProModeSwitcher() {
-  const [mode, setMode] = useState<UiMode>('easy');
-  useEffect(() => { setMode(getUiMode()); }, []);
-
-  const choose = (m: UiMode) => { setMode(m); setUiMode(m); };
+  // useUiMode（useSyncExternalStore）で購読＝切替はサイドバー等の全購読者へ即時反映
+  const mode = useUiMode();
+  const choose = (m: UiMode) => setUiMode(m);
 
   const opts: { value: UiMode; title: string; desc: string }[] = [
     { value: 'easy', title: 'かんたん', desc: '文字・ボタン大きめ。迷わない表示（おすすめ）' },
