@@ -16,10 +16,12 @@ export type DeviceClaims = {
  * 店舗デバイスログイン（Custom Token + claims）かどうかを判定。
  * device=true なら個人機能を隠し、allow のモジュールだけ表示する。
  */
+const NO_DEVICE: DeviceClaims = { loading: false, isDevice: false, allow: [], label: '', shopId: '' };
+
 export function useDeviceClaims(user: User | undefined): DeviceClaims {
   const [c, setC] = useState<DeviceClaims>({ loading: true, isDevice: false, allow: [], label: '', shopId: '' });
   useEffect(() => {
-    if (!user) { setC({ loading: false, isDevice: false, allow: [], label: '', shopId: '' }); return; }
+    if (!user) return; // 未ログインは返値側で導出（effect 内の同期 setState はカスケード再レンダー）
     let alive = true;
     user.getIdTokenResult().then((r) => {
       if (!alive) return;
@@ -31,10 +33,10 @@ export function useDeviceClaims(user: User | undefined): DeviceClaims {
         label: typeof r.claims.label === 'string' ? r.claims.label : '',
         shopId: typeof r.claims.shopId === 'string' ? r.claims.shopId : '',
       });
-    }).catch(() => { if (alive) setC({ loading: false, isDevice: false, allow: [], label: '', shopId: '' }); });
+    }).catch(() => { if (alive) setC(NO_DEVICE); });
     return () => { alive = false; };
   }, [user]);
-  return c;
+  return user ? c : NO_DEVICE;
 }
 
 export type ShopContext = {
@@ -48,14 +50,13 @@ export type ShopContext = {
  * shop_shops で ownerUid == uid のドキュメントを引く。
  * 個人ユーザー（MyDeck のみ）は hasShop=false → 店舗 UI を出さない。
  */
+const NO_SHOP: ShopContext = { loading: false, hasShop: false, shops: [] };
+
 export function useShopContext(uid: string | undefined): ShopContext {
   const [state, setState] = useState<ShopContext>({ loading: true, hasShop: false, shops: [] });
 
   useEffect(() => {
-    if (!uid) {
-      setState({ loading: false, hasShop: false, shops: [] });
-      return;
-    }
+    if (!uid) return; // 未ログインは返値側で導出
     let alive = true;
     getDocs(query(collection(db, 'shop_shops'), where('ownerUid', '==', uid)))
       .then((snap) => {
@@ -69,5 +70,5 @@ export function useShopContext(uid: string | undefined): ShopContext {
     return () => { alive = false; };
   }, [uid]);
 
-  return state;
+  return uid ? state : NO_SHOP;
 }

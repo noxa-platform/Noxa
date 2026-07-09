@@ -155,17 +155,20 @@ export function TransportClient({ user }: { user: User }) {
   const shop = useShopId(user);
   const { config } = useShopConfig(user);
   const reqTypes = config.transportTypes;
-  const [vehicles, setVehicles] = useState<Vehicle[]>([]);
-  const [requests, setRequests] = useState<TransportRequest[]>([]);
+  // 出所（path）つきスナップショットから一覧を導出（set-state-in-effect 返済・Day19）
+  const [vehSnap, setVehSnap] = useState<{ path: string; list: Vehicle[] } | null>(null);
+  const [reqSnap, setReqSnap] = useState<{ path: string; list: TransportRequest[] } | null>(null);
   const [selectedRequestId, setSelectedRequestId] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
   const reqPath = shop.shopId ? `shop_shops/${shop.shopId}/transport` : null;
   const vehPath = shop.shopId ? `shop_shops/${shop.shopId}/transport_vehicles` : null;
+  const requests = useMemo(() => (reqPath && reqSnap?.path === reqPath ? reqSnap.list : []), [reqSnap, reqPath]);
+  const vehicles = useMemo(() => (vehPath && vehSnap?.path === vehPath ? vehSnap.list : []), [vehSnap, vehPath]);
 
   // リクエスト購読
   useEffect(() => {
-    if (!reqPath) { setRequests([]); return; }
+    if (!reqPath) return;
     const unsub = onSnapshot(collection(db, reqPath), (snap) => {
       const list: TransportRequest[] = [];
       snap.forEach((d) => {
@@ -184,14 +187,14 @@ export function TransportClient({ user }: { user: User }) {
         });
       });
       list.sort((a, b) => a.time.localeCompare(b.time) || a.createdMs - b.createdMs);
-      setRequests(list);
+      setReqSnap({ path: reqPath, list });
     }, (e) => console.warn('[noxa:transport] リクエスト購読エラー', e?.message ?? e));
     return () => unsub();
   }, [reqPath]);
 
   // 車両購読
   useEffect(() => {
-    if (!vehPath) { setVehicles([]); return; }
+    if (!vehPath) return;
     const unsub = onSnapshot(collection(db, vehPath), (snap) => {
       const list: Vehicle[] = [];
       snap.forEach((d) => {
@@ -205,7 +208,7 @@ export function TransportClient({ user }: { user: User }) {
         });
       });
       list.sort((a, b) => a.name.localeCompare(b.name, 'ja'));
-      setVehicles(list);
+      setVehSnap({ path: vehPath, list });
     }, (e) => console.warn('[noxa:transport] 車両購読エラー', e?.message ?? e));
     return () => unsub();
   }, [vehPath]);
@@ -1105,11 +1108,11 @@ function RequestForm({ onAdd, busy, types }: { onAdd: (v: { time: string; type: 
   const [target, setTarget] = useState('');
   const [area, setArea] = useState('');
   const [memo, setMemo] = useState('');
-  // 設定変更で現在の選択が消えたら先頭へ寄せる
-  useEffect(() => { if (!types.some((t) => t.id === type)) setType(defaultType); }, [types, type, defaultType]);
+  // 設定変更で現在の選択が消えた場合は先頭扱い（effect での setState 補正はカスケード再レンダー＝導出に変更）
+  const effType = types.some((t) => t.id === type) ? type : defaultType;
   const submit = () => {
     if (!target.trim() || busy) return;
-    onAdd({ time, type, target, area, memo });
+    onAdd({ time, type: effType, target, area, memo });
     setTime(''); setTarget(''); setArea(''); setMemo(''); setType(defaultType);
   };
   return (
@@ -1122,7 +1125,7 @@ function RequestForm({ onAdd, busy, types }: { onAdd: (v: { time: string; type: 
         <span style={lbl}>種別</span>
         <div style={{ display: 'flex', gap: 4 }}>
           {types.map((t) => (
-            <button key={t.id} type="button" onClick={() => setType(t.id)} style={chip(type === t.id)}>{t.label}</button>
+            <button key={t.id} type="button" onClick={() => setType(t.id)} style={chip(effType === t.id)}>{t.label}</button>
           ))}
         </div>
       </label>

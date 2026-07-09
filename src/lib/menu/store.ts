@@ -75,13 +75,17 @@ export function useMenuStore(user: User): UseMenuStore {
   const shop = useShopId(user);
   const shopId = shop.shopId;
 
-  const [casts, setCasts] = useState<RawCast[]>([]);
+  // casts は出所（shopId）つきで保持し loading を導出（set-state-in-effect 返済・Day19。subsReady 廃止）
+  const [castsSnap, setCastsSnap] = useState<{ shopId: string; list: RawCast[] } | null>(null);
   const [infoCards, setInfoCards] = useState<InfoCard[]>([]);
   const [images, setImages] = useState<Record<string, string>>({});
   const [orders, setOrders] = useState<MenuOrder[]>([]);
   const [tables, setTables] = useState<ShopTable[]>([]);
   const [config, setConfig] = useState<MenuConfig>(DEFAULT_MENU_CONFIG);
-  const [subsReady, setSubsReady] = useState(false);
+  const casts = useMemo(
+    () => (shopId && castsSnap?.shopId === shopId ? castsSnap.list : []),
+    [castsSnap, shopId],
+  );
 
   useEffect(() => {
     if (shop.loading || !shopId) return;
@@ -90,8 +94,8 @@ export function useMenuStore(user: User): UseMenuStore {
     const unsubs = [
       onSnapshot(collection(db, `${base}/seating_casts`), (snap) => {
         const list: RawCast[] = []; snap.forEach((d) => list.push({ id: d.id, ...(d.data() as DocumentData) }));
-        setCasts(list);
-      }, onErr('casts')),
+        setCastsSnap({ shopId, list });
+      }, (e) => { console.warn('[noxa:menu] casts 購読エラー', e?.message ?? e); setCastsSnap({ shopId, list: [] }); }),
       onSnapshot(collection(db, `${base}/menu_info_cards`), (snap) => {
         const list: InfoCard[] = []; snap.forEach((d) => list.push({ id: d.id, ...(d.data() as Omit<InfoCard, 'id'>) }));
         setInfoCards(list);
@@ -124,8 +128,7 @@ export function useMenuStore(user: User): UseMenuStore {
         setConfig(d.exists() ? { ...DEFAULT_MENU_CONFIG, ...(d.data() as Partial<MenuConfig>) } : DEFAULT_MENU_CONFIG);
       }, onErr('config')),
     ];
-    setSubsReady(true);
-    return () => { unsubs.forEach((u) => u()); setSubsReady(false); };
+    return () => unsubs.forEach((u) => u());
   }, [shop.loading, shopId]);
 
   // パネル合成（cast + info）→ 表示順ソート
@@ -254,7 +257,7 @@ export function useMenuStore(user: User): UseMenuStore {
   }, [shopId]);
 
   return {
-    loading: shop.loading || (!!shopId && !subsReady),
+    loading: shop.loading || (!!shopId && castsSnap?.shopId !== shopId),
     shopId, canManage: shop.canManage, isDevice: shop.isDevice,
     panels, visiblePanels, tables, orders, config,
     addCastPanel, savePanelMeta, removePanel, setPanelImage, reorderPanel, addInfoCard,
