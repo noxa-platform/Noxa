@@ -25,28 +25,36 @@ type Sale = { id: string; amount: number; customerName: string | null; customerI
 export function SalesClient({ user }: { user: User }) {
   const shop = useShopId(user);
   const colPath = shop.shopId ? `shop_shops/${shop.shopId}/sales` : `personal_sales/${user.uid}/items`;
-  const [sales, setSales] = useState<Sale[]>([]);
-  const [customers, setCustomers] = useState<{ id: string; name: string }[]>([]);
-  const [loading, setLoading] = useState(true);
+  // 売上・顧客は「どのパス/店の購読か」つきで保持し、loading と表示リストを導出する
+  // （effect 冒頭の同期 setState は react-hooks/set-state-in-effect 違反。Day17 返済）
+  const [salesSnap, setSalesSnap] = useState<{ colPath: string; list: Sale[] } | null>(null);
+  const [customersSnap, setCustomersSnap] = useState<{ shopId: string; list: { id: string; name: string }[] } | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
   const [opBusy, setOpBusy] = useState(false); // 取消/修正の二重実行防止
 
+  const sales = useMemo(() => (salesSnap?.colPath === colPath ? salesSnap.list : []), [salesSnap, colPath]);
+  const customers = useMemo(
+    () => (shop.shopId && customersSnap?.shopId === shop.shopId ? customersSnap.list : []),
+    [customersSnap, shop.shopId],
+  );
+  const loading = shop.loading || salesSnap?.colPath !== colPath;
+
   // 店舗ワークスペース時のみ顧客台帳を購読（手入力売上の顧客紐付け用）
   useEffect(() => {
-    if (!shop.shopId) { setCustomers([]); return; }
-    const unsub = onSnapshot(collection(db, `shop_shops/${shop.shopId}/customers`), (snap) => {
+    const sid = shop.shopId;
+    if (!sid) return;
+    const unsub = onSnapshot(collection(db, `shop_shops/${sid}/customers`), (snap) => {
       const list: { id: string; name: string }[] = [];
       snap.forEach((d) => { const x = d.data() as DocumentData; list.push({ id: d.id, name: (x.name as string) ?? '（無名）' }); });
       list.sort((a, b) => a.name.localeCompare(b.name, 'ja'));
-      setCustomers(list);
-    }, () => setCustomers([]));
+      setCustomersSnap({ shopId: sid, list });
+    }, () => setCustomersSnap({ shopId: sid, list: [] }));
     return () => unsub();
   }, [shop.shopId]);
 
   useEffect(() => {
     if (shop.loading) return;
-    setLoading(true);
     // 期間クエリ化: 当月分のみ購読（全件購読は数ヶ月で read 数が破綻する）。
     // dayKey は businessDayKey 形式（YYYY-MM-DD）なので範囲条件で当月を取る。
     const monthStart = `${businessDayKey().slice(0, 7)}-01`;
@@ -60,8 +68,8 @@ export function SalesClient({ user }: { user: User }) {
         nomination: typeof x.nomination === 'string' ? x.nomination : null, dohan: x.dohan === true,
         unpaidAmount: typeof x.unpaidAmount === 'number' ? x.unpaidAmount : 0,
       }); });
-      setSales(list); setLoading(false); setLoadError(null);
-    }, (e) => { setLoading(false); setLoadError(`売上の読み込みに失敗しました（${e.code ?? e.message}）`); });
+      setSalesSnap({ colPath, list }); setLoadError(null);
+    }, (e) => { setSalesSnap({ colPath, list: [] }); setLoadError(`売上の読み込みに失敗しました（${e.code ?? e.message}）`); });
     return () => unsub();
   }, [colPath, shop.loading]);
 

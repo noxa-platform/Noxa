@@ -104,10 +104,15 @@ export function usePosStore(user: User): UsePosStore {
   const shopId = shop.shopId;
 
   const [config, setConfig] = useState<StoreConfig>(() => createDefaultStoreConfig());
-  const [tables, setTables] = useState<FloorTable[]>([]);
+  // 卓は出所（shopId）つきで保持し loading を導出（Day17: set-state-in-effect 返済・seating store と同型）
+  const [tablesSnap, setTablesSnap] = useState<{ shopId: string; list: FloorTable[] } | null>(null);
   const [casts, setCasts] = useState<Cast[]>([]);
   const [customers, setCustomers] = useState<ShopCustomer[]>([]);
-  const [loadingData, setLoadingData] = useState(true);
+  const tables = useMemo(
+    () => (shopId && tablesSnap?.shopId === shopId ? tablesSnap.list : []),
+    [shopId, tablesSnap],
+  );
+  const loadingData = !!shopId && tablesSnap?.shopId !== shopId;
   const configRef = useRef(config);
   // 売上の付け方（店舗設定 config/settings.salesAttribution）。会計時の帰属に使用
   const attributionRef = useRef<'mainCast' | 'operator'>('mainCast');
@@ -149,15 +154,13 @@ export function usePosStore(user: User): UsePosStore {
 
   // 卓（seating_tables）購読
   useEffect(() => {
-    if (!shopId) { setLoadingData(false); return; }
-    setLoadingData(true);
+    if (!shopId) return;
     const unsubT = onSnapshot(collection(db, `shop_shops/${shopId}/seating_tables`), (snap) => {
       const list: FloorTable[] = [];
       snap.forEach((d) => list.push({ ...createEmptyTable(d.id, d.id), ...(d.data() as Partial<FloorTable>), id: d.id } as FloorTable));
       list.sort((a, b) => a.name.localeCompare(b.name, 'ja'));
-      setTables(list);
-      setLoadingData(false);
-    }, () => setLoadingData(false));
+      setTablesSnap({ shopId, list });
+    }, () => setTablesSnap({ shopId, list: [] }));
     const unsubC = onSnapshot(collection(db, `shop_shops/${shopId}/seating_casts`), (snap) => {
       const list: Cast[] = [];
       snap.forEach((d) => {

@@ -135,17 +135,24 @@ export function useSeatingStore(user: User): UseSeatingStore {
   const shopId = shop.shopId;
 
   const [stored, setStored] = useState<StoredCast[]>([]);
-  const [tables, setTables] = useState<FloorTable[]>([]);
+  // 卓は「どの shopId のスナップショットか」ごと保持し、loading を導出する
+  // （effect 冒頭の setLoading(true) は react-hooks/set-state-in-effect 違反＝カスケード再レンダー。
+  //   Day17 返済: 出所つきデータからの導出に置き換え。エラー時は空リストで確定し loading を解く）
+  const [tablesSnap, setTablesSnap] = useState<{ shopId: string; list: FloorTable[] } | null>(null);
   const [queue, setQueue] = useState<QueueItem[]>([]);
   const [rotationOrder, setRotationOrderState] = useState<string[]>([]);
   const [assistMode, setAssistModeState] = useState<AssistMode>('balanced');
-  const [loadingData, setLoadingData] = useState(true);
   const [dataError, setDataError] = useState<string | null>(null);
+
+  const tables = useMemo(
+    () => (shopId && tablesSnap?.shopId === shopId ? tablesSnap.list : []),
+    [shopId, tablesSnap],
+  );
+  const loadingData = !!shopId && tablesSnap?.shopId !== shopId;
 
   // 購読
   useEffect(() => {
-    if (!shopId) { setLoadingData(false); return; }
-    setLoadingData(true);
+    if (!shopId) return;
     const unsubs = [
       onSnapshot(collection(db, `shop_shops/${shopId}/seating_casts`), (snap) => {
         const list: StoredCast[] = [];
@@ -156,9 +163,8 @@ export function useSeatingStore(user: User): UseSeatingStore {
         const list: FloorTable[] = [];
         snap.forEach((d) => list.push(toFloorTable(d.id, d.data() as Partial<FloorTable>)));
         list.sort((a, b) => a.name.localeCompare(b.name, 'ja'));
-        setTables(list);
-        setLoadingData(false);
-      }, (e) => { setLoadingData(false); setDataError(`卓情報の取得に失敗（${e?.code ?? e?.message ?? e}）`); }),
+        setTablesSnap({ shopId, list });
+      }, (e) => { setTablesSnap({ shopId, list: [] }); setDataError(`卓情報の取得に失敗（${e?.code ?? e?.message ?? e}）`); }),
       onSnapshot(doc(db, `shop_shops/${shopId}/seating_meta/state`), (snap) => {
         const data = snap.exists() ? (snap.data() as { rotationOrder?: string[]; assistMode?: string }) : undefined;
         setRotationOrderState(Array.isArray(data?.rotationOrder) ? data.rotationOrder : []);
