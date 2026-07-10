@@ -15,6 +15,7 @@ import {
 import type { User } from 'firebase/auth';
 import { db } from '@/lib/firebase/config';
 import { useShopRole, hasShopRole } from '@/lib/useShopRole';
+import { UNPAID_STATUS_OPTIONS, balanceOf, collectPatch, isOverdue as isOverdueAt, statusChangePatch, type UnpaidStatus } from '@/lib/unpaid/logic';
 
 /**
  * 売掛管理モジュール（機微・オーナー専用・実データ）
@@ -24,8 +25,6 @@ import { useShopRole, hasShopRole } from '@/lib/useShopRole';
  */
 
 const mono = 'var(--noxa-font-mono)';
-
-type UnpaidStatus = '未回収' | '一部回収' | '回収済';
 
 type UnpaidRecord = {
   id: string;
@@ -40,7 +39,7 @@ type UnpaidRecord = {
   elapsedDays: number; // date からの経過日数（算出）
 };
 
-const STATUS_OPTIONS: UnpaidStatus[] = ['未回収', '一部回収', '回収済'];
+const STATUS_OPTIONS = UNPAID_STATUS_OPTIONS;
 
 /** YYYY-MM-DD から今日までの経過日数を算出 */
 function calcElapsedDays(date: string): number {
@@ -98,11 +97,8 @@ function statusStyle(status: UnpaidStatus): React.CSSProperties {
 
 const yen = (n: number) => `¥${Math.round(n).toLocaleString('ja-JP')}`;
 
-/** 残高（売掛額 − 回収済）。負にならないよう 0 でクランプ */
-const balanceOf = (r: UnpaidRecord) => Math.max(0, r.amount - r.paidAmount);
-
-/** 期日超過か（回収済は除く。due は YYYY-MM-DD の文字列比較で判定） */
-const isOverdue = (r: UnpaidRecord) => r.status !== '回収済' && !!r.due && r.due < today();
+/** 期日超過か（純ロジックは lib/unpaid/logic に分離・Day24） */
+const isOverdue = (r: UnpaidRecord) => isOverdueAt(r, today());
 
 /** 顧客別残高を集計（回収済は除外） */
 function buildBalanceRanking(records: UnpaidRecord[]) {
@@ -227,25 +223,17 @@ export function UnpaidClient({ user }: { user: User }) {
 
   const changeStatus = async (r: UnpaidRecord, status: UnpaidStatus) => {
     if (!path) return;
-    const patch: Record<string, unknown> = { status };
-    // 回収済にしたら回収済額を売掛額に揃える
-    if (status === '回収済') patch.paidAmount = r.amount;
-    // 回収済から戻すのは誤操作の取り消し＝回収済額をリセットして債権を再表示
-    // （据え置くと「未回収なのに残高¥0」で合計・ランキングからも消える。回収実績は回収記録で入れ直す）
-    else if (r.status === '回収済') patch.paidAmount = 0;
-    await updateDoc(doc(db, `${path}/${r.id}`), patch);
+    await updateDoc(doc(db, `${path}/${r.id}`), statusChangePatch(r, status));
   };
 
   // 一部回収を確定（paidAmount を加算し、status を自動更新）
   const applyCollect = async (r: UnpaidRecord) => {
     if (!path || busy) return;
-    const add = Number(collectAmount);
-    if (!Number.isFinite(add) || add <= 0) return;
+    const patch = collectPatch(r, Number(collectAmount));
+    if (!patch) return;
     setBusy(true);
     try {
-      const nextPaid = Math.min(r.amount, r.paidAmount + add);
-      const status: UnpaidStatus = nextPaid >= r.amount ? '回収済' : '一部回収';
-      await updateDoc(doc(db, `${path}/${r.id}`), { paidAmount: nextPaid, status });
+      await updateDoc(doc(db, `${path}/${r.id}`), patch);
       setCollectId(null);
       setCollectAmount('');
     } finally {
