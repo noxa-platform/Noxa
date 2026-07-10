@@ -267,7 +267,20 @@ function ShiftCalendar({ shopId, uid, shifts }: { shopId: string; uid: string; s
       setPlans(m);
     } catch { /* skip */ }
   };
-  useEffect(() => { void reloadPlans(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [shopId, uid]);
+  // 初回ロードは then 形式で（async 関数の同期区間から辿れる setState を避ける）。
+  // 保存/クリア後の再読込はハンドラから reloadPlans を呼ぶ
+  useEffect(() => {
+    let alive = true;
+    getDocs(query(collection(db, `shop_shops/${shopId}/shift_plans`), where('castUid', '==', uid)))
+      .then((snap) => {
+        if (!alive) return;
+        const m: Record<string, Plan> = {};
+        snap.forEach((d) => { const v = d.data() as DocumentData; if (v.date) m[v.date as string] = { date: v.date as string, start: (v.start as string) ?? '', end: (v.end as string) ?? '', off: v.off === true }; });
+        setPlans(m);
+      })
+      .catch(() => { /* skip */ });
+    return () => { alive = false; };
+  }, [shopId, uid]);
 
   // 実績の日別合計（分）
   const actualMin = useMemo(() => {

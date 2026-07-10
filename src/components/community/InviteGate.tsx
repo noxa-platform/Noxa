@@ -16,23 +16,26 @@ const { mono, jp: fontJp, display: fontDisplay } = FONT;
 export function InviteGate({ children }: { children: (me: CommunityMe) => React.ReactNode }) {
   const [me, setMe] = useState<CommunityMe | null>(null);
   const [loading, setLoading] = useState(true);
-  const [code, setCode] = useState('');
+  // ?invite=CODE は lazy initializer で（AuthGuard 配下＝クライアント専用マウントのため SSR 不整合なし。
+  // effect での同期 setCode は set-state-in-effect 違反）
+  const [code, setCode] = useState(() =>
+    typeof window === 'undefined' ? '' : new URLSearchParams(window.location.search).get('invite') ?? '');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
-    setLoading(true);
     try { setMe(await fetchCommunityMe()); } catch (e) { setError(e instanceof Error ? e.message : '取得に失敗しました'); } finally { setLoading(false); }
   }, []);
 
+  // 初回は then 形式（effect から async 関数を直接呼ぶと同期区間の setState と見なされる）
   useEffect(() => {
-    // ?invite=CODE を初期値に
-    if (typeof window !== 'undefined') {
-      const c = new URLSearchParams(window.location.search).get('invite');
-      if (c) setCode(c);
-    }
-    refresh();
-  }, [refresh]);
+    let alive = true;
+    fetchCommunityMe()
+      .then((m) => { if (alive) setMe(m); })
+      .catch((e) => { if (alive) setError(e instanceof Error ? e.message : '取得に失敗しました'); })
+      .finally(() => { if (alive) setLoading(false); });
+    return () => { alive = false; };
+  }, []);
 
   const submit = async () => {
     const c = code.trim();

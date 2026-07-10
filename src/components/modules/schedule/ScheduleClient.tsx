@@ -40,8 +40,19 @@ export function ScheduleClient({ user }: { user: User }) {
     } catch { /* skip */ }
     setLoading(false);
   };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  useEffect(() => { reload(); }, [user.uid]);
+  // 初回ロードは then 形式（async 関数の同期区間から辿れる setState を避ける・set-state-in-effect 対応）。
+  // 追加/削除後の再読込はハンドラから reload を呼ぶ
+  useEffect(() => {
+    let alive = true;
+    getDocs(collection(db, `personal_reminders/${user.uid}/items`))
+      .then((snap) => {
+        if (!alive) return;
+        const list: Item[] = []; snap.forEach((d) => list.push(mapItem(d.id, d.data())));
+        setItems(list); setLoading(false);
+      })
+      .catch(() => { if (alive) setLoading(false); });
+    return () => { alive = false; };
+  }, [user.uid]);
 
   // 個人のカスタム種別を読み込み（無ければ既定）
   useEffect(() => {

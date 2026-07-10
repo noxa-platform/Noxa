@@ -33,11 +33,18 @@ function ProfileLinkClient({ user }: { user: User }) {
   const [avatar, setAvatar] = useState('');
   const [blocks, setBlocks] = useState<ProfileBlock[]>([]);
   const [visibility, setVisibility] = useState<Visibility>('private');
-  // ハンドル変更
+  // ハンドル変更。可用性は「どのハンドルの結果か」つきで持ち、表示状態を導出する
+  // （同期分岐の setHStatus は set-state-in-effect 違反）
   const [editingHandle, setEditingHandle] = useState(false);
   const [newHandle, setNewHandle] = useState('');
-  const [hStatus, setHStatus] = useState<'idle' | 'ok' | 'taken' | 'invalid'>('idle');
+  const [checkSnap, setCheckSnap] = useState<{ for: string; status: 'ok' | 'taken' } | null>(null);
   const [hBusy, setHBusy] = useState(false);
+  const validH = validateHandle(newHandle);
+  const hStatus: 'idle' | 'checking' | 'ok' | 'taken' | 'invalid' =
+    !editingHandle ? 'idle'
+    : !validH ? (newHandle ? 'invalid' : 'idle')
+    : validH === handle ? 'idle'
+    : checkSnap?.for === validH ? checkSnap.status : 'checking';
 
   useEffect(() => {
     let alive = true;
@@ -70,10 +77,9 @@ function ProfileLinkClient({ user }: { user: User }) {
   useEffect(() => {
     if (!editingHandle) return;
     const h = validateHandle(newHandle);
-    if (!h) { setHStatus(newHandle ? 'invalid' : 'idle'); return; }
-    if (h === handle) { setHStatus('idle'); return; }
+    if (!h || h === handle) return; // 表示は導出（invalid/idle）
     let alive = true;
-    const t = setTimeout(async () => { const ok = await isHandleAvailable(h); if (alive) setHStatus(ok ? 'ok' : 'taken'); }, 400);
+    const t = setTimeout(async () => { const ok = await isHandleAvailable(h); if (alive) setCheckSnap({ for: h, status: ok ? 'ok' : 'taken' }); }, 400);
     return () => { alive = false; clearTimeout(t); };
   }, [newHandle, editingHandle, handle]);
 
@@ -82,7 +88,7 @@ function ProfileLinkClient({ user }: { user: User }) {
     const h = validateHandle(newHandle); if (!h) return;
     setHBusy(true);
     try { const nh = await changeUserHandle(user.uid, handle, h); setHandle(nh); setEditingHandle(false); setNewHandle(''); }
-    catch { setHStatus('taken'); }
+    catch { setCheckSnap({ for: h, status: 'taken' }); }
     finally { setHBusy(false); }
   };
 

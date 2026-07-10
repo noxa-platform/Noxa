@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { AuthGuard } from '@/components/AuthGuard';
@@ -9,25 +9,24 @@ import { HANDLE_RE, validateHandle, suggestHandle, isHandleAvailable, claimHandl
 
 function Onboarding({ user }: { user: User }) {
   const router = useRouter();
-  const [handle, setHandle] = useState('');
-  const [status, setStatus] = useState<'idle' | 'checking' | 'ok' | 'taken' | 'invalid'>('idle');
+  // 初期値は lazy initializer で（マウント時に user は確定済み。effect での seed は不要）
+  const [handle, setHandle] = useState(() => suggestHandle(user.displayName || user.email?.split('@')[0] || 'noxa'));
+  // 可用性は「どのハンドルの結果か」つきで持ち、表示状態を導出（同期 setStatus は set-state-in-effect 違反）
+  const [checkSnap, setCheckSnap] = useState<{ for: string; status: 'ok' | 'taken' } | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const seeded = useRef(false);
-
-  useEffect(() => {
-    if (seeded.current) return; seeded.current = true;
-    setHandle(suggestHandle(user.displayName || user.email?.split('@')[0] || 'noxa'));
-  }, [user]);
+  const validH = validateHandle(handle);
+  const status: 'idle' | 'checking' | 'ok' | 'taken' | 'invalid' =
+    !validH ? (handle ? 'invalid' : 'idle')
+    : checkSnap?.for === validH ? checkSnap.status : 'checking';
 
   useEffect(() => {
     const h = validateHandle(handle);
-    if (!h) { setStatus(handle ? 'invalid' : 'idle'); return; }
-    setStatus('checking');
+    if (!h) return; // invalid/idle は導出
     let alive = true;
     const t = setTimeout(async () => {
       const ok = await isHandleAvailable(h);
-      if (alive) setStatus(ok ? 'ok' : 'taken');
+      if (alive) setCheckSnap({ for: h, status: ok ? 'ok' : 'taken' });
     }, 400);
     return () => { alive = false; clearTimeout(t); };
   }, [handle]);

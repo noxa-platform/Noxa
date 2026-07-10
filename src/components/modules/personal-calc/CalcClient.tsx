@@ -43,15 +43,19 @@ async function loadShops(uid: string): Promise<ShopRef[]> {
 }
 
 export function CalcClient({ user }: { user: User }) {
-  const [shops, setShops] = useState<ShopRef[]>([]);
+  // 出所つきスナップショットから shops/config/loading を導出（set-state-in-effect 返済・Day21）
+  const [shopsSnap, setShopsSnap] = useState<ShopRef[] | null>(null);
   const [shopId, setShopId] = useState<string | null>(null);
-  const [config, setConfig] = useState<StoreConfig | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [cfgSnap, setCfgSnap] = useState<{ shopId: string; config: StoreConfig } | null>(null);
   const [state, setState] = useState<CalculatorState>(() => createInitialState(createDefaultStoreConfig()));
   const [activeCategory, setActiveCategory] = useState('');
   const [customItem, setCustomItem] = useState<{ name: string } | null>(null);
   const [, setTick] = useState(0);
   const configRef = useRef<StoreConfig>(createDefaultStoreConfig());
+
+  const shops = shopsSnap ?? [];
+  const config = shopId && cfgSnap?.shopId === shopId ? cfgSnap.config : null;
+  const loading = shopsSnap === null || (!!shopId && cfgSnap?.shopId !== shopId);
 
   useEffect(() => { const t = setInterval(() => setTick((n) => n + 1), 30000); return () => clearInterval(t); }, []);
 
@@ -59,17 +63,15 @@ export function CalcClient({ user }: { user: User }) {
     let alive = true;
     loadShops(user.uid).then((s) => {
       if (!alive) return;
-      setShops(s);
+      setShopsSnap(s);
       setShopId(s[0]?.id ?? null);
-      if (s.length === 0) setLoading(false);
-    }).catch(() => { if (alive) setLoading(false); });
+    }).catch(() => { if (alive) setShopsSnap([]); });
     return () => { alive = false; };
   }, [user.uid]);
 
   useEffect(() => {
     if (!shopId) return;
     let alive = true;
-    setLoading(true);
     (async () => {
       let cfg = createDefaultStoreConfig('active');
       try {
@@ -78,10 +80,9 @@ export function CalcClient({ user }: { user: User }) {
       } catch { /* default */ }
       if (!alive) return;
       configRef.current = cfg;
-      setConfig(cfg);
+      setCfgSnap({ shopId, config: cfg });
       setState(createInitialState(cfg));
       setActiveCategory(cfg.menuCategories[0]?.id ?? '');
-      setLoading(false);
     })();
     return () => { alive = false; };
   }, [shopId]);

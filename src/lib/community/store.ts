@@ -71,11 +71,19 @@ export function useCommunity(uid?: string): UseCommunity {
   const [boards, setBoards] = useState<Board[]>([]);
   const [boardId, setBoardId] = useState<string | null>(null);
   const [threadId, setThreadId] = useState<string | null>(null);
-  const [threads, setThreads] = useState<Thread[]>([]);
+  // スレッド一覧は「どの板×絞り込みの結果か」キーつきで保持し loading を導出
+  // （reloadThreads 冒頭の同期 setLoading は set-state-in-effect 違反・Day21 返済）
+  const [threadsSnap, setThreadsSnap] = useState<{ key: string; list: Thread[] } | null>(null);
   const [areaFilter, setAreaFilterState] = useState<AreaTag | null>(null);
   const [jobFilter, setJobFilterState] = useState<JobTag | null>(null);
   const [likedIds, setLikedIds] = useState<Set<string>>(new Set());
-  const [loading, setLoading] = useState(false);
+
+  const threadsKey = boardId ? `${boardId}|${areaFilter ?? ''}|${jobFilter ?? ''}` : null;
+  const threads = useMemo(
+    () => (threadsKey && threadsSnap?.key === threadsKey ? threadsSnap.list : []),
+    [threadsSnap, threadsKey],
+  );
+  const loading = !!threadsKey && threadsSnap?.key !== threadsKey;
 
   // 板一覧 + 自分のいいね済み集合を初回ロード
   useEffect(() => {
@@ -87,14 +95,14 @@ export function useCommunity(uid?: string): UseCommunity {
     return () => { alive = false; };
   }, []);
 
-  // 板 or 絞り込みが変わったらスレッド一覧を再取得
+  // 板 or 絞り込みが変わったらスレッド一覧を再取得（キーつきで確定＝古い応答は導出側で無視される）
   const reloadThreads = useCallback(async (bId: string, filter: ThreadFilter) => {
-    setLoading(true);
+    const key = `${bId}|${filter.areaTag ?? ''}|${filter.jobTag ?? ''}`;
     try {
       const list = await repoRef.current.listThreads(bId, filter);
-      setThreads(list);
-    } finally {
-      setLoading(false);
+      setThreadsSnap({ key, list });
+    } catch {
+      setThreadsSnap({ key, list: [] }); // 失敗でもキーを確定し loading を解く
     }
   }, []);
 
@@ -122,12 +130,11 @@ export function useCommunity(uid?: string): UseCommunity {
 
   // 更新後スレッドを threads 配列に反映
   const upsertThread = useCallback((updated: Thread) => {
-    setThreads((cur) => {
-      const idx = cur.findIndex((t) => t.id === updated.id);
-      if (idx === -1) return [updated, ...cur];
-      const next = [...cur];
-      next[idx] = updated;
-      return next;
+    setThreadsSnap((cur) => {
+      if (!cur) return cur;
+      const idx = cur.list.findIndex((t) => t.id === updated.id);
+      const next = idx === -1 ? [updated, ...cur.list] : cur.list.map((t, i) => (i === idx ? updated : t));
+      return { ...cur, list: next };
     });
   }, []);
 
@@ -135,13 +142,14 @@ export function useCommunity(uid?: string): UseCommunity {
   const createThread = useCallback(async (input: { title: string; body: string; areaTag?: AreaTag; jobTag?: JobTag }) => {
     if (!boardId) return;
     const created = await repoRef.current.createThread({ boardId, ...input });
-    // 絞り込みを解除して自分のスレを確実に表示
+    // 絞り込みを解除して自分のスレを確実に表示。
+    // キーも解除後（絞り込みなし）で確定させ、再取得完了前でも作成スレを即表示する
     setAreaFilterState(null);
     setJobFilterState(null);
-    upsertThread(created);
+    setThreadsSnap((cur) => ({ key: `${boardId}||`, list: [created, ...(cur?.list.filter((t) => t.id !== created.id) ?? [])] }));
     setThreadId(created.id);
     setView('thread');
-  }, [boardId, upsertThread]);
+  }, [boardId]);
 
   const addReply = useCallback(async (tid: string, input: { body: string; areaTag?: AreaTag; jobTag?: JobTag }) => {
     const updated = await repoRef.current.addReply(tid, input);
@@ -160,7 +168,7 @@ export function useCommunity(uid?: string): UseCommunity {
 
   const deleteThread = useCallback(async (tid: string) => {
     await repoRef.current.deleteThread(tid);
-    setThreads((cur) => cur.filter((t) => t.id !== tid));
+    setThreadsSnap((cur) => (cur ? { ...cur, list: cur.list.filter((t) => t.id !== tid) } : cur));
     setThreadId(null);
     setView('threads');
   }, []);

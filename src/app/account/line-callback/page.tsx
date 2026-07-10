@@ -10,28 +10,31 @@ import { handlePostLoginRedirect } from '@/lib/auth';
 function LineCallback() {
   const router = useRouter();
   const params = useSearchParams();
-  const [error, setError] = useState<string | null>(null);
+  const [asyncError, setAsyncError] = useState<string | null>(null);
   const firedRef = useRef(false);
 
+  // URL パラメータ起因のエラーは派生値（effect 内の同期 setState は set-state-in-effect 違反）
+  const code = params.get('code');
+  const state = params.get('state');
+  const paramError = params.get('error')
+    ? 'LINEログインがキャンセルされました。'
+    : (!code || !state) ? '不正なコールバックです。' : null;
+  const error = paramError ?? asyncError;
+
   useEffect(() => {
-    if (firedRef.current) return;
+    if (firedRef.current || paramError || !code || !state) return;
     firedRef.current = true;
-    const code = params.get('code');
-    const state = params.get('state');
-    const errParam = params.get('error');
-    if (errParam) { setError('LINEログインがキャンセルされました。'); return; }
-    if (!code || !state) { setError('不正なコールバックです。'); return; }
     // 統合フロー（既存アカウントへ LINE 由来アカウントを統合）
     if (isLineMergePending()) {
       finishLineMerge(code, state)
         .then(() => router.push('/account/connections?merged=1'))
-        .catch((e) => { console.error('[line-merge]', e); setError('LINE アカウントの統合に失敗しました。'); });
+        .catch((e) => { console.error('[line-merge]', e); setAsyncError('LINE アカウントの統合に失敗しました。'); });
       return;
     }
     finishLineLogin(code, state)
       .then((redirect) => handlePostLoginRedirect(redirect, router))
-      .catch((e) => { console.error('[line-callback]', e); setError('LINEログインに失敗しました。もう一度お試しください。'); });
-  }, [params, router]);
+      .catch((e) => { console.error('[line-callback]', e); setAsyncError('LINEログインに失敗しました。もう一度お試しください。'); });
+  }, [code, state, paramError, router]);
 
   return (
     <main className="noxa-zone" style={{ minHeight: '100dvh', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24 }}>

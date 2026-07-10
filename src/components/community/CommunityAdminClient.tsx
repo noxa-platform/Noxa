@@ -38,21 +38,28 @@ async function adminPost<T>(path: string, body: unknown): Promise<T> {
 
 export function CommunityAdminClient({ user }: { user: User }) {
   void user;
-  const [items, setItems] = useState<ReportItem[]>([]);
-  const [loading, setLoading] = useState(true);
+  // 一覧未取得（null）を loading として導出（load 冒頭の同期 setLoading は set-state-in-effect 違反）
+  const [itemsSnap, setItemsSnap] = useState<ReportItem[] | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [busyKey, setBusyKey] = useState<string | null>(null);
   const [revokeUid, setRevokeUid] = useState('');
   const [revokeMsg, setRevokeMsg] = useState<string | null>(null);
+  const items = itemsSnap ?? [];
+  const loading = itemsSnap === null && !err;
 
   const load = useCallback(async () => {
-    setLoading(true); setErr(null);
-    try { const r = await adminPost<{ items: ReportItem[] }>('/api/community/admin/reports', {}); setItems(r.items); }
-    catch (e) { setErr(e instanceof Error ? e.message : '取得に失敗しました'); }
-    finally { setLoading(false); }
+    try { const r = await adminPost<{ items: ReportItem[] }>('/api/community/admin/reports', {}); setItemsSnap(r.items); setErr(null); }
+    catch (e) { setErr(e instanceof Error ? e.message : '取得に失敗しました'); setItemsSnap([]); }
   }, []);
 
-  useEffect(() => { load(); }, [load]);
+  // 初回は then 形式（effect から async 関数を直接呼ぶと同期区間の setState と見なされる）
+  useEffect(() => {
+    let alive = true;
+    adminPost<{ items: ReportItem[] }>('/api/community/admin/reports', {})
+      .then((r) => { if (alive) { setItemsSnap(r.items); setErr(null); } })
+      .catch((e) => { if (alive) { setErr(e instanceof Error ? e.message : '取得に失敗しました'); setItemsSnap([]); } });
+    return () => { alive = false; };
+  }, []);
 
   const act = async (it: ReportItem, action: 'hide' | 'unhide' | 'resolve') => {
     const key = `${it.targetType}:${it.targetId}`;
