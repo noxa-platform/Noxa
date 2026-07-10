@@ -143,3 +143,18 @@ unit **80件** / rules 33件（CI GREEN run 28700766120）/ tsc EXIT0 / build EX
 7. **Vercel env 確認**: `NEXT_PUBLIC_COMMUNITY_BACKEND` — 既定が firestore になったため、未設定なら次のデプロイからコミュニティが本番モードで公開される（意図どおりか確認）
 8. **コミュニティ板シード**: `node scripts/seed-community.mjs`（冪等・ADC 必要・本番 DB 書込のため要確認実行）
 9. 旧 CF 個人売上控えの dayKey/amount バックフィル要否の判断
+
+---
+
+## 追記（2026-07-10）: リリース列車の残タスク消化状況
+
+本番反映（rules / CF / Vercel / スモーク）完了後の残5タスクを点検した結果:
+
+- **8. コミュニティ板シード → 完了済みを確認**。本番 `noxa_boards` に6板、シードスレッド3件＋レス、`noxa_meta/community_seed` marker（2026-06-01 投入）が存在。再実行不要。
+- **9. バックフィル → 調査完了・対象0件（apply 不要）**。dry-run 実施（collectionGroup index 不要の直接走査版）で、本番 `personal_sales/*/items` は 3 uid / 6件のみ、**`source=='shop'` の旧 CF 控えは 0 件**。CF 断線期間中に本番で POS 会計→控え生成が走った実績が無かったため、過去分の回収は不要。
+  - 補足所見: 既存6件は全て `StandaloneSale`（顧客紐付けなしの日売/組数登録・2026-05-12 スキーマ）で dayKey が無く、現行 SalesClient（dayKey 範囲購読）には表示されない。ただし当月表示設計のため 5〜6 月の旧データが 7 月画面に出ないのは仕様と整合。月ピッカー等で過去月表示を実装する際に dayKey 付与を再検討。
+- **5. App Store Connect 通知 URL 設定 → 人間タスクのまま**（Apple アカウント 2FA が必要）。
+- **Vercel env `GOOGLE_PLAY_*` → Android 展開時まで保留のまま**（サービスアカウント鍵の準備が必要）。
+- **BUG-12 仕様判断 → ユーザー判断待ちのまま**（`docs/bug-12-cast-start-times-memo.md`、推奨=現状維持）。
+
+以上でリリース列車の自律消化可能分は完了。残りは上記3件の人間タスクのみ。
