@@ -6,11 +6,11 @@
  * 端末ログインPIN（panel プロファイル）発行、表示設定。オーナー専用。
  */
 
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import type { User } from 'firebase/auth';
 import { useMenuStore } from '@/lib/menu/store';
 import { compressImage } from '@/lib/menu/imageCompress';
-import { COLOR_HEX, COLOR_LABEL, DEFAULT_MENU_CONFIG, type MenuConfig, type MenuPanel } from '@/lib/menu/types';
+import { COLOR_HEX, COLOR_LABEL, type MenuConfig, type MenuPanel } from '@/lib/menu/types';
 import { Shell, Section, Empty, Eyebrow, lbl, field, chip } from '@/components/modules/schedule/ScheduleClient';
 
 const mono = 'var(--noxa-font-mono)';
@@ -29,9 +29,13 @@ export function FirstVisitSettingsClient({ user }: { user: User }) {
   const [busy, setBusy] = useState(false);
   const [pin, setPin] = useState('');
   const [pinMsg, setPinMsg] = useState('');
-  const [cfg, setCfg] = useState<MenuConfig>(DEFAULT_MENU_CONFIG);
-
-  useEffect(() => { setCfg(store.config); }, [store.config]);
+  // 表示設定: 未編集の間は store.config に追従し、編集を始めたら override（出所=shopId つき）が勝つ
+  // （menu store の loading は casts 到着基準で config は後着し得るため、mount 時固定だと
+  //  「既定値のまま保存→実設定を上書き」の穴がある。旧 effect ミラーは set-state-in-effect
+  //  違反な上、リモート更新が編集途中の値を握り潰していた）
+  const [cfgOverride, setCfgOverride] = useState<{ shopId: string; config: MenuConfig } | null>(null);
+  const cfg = cfgOverride && cfgOverride.shopId === store.shopId ? cfgOverride.config : store.config;
+  const setCfg = (c: MenuConfig) => { if (store.shopId) setCfgOverride({ shopId: store.shopId, config: c }); };
 
   if (store.loading) return <Shell title="初回案内 設定" eyebrow="Noxa OS · First Visit" crumb="first-visit/settings"><Eyebrow>読み込み中…</Eyebrow></Shell>;
   if (!store.shopId) return <Shell title="初回案内 設定" eyebrow="Noxa OS · First Visit" crumb="first-visit/settings"><Section label="設定"><Empty>所属店舗が見つかりません。</Empty></Section></Shell>;
@@ -161,7 +165,7 @@ export function FirstVisitSettingsClient({ user }: { user: User }) {
           <input type="checkbox" checked={cfg.skipOrderInput} onChange={(e) => setCfg({ ...cfg, skipOrderInput: e.target.checked })} />
           確定時に入力モーダルを出さず即送信する（席はヘッダで選択した卓を使用）
         </label>
-        <div style={{ marginTop: 12 }}><button type="button" onClick={() => store.saveConfig(cfg)} style={chip(true)}>表示設定を保存</button></div>
+        <div style={{ marginTop: 12 }}><button type="button" onClick={async () => { await store.saveConfig(cfg); setCfgOverride(null); /* 保存後は store 追従に戻す */ }} style={chip(true)}>表示設定を保存</button></div>
       </Section>
 
       {/* 編集モーダル */}

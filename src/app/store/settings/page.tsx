@@ -20,32 +20,44 @@ const moduleLabel = (key: string) => DEFAULT_MODULES.find((d) => d.key === key)?
 
 function SettingsClient({ user }: { user: User }) {
   const { loading, shopId, canManage, config, save } = useShopConfig(user);
-  const [terms, setTerms] = useState<Record<string, string>>({});
-  const [roles, setRoles] = useState<RoleWage[]>([]);
-  const [modules, setModules] = useState<ModuleCfg[]>([]);
-  const [attr, setAttr] = useState<SalesAttribution>('mainCast');
-  const [setLen, setSetLen] = useState(60);
-  const [rotLen, setRotLen] = useState(15);
-  const [transportTypes, setTransportTypes] = useState<ChoiceItem[]>([]);
-  const [invCats, setInvCats] = useState<ChoiceItem[]>([]);
-  const [saving, setSaving] = useState(false);
-  const [saved, setSaved] = useState(false);
-
-  useEffect(() => {
-    if (loading) return;
-    setTerms(config.terminology ?? {});
-    setRoles(config.roles);
-    setModules(config.modules);
-    setAttr(config.salesAttribution);
-    setSetLen(config.setTimeLength);
-    setRotLen(config.rotationTimeLength);
-    setTransportTypes(config.transportTypes?.length ? config.transportTypes : DEFAULT_TRANSPORT_TYPES);
-    setInvCats(config.inventoryCategories?.length ? config.inventoryCategories : DEFAULT_INVENTORY_CATEGORIES);
-  }, [loading]); // eslint-disable-line react-hooks/exhaustive-deps
 
   if (loading) return <P>読み込み中…</P>;
   if (!shopId) return <P>店舗が見つかりません。</P>;
   if (!canManage) return <P>この設定はオーナー専用です。</P>;
+
+  // 編集セッション: key=shopId でフォームを再マウントし、初期値は lazy initializer で確定
+  // （useShopConfig の loading は config 到着で解けるため、この時点で config は確定済み。
+  //  旧実装の「loading 解決時に effect で全フィールドへミラー」は set-state-in-effect 違反だった）
+  return <SettingsForm key={shopId} shopId={shopId} myUid={user.uid} config={config} save={save} />;
+}
+
+function SettingsForm({ shopId, myUid, config, save }: {
+  shopId: string; myUid: string; config: ReturnType<typeof useShopConfig>['config']; save: ReturnType<typeof useShopConfig>['save'];
+}) {
+  const [terms, setTerms] = useState<Record<string, string>>(() => config.terminology ?? {});
+  const [roles, setRoles] = useState<RoleWage[]>(() => config.roles);
+  const [modules, setModules] = useState<ModuleCfg[]>(() => config.modules);
+  const [attr, setAttr] = useState<SalesAttribution>(() => config.salesAttribution);
+  const [setLen, setSetLen] = useState(() => config.setTimeLength);
+  const [rotLen, setRotLen] = useState(() => config.rotationTimeLength);
+  const [transportTypes, setTransportTypes] = useState<ChoiceItem[]>(() => config.transportTypes?.length ? config.transportTypes : DEFAULT_TRANSPORT_TYPES);
+  const [invCats, setInvCats] = useState<ChoiceItem[]>(() => config.inventoryCategories?.length ? config.inventoryCategories : DEFAULT_INVENTORY_CATEGORIES);
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
+
+  // 未保存インジケータ: マウント時の内容と比較して導出（PosConfig の Day15 事故対策の横展開。
+  // 保存成功でベースラインを更新）
+  const draftJson = JSON.stringify({ terms, roles, modules, attr, setLen, rotLen, transportTypes, invCats });
+  const [baselineJson, setBaselineJson] = useState(() => draftJson);
+  const dirty = draftJson !== baselineJson;
+
+  // 未保存のままタブを閉じる/リロードを確認（SPA 内遷移は対象外＝既知の限界）
+  useEffect(() => {
+    if (!dirty) return;
+    const h = (e: BeforeUnloadEvent) => { e.preventDefault(); };
+    window.addEventListener('beforeunload', h);
+    return () => window.removeEventListener('beforeunload', h);
+  }, [dirty]);
 
   const moveModule = (i: number, dir: -1 | 1) => {
     const j = i + dir; if (j < 0 || j >= modules.length) return;
@@ -56,6 +68,7 @@ function SettingsClient({ user }: { user: User }) {
     setSaving(true); setSaved(false);
     try {
       await save({ terminology: terms, roles: roles.filter((r) => r.name.trim()), modules, salesAttribution: attr, setTimeLength: Math.max(1, setLen), rotationTimeLength: Math.max(1, rotLen), transportTypes: transportTypes.filter((t) => t.label.trim()), inventoryCategories: invCats.filter((t) => t.label.trim()) });
+      setBaselineJson(draftJson);
       setSaved(true); setTimeout(() => setSaved(false), 2000);
     } finally { setSaving(false); }
   };
@@ -70,7 +83,7 @@ function SettingsClient({ user }: { user: User }) {
 
       {/* メンバー・招待 */}
       <Section title="メンバーと招待">
-        <MembersSection shopId={shopId} myUid={user.uid} />
+        <MembersSection shopId={shopId} myUid={myUid} />
       </Section>
 
       {/* 用語辞書 */}
@@ -168,6 +181,7 @@ function SettingsClient({ user }: { user: User }) {
       <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 8 }}>
         <button type="button" onClick={onSave} disabled={saving} className="noxa-btn noxa-btn-primary" style={{ padding: '12px 28px', fontSize: 15 }}>{saving ? '保存中…' : '設定を保存'}</button>
         {saved && <span style={{ color: 'var(--noxa-status-success)', fontSize: 13 }}>✓ 保存しました</span>}
+        {dirty && !saving && !saved && <span style={{ color: 'var(--noxa-status-warning)', fontSize: 13 }}>● 未保存の変更があります</span>}
       </div>
     </div>
   );
