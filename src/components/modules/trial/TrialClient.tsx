@@ -818,6 +818,8 @@ export function TrialClient({ user }: { user: User }) {
 
   const remove = async (c: Candidate) => {
     if (!path || busy) return;
+    // 採用記録（面接メモ・評価つき）の誤タップ消失防止
+    if (!window.confirm(`「${c.name}」の体験入店記録を削除しますか？面接メモ・評価も消えます。`)) return;
     setBusy(true);
     try {
       await deleteDoc(doc(db, `${path}/${c.id}`));

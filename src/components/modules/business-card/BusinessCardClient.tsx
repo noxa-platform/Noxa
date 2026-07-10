@@ -199,6 +199,7 @@ export function BusinessCardClient({ user }: { user: User }) {
   };
 
   const removeOrder = async (id: string) => {
+    if (!window.confirm('この発注履歴を削除しますか？')) return;
     await deleteDoc(doc(db, `${colPath}/${id}`));
     setRows((p) => p.filter((r) => r.id !== id));
   };

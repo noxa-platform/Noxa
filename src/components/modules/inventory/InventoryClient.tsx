@@ -191,10 +191,12 @@ export function InventoryClient({ user }: { user: User }) {
     finally { setBusy(false); }
   };
 
-  const removeItem = async (id: string) => {
+  const removeItem = async (item: StockItem) => {
     if (!invPath || busy) return;
+    // 品目削除は在庫数・発注点設定ごと消える（誤タップ防止）
+    if (!window.confirm(`品目「${item.name}」を削除しますか？在庫数・発注点の設定も消えます。`)) return;
     setBusy(true);
-    try { await deleteDoc(doc(db, `${invPath}/${id}`)); }
+    try { await deleteDoc(doc(db, `${invPath}/${item.id}`)); }
     finally { setBusy(false); }
   };
 
@@ -695,7 +697,7 @@ export function InventoryClient({ user }: { user: User }) {
                           </button>
                           <button
                             type="button"
-                            onClick={() => removeItem(item.id)}
+                            onClick={() => removeItem(item)}
                             title="削除"
                             style={{ ...iconBtnStyle, color: 'var(--noxa-text-faint)' }}
                           >

@@ -286,9 +286,11 @@ export function ReservationClient({ user }: { user: User }) {
       }
     } finally { setBusy(false); }
   };
-  const remove = async (id: string) => {
+  const remove = async (r: Reservation) => {
     if (!resPath) return;
-    await deleteDoc(doc(db, `${resPath}/${id}`));
+    // 予約の誤タップ消失防止（キャンセルはステータス遷移で残せる旨も案内）
+    if (!window.confirm(`「${r.customerName}」${r.date} ${r.time} の予約を削除しますか？記録を残す場合は「→ キャンセル」を使ってください。`)) return;
+    await deleteDoc(doc(db, `${resPath}/${r.id}`));
   };
 
   return (
@@ -645,7 +647,7 @@ export function ReservationClient({ user }: { user: User }) {
                                   secondary={st !== '来店済'} />
                               ))}
                               <ActionButton label="編集" onClick={() => openEdit(r)} secondary />
-                              <button type="button" onClick={() => remove(r.id)} title="削除" aria-label="削除"
+                              <button type="button" onClick={() => remove(r)} title="削除" aria-label="削除"
                                 style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--noxa-text-faint)', fontSize: 16, lineHeight: 1, padding: '4px 6px' }}>
                                 ×
                               </button>

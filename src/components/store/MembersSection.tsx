@@ -86,6 +86,8 @@ export function MembersSection({ shopId, myUid }: { shopId: string; myUid: strin
   };
 
   const cancelInvite = async (code: string) => {
+    // 共有済みコードの誤取消防止（取り消すと相手側で無効になる）
+    if (!window.confirm(`招待コード ${code} を取り消しますか？送付済みの場合、相手は参加できなくなります。`)) return;
     try { await deleteDoc(doc(db, `shop_shops/${shopId}/invites/${code}`)); } catch (e) { setError(String((e as Error)?.message ?? e)); }
   };
 

@@ -261,10 +261,12 @@ export function TransportClient({ user }: { user: User }) {
       await updateDoc(doc(db, `${reqPath}/${req.id}`), patch);
     } finally { setBusy(false); }
   };
-  const removeRequest = async (id: string) => {
+  const removeRequest = async (r: TransportRequest) => {
     if (!reqPath) return;
-    await deleteDoc(doc(db, `${reqPath}/${id}`));
-    if (selectedRequestId === id) setSelectedRequestId(null);
+    // 今夜の送迎依頼の誤タップ消失＝送り忘れ事故に直結するため対象入りで確認
+    if (!window.confirm(`「${r.target}」${r.time ? ` ${r.time}` : ''} の送迎リクエストを削除しますか？`)) return;
+    await deleteDoc(doc(db, `${reqPath}/${r.id}`));
+    if (selectedRequestId === r.id) setSelectedRequestId(null);
   };
 
   // ── 車両操作 ──
@@ -289,9 +291,10 @@ export function TransportClient({ user }: { user: User }) {
     try { await updateDoc(doc(db, `${vehPath}/${veh.id}`), { status: next }); }
     finally { setBusy(false); }
   };
-  const removeVehicle = async (id: string) => {
+  const removeVehicle = async (v: Vehicle) => {
     if (!vehPath) return;
-    await deleteDoc(doc(db, `${vehPath}/${id}`));
+    if (!window.confirm(`車両「${v.name}」を削除しますか？`)) return;
+    await deleteDoc(doc(db, `${vehPath}/${v.id}`));
   };
 
   const selectedRequest = requests.find((r) => r.id === selectedRequestId) ?? null;
@@ -551,7 +554,7 @@ export function TransportClient({ user }: { user: User }) {
                     </span>
                     <button
                       type="button"
-                      onClick={() => removeVehicle(v.id)}
+                      onClick={() => removeVehicle(v)}
                       title="車両を削除"
                       style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--noxa-text-faint)', fontSize: 14, flex: 'none' }}
                     >
@@ -1041,7 +1044,7 @@ export function TransportClient({ user }: { user: User }) {
 
                   <button
                     type="button"
-                    onClick={() => removeRequest(req.id)}
+                    onClick={() => removeRequest(req)}
                     aria-label="リクエストを削除"
                     style={{
                       appearance: 'none',

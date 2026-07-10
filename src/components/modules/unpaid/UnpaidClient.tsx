@@ -101,6 +101,9 @@ const yen = (n: number) => `¥${Math.round(n).toLocaleString('ja-JP')}`;
 /** 残高（売掛額 − 回収済）。負にならないよう 0 でクランプ */
 const balanceOf = (r: UnpaidRecord) => Math.max(0, r.amount - r.paidAmount);
 
+/** 期日超過か（回収済は除く。due は YYYY-MM-DD の文字列比較で判定） */
+const isOverdue = (r: UnpaidRecord) => r.status !== '回収済' && !!r.due && r.due < today();
+
 /** 顧客別残高を集計（回収済は除外） */
 function buildBalanceRanking(records: UnpaidRecord[]) {
   const map = new Map<string, number>();
@@ -178,6 +181,7 @@ export function UnpaidClient({ user }: { user: User }) {
   const totalAmount = useMemo(() => active.reduce((s, r) => s + balanceOf(r), 0), [active]);
   const totalCount = active.length;
   const maxElapsed = active.length > 0 ? Math.max(...active.map((r) => r.elapsedDays)) : 0;
+  const overdueCount = useMemo(() => active.filter(isOverdue).length, [active]);
 
   const balanceRanking = useMemo(() => buildBalanceRanking(records), [records]);
   const maxBalance = balanceRanking.length > 0 ? balanceRanking[0][1] : 1;
@@ -214,9 +218,11 @@ export function UnpaidClient({ user }: { user: User }) {
     }
   };
 
-  const removeRecord = async (id: string) => {
+  const removeRecord = async (r: UnpaidRecord) => {
     if (!path) return;
-    await deleteDoc(doc(db, `${path}/${id}`));
+    // 売掛＝債権の記録。誤タップ消失は金銭事故に直結するため対象名・残高入りで確認
+    if (!window.confirm(`「${r.customerName}」の売掛記録（残 ${yen(balanceOf(r))}）を削除しますか？この操作は取り消せません。`)) return;
+    await deleteDoc(doc(db, `${path}/${r.id}`));
   };
 
   const changeStatus = async (r: UnpaidRecord, status: UnpaidStatus) => {
@@ -224,6 +230,9 @@ export function UnpaidClient({ user }: { user: User }) {
     const patch: Record<string, unknown> = { status };
     // 回収済にしたら回収済額を売掛額に揃える
     if (status === '回収済') patch.paidAmount = r.amount;
+    // 回収済から戻すのは誤操作の取り消し＝回収済額をリセットして債権を再表示
+    // （据え置くと「未回収なのに残高¥0」で合計・ランキングからも消える。回収実績は回収記録で入れ直す）
+    else if (r.status === '回収済') patch.paidAmount = 0;
     await updateDoc(doc(db, `${path}/${r.id}`), patch);
   };
 
@@ -381,11 +390,12 @@ export function UnpaidClient({ user }: { user: User }) {
             {/* ── サマリカード ── */}
             <div
               className="grid grid-cols-1"
-              style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12, marginBottom: 24 }}
+              style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 12, marginBottom: 24 }}
             >
               <SummaryCard label="未収金合計" value={yen(totalAmount)} accent="primary" />
               <SummaryCard label="件数（未回収＋一部）" value={`${totalCount} 件`} />
               <SummaryCard label="最長滞留日数" value={`${maxElapsed} 日`} accent="warning" />
+              <SummaryCard label="期日超過" value={`${overdueCount} 件`} accent={overdueCount > 0 ? 'error' : undefined} />
             </div>
 
             {/* ── 売掛追加フォーム ── */}
@@ -584,8 +594,8 @@ export function UnpaidClient({ user }: { user: User }) {
                           >
                             {r.date || '—'}
                             {r.due && (
-                              <span style={{ display: 'block', fontSize: 10, color: 'var(--noxa-text-faint)' }}>
-                                期日 {r.due}
+                              <span style={{ display: 'block', fontSize: 10, color: isOverdue(r) ? 'var(--noxa-status-error)' : 'var(--noxa-text-faint)', fontWeight: isOverdue(r) ? 700 : 400 }}>
+                                {isOverdue(r) ? '⚠ 期日超過 ' : '期日 '}{r.due}
                               </span>
                             )}
                           </td>
@@ -701,7 +711,7 @@ export function UnpaidClient({ user }: { user: User }) {
                                 ))}
                               <button
                                 type="button"
-                                onClick={() => removeRecord(r.id)}
+                                onClick={() => removeRecord(r)}
                                 title="削除"
                                 aria-label={`${r.customerName}を削除`}
                                 style={{
@@ -832,13 +842,15 @@ function SummaryCard({
 }: {
   label: string;
   value: string;
-  accent?: 'primary' | 'warning';
+  accent?: 'primary' | 'warning' | 'error';
 }) {
   const valueColor =
     accent === 'primary'
       ? 'var(--noxa-accent-primary-ink)'
       : accent === 'warning'
       ? 'var(--noxa-status-warning)'
+      : accent === 'error'
+      ? 'var(--noxa-status-error)'
       : 'var(--noxa-text-primary)';
 
   return (
