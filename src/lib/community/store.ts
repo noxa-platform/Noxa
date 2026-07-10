@@ -95,14 +95,18 @@ export function useCommunity(uid?: string): UseCommunity {
     return () => { alive = false; };
   }, []);
 
-  // 板 or 絞り込みが変わったらスレッド一覧を再取得（キーつきで確定＝古い応答は導出側で無視される）
+  // 板 or 絞り込みが変わったらスレッド一覧を再取得。
+  // 最後に要求したキーを ref に控え、古い応答は破棄する（破棄しないと遅い旧応答が
+  // 新しいスナップを後から上書き→キー不一致で loading に戻ったまま再取得も走らない）
+  const reloadKeyRef = useRef<string | null>(null);
   const reloadThreads = useCallback(async (bId: string, filter: ThreadFilter) => {
     const key = `${bId}|${filter.areaTag ?? ''}|${filter.jobTag ?? ''}`;
+    reloadKeyRef.current = key;
     try {
       const list = await repoRef.current.listThreads(bId, filter);
-      setThreadsSnap({ key, list });
+      if (reloadKeyRef.current === key) setThreadsSnap({ key, list });
     } catch {
-      setThreadsSnap({ key, list: [] }); // 失敗でもキーを確定し loading を解く
+      if (reloadKeyRef.current === key) setThreadsSnap({ key, list: [] }); // 失敗でもキーを確定し loading を解く
     }
   }, []);
 

@@ -17,26 +17,31 @@ export type DeviceClaims = {
  * device=true なら個人機能を隠し、allow のモジュールだけ表示する。
  */
 const NO_DEVICE: DeviceClaims = { loading: false, isDevice: false, allow: [], label: '', shopId: '' };
+const LOADING_DEVICE: DeviceClaims = { loading: true, isDevice: false, allow: [], label: '', shopId: '' };
 
 export function useDeviceClaims(user: User | undefined): DeviceClaims {
-  const [c, setC] = useState<DeviceClaims>({ loading: true, isDevice: false, allow: [], label: '', shopId: '' });
+  // 出所（uid）つきスナップショットから導出。uid 不一致＝別ユーザーの結果は返さない
+  // （ログアウト→別ユーザー再ログイン時に前ユーザーの claims が解決まで漏れるのを防ぐ）
+  const [snap, setSnap] = useState<{ uid: string; claims: DeviceClaims } | null>(null);
   useEffect(() => {
     if (!user) return; // 未ログインは返値側で導出（effect 内の同期 setState はカスケード再レンダー）
+    const uid = user.uid;
     let alive = true;
     user.getIdTokenResult().then((r) => {
       if (!alive) return;
       const isDevice = r.claims.device === true;
-      setC({
+      setSnap({ uid, claims: {
         loading: false,
         isDevice,
         allow: Array.isArray(r.claims.allow) ? (r.claims.allow as string[]) : [],
         label: typeof r.claims.label === 'string' ? r.claims.label : '',
         shopId: typeof r.claims.shopId === 'string' ? r.claims.shopId : '',
-      });
-    }).catch(() => { if (alive) setC(NO_DEVICE); });
+      } });
+    }).catch(() => { if (alive) setSnap({ uid, claims: NO_DEVICE }); });
     return () => { alive = false; };
   }, [user]);
-  return user ? c : NO_DEVICE;
+  if (!user) return NO_DEVICE;
+  return snap?.uid === user.uid ? snap.claims : LOADING_DEVICE;
 }
 
 export type ShopContext = {
@@ -51,24 +56,27 @@ export type ShopContext = {
  * 個人ユーザー（MyDeck のみ）は hasShop=false → 店舗 UI を出さない。
  */
 const NO_SHOP: ShopContext = { loading: false, hasShop: false, shops: [] };
+const LOADING_SHOP: ShopContext = { loading: true, hasShop: false, shops: [] };
 
 export function useShopContext(uid: string | undefined): ShopContext {
-  const [state, setState] = useState<ShopContext>({ loading: true, hasShop: false, shops: [] });
+  // 出所（uid）つきスナップショットから導出（useDeviceClaims と同じ理由）
+  const [snap, setSnap] = useState<{ uid: string; ctx: ShopContext } | null>(null);
 
   useEffect(() => {
     if (!uid) return; // 未ログインは返値側で導出
     let alive = true;
     getDocs(query(collection(db, 'shop_shops'), where('ownerUid', '==', uid)))
-      .then((snap) => {
+      .then((s) => {
         if (!alive) return;
-        const shops = snap.docs.map((d) => ({ id: d.id, name: (d.data().name as string) ?? d.id }));
-        setState({ loading: false, hasShop: shops.length > 0, shops });
+        const shops = s.docs.map((d) => ({ id: d.id, name: (d.data().name as string) ?? d.id }));
+        setSnap({ uid, ctx: { loading: false, hasShop: shops.length > 0, shops } });
       })
       .catch(() => {
-        if (alive) setState({ loading: false, hasShop: false, shops: [] });
+        if (alive) setSnap({ uid, ctx: NO_SHOP });
       });
     return () => { alive = false; };
   }, [uid]);
 
-  return uid ? state : NO_SHOP;
+  if (!uid) return NO_SHOP;
+  return snap?.uid === uid ? snap.ctx : LOADING_SHOP;
 }
