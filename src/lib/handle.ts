@@ -12,29 +12,11 @@ import { VISIBILITY, type Visibility, resolveVisibility } from '@/lib/visibility
 export { VISIBILITY, resolveVisibility };
 export type { Visibility };
 
-export const HANDLE_RE = /^[a-z0-9_]{3,20}$/;
-const RESERVED = new Set([
-  'admin', 'support', 'noxa', 'account', 'api', 'null', 'undefined', 'root', 'system',
-  'help', 'about', 'login', 'signup', 'u', 's', 'p', 'me', 'official', 'staff', 'noxaofficial',
-]);
+// 純ルール（検証・候補生成）は firebase 非依存の handle-rules に分離（テスト対象・Day25）
+export { HANDLE_RE, validateHandle, suggestHandle } from '@/lib/handle-rules';
+import { validateHandle } from '@/lib/handle-rules';
 
 export type ProfileType = 'user' | 'shop';
-
-export function validateHandle(raw: string): string | null {
-  const h = (raw ?? '').trim().toLowerCase();
-  if (!HANDLE_RE.test(h)) return null;
-  if (RESERVED.has(h)) return null;
-  return h;
-}
-
-/** 表示名/メールから候補ハンドルを生成（英数字以外を除去、3〜20字に整形） */
-export function suggestHandle(seed: string): string {
-  let s = (seed ?? '').toLowerCase().replace(/[^a-z0-9_]/g, '');
-  if (s.length < 3) s = `noxa_${s}`;
-  s = s.slice(0, 20);
-  while (s.length < 3) s += '0';
-  return s;
-}
 
 export async function isHandleAvailable(handle: string): Promise<boolean> {
   const h = validateHandle(handle);

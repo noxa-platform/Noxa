@@ -171,12 +171,16 @@ export function CustomersClient({ user }: { user: User }) {
           <p style={{ margin: '0 0 6px', fontSize: 15 }}>まだ顧客がいません。</p>
           <p style={{ margin: 0, fontSize: 13, color: 'var(--noxa-text-muted)' }}>「＋ 顧客を追加」から登録できます（{place}の台帳）。</p>
         </div>
+      ) : list.length === 0 ? (
+        <p style={{ padding: '24px 4px', margin: 0, fontSize: 13, color: 'var(--noxa-text-muted)' }}>
+          条件に一致する顧客がいません。検索語・評価の絞り込みを見直してください。
+        </p>
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3" style={{ gap: 12 }}>
           {list.map((c) => (
             <button key={c.id} type="button" onClick={() => setEditId(c.id)} style={{ appearance: 'none', textAlign: 'left', cursor: 'pointer', background: 'var(--noxa-surface-card)', border: '1px solid var(--noxa-border)', borderRadius: 14, padding: 16, display: 'flex', flexDirection: 'column', gap: 10, color: 'var(--noxa-text-primary)' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                <span style={{ width: 38, height: 38, borderRadius: 19, background: 'linear-gradient(135deg,#8B5CF6,#C4384A)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', fontSize: 16, flex: 'none' }}>{c.name[0]}</span>
+                <span style={{ width: 38, height: 38, borderRadius: 19, background: 'linear-gradient(135deg,#8B5CF6,#C4384A)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', fontSize: 16, flex: 'none' }}>{c.name.trim().charAt(0) || '客'}</span>
                 <div style={{ minWidth: 0, flex: 1 }}>
                   <div style={{ fontSize: 16, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c.name}</div>
                   <Stars rank={c.rank} />
