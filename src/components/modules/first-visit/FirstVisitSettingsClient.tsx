@@ -165,7 +165,12 @@ export function FirstVisitSettingsClient({ user }: { user: User }) {
           <input type="checkbox" checked={cfg.skipOrderInput} onChange={(e) => setCfg({ ...cfg, skipOrderInput: e.target.checked })} />
           確定時に入力モーダルを出さず即送信する（席はヘッダで選択した卓を使用）
         </label>
-        <div style={{ marginTop: 12 }}><button type="button" onClick={async () => { await store.saveConfig(cfg); setCfgOverride(null); /* 保存後は store 追従に戻す */ }} style={chip(true)}>表示設定を保存</button></div>
+        <div style={{ marginTop: 12 }}><button type="button" onClick={async () => {
+          // 保存後は store 追従に戻す。保存中にさらに編集された場合はその編集を消さない
+          const saved = cfgOverride;
+          await store.saveConfig(cfg);
+          setCfgOverride((cur) => (cur === saved ? null : cur));
+        }} style={chip(true)}>表示設定を保存</button></div>
       </Section>
 
       {/* 編集モーダル */}

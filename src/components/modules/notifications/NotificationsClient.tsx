@@ -60,11 +60,15 @@ export function NotificationsClient({ user }: { user: User }) {
   const unread = list.filter((n) => !n.read);
 
   // 全件既読（1件ずつタップの手間を省く。楽観更新・失敗分は次回ロードで未読に戻る）
+  const [markingAll, setMarkingAll] = useState(false);
   const markAllRead = async () => {
     const targets = unread;
-    if (targets.length === 0) return;
+    if (targets.length === 0 || markingAll) return;
+    setMarkingAll(true);
     setList((p) => p.map((n) => ({ ...n, read: true })));
-    await Promise.all(targets.map((n) => updateDoc(doc(db, `notification_inbox/${n.id}`), { read: true }).catch(() => {})));
+    try {
+      await Promise.all(targets.map((n) => updateDoc(doc(db, `notification_inbox/${n.id}`), { read: true }).catch(() => {})));
+    } finally { setMarkingAll(false); }
   };
 
   return (
