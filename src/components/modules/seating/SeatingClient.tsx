@@ -515,7 +515,8 @@ function TableCard({ table, castById, posConfig, active, onSelect, onOpenPos }: 
                 <span style={{ fontSize: 10, color: 'var(--noxa-text-faint)', fontFamily: mono }}>分 · {timer.setNumber}set</span>
               </span>
             ) : <span style={{ fontSize: 12, fontFamily: mono, color: 'var(--noxa-text-muted)' }}>{fmtElapsed(table.startTime)}</span>}
-            <span style={{ fontSize: 10, fontFamily: mono, color: 'var(--noxa-text-faint)' }}>{guestName ? `${guestName} · ` : ''}{table.customers.length}名 · 計{fmtElapsed(table.startTime)}</span>
+            {/* スマホ2列（カード幅 ~170px）で長い客名が折返してカード高が揃わなくなるため 1 行に収める */}
+            <span style={{ fontSize: 10, fontFamily: mono, color: 'var(--noxa-text-faint)', maxWidth: '100%', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{guestName ? `${guestName} · ` : ''}{table.customers.length}名 · 計{fmtElapsed(table.startTime)}</span>
           </div>
           {/* セット進捗バー */}
           {timer && (
