@@ -81,10 +81,16 @@ export function useMenuStore(user: User): UseMenuStore {
   const [images, setImages] = useState<Record<string, string>>({});
   const [orders, setOrders] = useState<MenuOrder[]>([]);
   const [tables, setTables] = useState<ShopTable[]>([]);
-  const [config, setConfig] = useState<MenuConfig>(DEFAULT_MENU_CONFIG);
+  // config も出所つきで保持し loading に到着を含める（Day26。後着中に既定値で表示/編集が
+  // 始まり、first-visit 設定が既定値のまま保存し得た穴の根治）
+  const [cfgSnap, setCfgSnap] = useState<{ shopId: string; config: MenuConfig } | null>(null);
   const casts = useMemo(
     () => (shopId && castsSnap?.shopId === shopId ? castsSnap.list : []),
     [castsSnap, shopId],
+  );
+  const config = useMemo(
+    () => (shopId && cfgSnap?.shopId === shopId ? cfgSnap.config : DEFAULT_MENU_CONFIG),
+    [cfgSnap, shopId],
   );
 
   useEffect(() => {
@@ -125,8 +131,8 @@ export function useMenuStore(user: User): UseMenuStore {
         setTables(t);
       }, onErr('tables')),
       onSnapshot(doc(db, `${base}/menu_config/main`), (d) => {
-        setConfig(d.exists() ? { ...DEFAULT_MENU_CONFIG, ...(d.data() as Partial<MenuConfig>) } : DEFAULT_MENU_CONFIG);
-      }, onErr('config')),
+        setCfgSnap({ shopId, config: d.exists() ? { ...DEFAULT_MENU_CONFIG, ...(d.data() as Partial<MenuConfig>) } : DEFAULT_MENU_CONFIG });
+      }, (e) => { console.warn('[noxa:menu] config 購読エラー', e?.message ?? e); setCfgSnap({ shopId, config: DEFAULT_MENU_CONFIG }); }),
     ];
     return () => unsubs.forEach((u) => u());
   }, [shop.loading, shopId]);
@@ -257,7 +263,7 @@ export function useMenuStore(user: User): UseMenuStore {
   }, [shopId]);
 
   return {
-    loading: shop.loading || (!!shopId && castsSnap?.shopId !== shopId),
+    loading: shop.loading || (!!shopId && (castsSnap?.shopId !== shopId || cfgSnap?.shopId !== shopId)),
     shopId, canManage: shop.canManage, isDevice: shop.isDevice,
     panels, visiblePanels, tables, orders, config,
     addCastPanel, savePanelMeta, removePanel, setPanelImage, reorderPanel, addInfoCard,

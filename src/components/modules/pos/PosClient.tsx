@@ -445,6 +445,9 @@ function BillPanel({ tableName, casts, slip, result, canUnpaid, onDispatch, onRe
   const [unpaidAmount, setUnpaidAmount] = useState<number>(0);
   const [busy, setBusy] = useState(false);
   const unpaidInvalid = unpaidOn && (unpaidAmount <= 0 || unpaidAmount > amount);
+  // 負数の手入力で会計できると負の売上計上→顧客累計の減算・個人控えの負額転記まで波及する
+  // （0円はサービス会計としてあり得るため拒否しない）
+  const amountInvalid = !Number.isFinite(amount) || amount < 0;
 
   return (
     <div style={{ background: 'var(--noxa-surface-card)', border: '1px solid var(--noxa-border)', borderRadius: 16, padding: 16, display: 'flex', flexDirection: 'column', gap: 12 }}>
@@ -519,7 +522,7 @@ function BillPanel({ tableName, casts, slip, result, canUnpaid, onDispatch, onRe
             </div>
           )}
           <div style={{ display: 'flex', gap: 8 }}>
-            <button type="button" disabled={busy || unpaidInvalid} className="noxa-btn noxa-btn-primary" style={{ ...primaryBtn, flex: 1, opacity: busy || unpaidInvalid ? 0.7 : 1 }}
+            <button type="button" disabled={busy || unpaidInvalid || amountInvalid} className="noxa-btn noxa-btn-primary" style={{ ...primaryBtn, flex: 1, opacity: busy || unpaidInvalid || amountInvalid ? 0.7 : 1 }}
               onClick={async () => { setBusy(true); try { await onCheckout({ amount, castName: castName || undefined, customerName: customerName || undefined, guests, unpaidAmount: unpaidOn ? unpaidAmount : undefined }); setCheckingOut(false); } catch (e) { window.alert('会計に失敗しました（通信状態をご確認ください）。\n' + ((e as Error)?.message ?? String(e))); } finally { setBusy(false); } }}>
               {busy ? '計上中…' : `${yen(amount)} で確定${unpaidOn && unpaidAmount > 0 ? `（うちツケ${yen(unpaidAmount)}）` : ''}`}
             </button>

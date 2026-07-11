@@ -278,6 +278,8 @@ export function usePosStore(user: User): UsePosStore {
 
   const checkoutSlip = useCallback<UsePosStore['checkoutSlip']>(async (tableId, slipId, opts) => {
     if (!shopId) return;
+    // 金銭書込の入口ガード（UI 側でも拒否するが、負の売上→顧客累計減算まで波及するため二重防衛）
+    if (!Number.isFinite(opts.amount) || opts.amount < 0) throw new Error('会計金額が不正です（0以上を指定してください）');
     // 売上転記＋伝票削除を単一トランザクションで（二重計上/取りこぼし防止・同時編集に安全）
     await runTransaction(db, async (tx) => {
       const ref = tableRef(tableId);
