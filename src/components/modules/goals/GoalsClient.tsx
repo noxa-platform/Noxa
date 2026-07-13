@@ -7,6 +7,8 @@ import type { User } from 'firebase/auth';
 import { db } from '@/lib/firebase/config';
 import { getActiveShop, pickShopId } from '@/lib/workspace';
 import { computeGoalHistory } from '@/lib/goals/history';
+import { businessMonthKey } from '@/lib/datetime';
+import { currentBusinessYm, lastSixMonths } from '@/lib/goals/months';
 
 /**
  * 目標管理 — Noxa OS（実データ）
@@ -20,22 +22,11 @@ const mono = 'var(--noxa-font-mono)';
 const display = 'var(--noxa-font-display-en)';
 const yen = (n: number) => `¥${Math.round(n).toLocaleString('ja-JP')}`;
 
-function ymOf(d = new Date()): string {
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
-}
-function last6Months(): { ym: string; label: string }[] {
-  const out: { ym: string; label: string }[] = [];
-  const now = new Date();
-  for (let i = 5; i >= 0; i--) {
-    const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
-    out.push({ ym: ymOf(d), label: `${d.getMonth() + 1}月` });
-  }
-  return out;
-}
+// 売上の月バケットは営業月基準（businessMonthKey）に統一。dayKey は既に businessDayKey。
 function saleYm(d: DocumentData): string | null {
   if (typeof d.dayKey === 'string' && d.dayKey.length >= 7) return d.dayKey.slice(0, 7);
   const c = d.checkoutAt ?? d.createdAt;
-  if (c && typeof c.toDate === 'function') return ymOf(c.toDate());
+  if (c && typeof c.toDate === 'function') return businessMonthKey(c.toDate());
   return null;
 }
 
@@ -44,7 +35,7 @@ type Perf = { byMonth: Record<string, number>; currentTypes: Record<string, numb
 async function loadPerf(uid: string): Promise<Perf> {
   const byMonth: Record<string, number> = {};
   const currentTypes: Record<string, number> = {};
-  const cur = ymOf();
+  const cur = currentBusinessYm();
   const add = (d: DocumentData) => {
     if (d.voided === true) return; // 取消は集計から除外
     const ym = saleYm(d);
@@ -65,7 +56,7 @@ async function loadPerf(uid: string): Promise<Perf> {
       // 期間クエリ化（Day13）: グラフに使うのは直近6ヶ月のみ。全件取得は read 数が
       // 蓄積で破綻する。オーナーは dayKey 範囲（単一フィールド index）、スタッフは
       // castUid 一致のみで取得しクライアント側で月フィルタ（複合 index を増やさない）
-      const sixAgo = `${last6Months()[0].ym}-01`;
+      const sixAgo = `${lastSixMonths()[0].ym}-01`;
       const ss = isOwner
         ? await getDocs(query(col, where('dayKey', '>=', sixAgo)))
         : await getDocs(query(col, where('castUid', '==', uid)));
@@ -89,7 +80,7 @@ async function loadGoals(uid: string): Promise<{ byYm: Record<string, number>; c
     });
   } catch { /* skip */ }
   // 当月の月別 doc があればそれが正（current は旧クライアント互換のミラー）
-  const cur = ymOf();
+  const cur = currentBusinessYm();
   if (byYm[cur]) currentGoal = byYm[cur];
   return { byYm, currentGoal };
 }
@@ -116,8 +107,8 @@ export function GoalsClient({ user }: { user: User }) {
     return () => { alive = false; };
   }, [user.uid]);
 
-  const months = useMemo(() => last6Months(), []);
-  const cur = ymOf();
+  const months = useMemo(() => lastSixMonths(), []);
+  const cur = currentBusinessYm();
   const actual = perf.byMonth[cur] ?? 0;
   const rate = goalSales > 0 ? Math.round((actual / goalSales) * 100) : 0;
   // 過去月は「当時の目標」で達成率を出す（未記録の月のみ現在の目標で換算・注記つき）
