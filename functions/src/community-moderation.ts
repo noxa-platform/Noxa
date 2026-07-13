@@ -7,6 +7,9 @@
  *
  * 設計:
  *   - 通報者は reporterUid で重複排除（同一人物が連打しても 1 とカウント）。
+ *   - 集計は「未解決」の通報のみ（status=='resolved' を除外）。admin が unhide + resolve
+ *     した通報を数え続けると、一度閾値を超えたコンテンツは新規通報 1 件で即再非表示になり、
+ *     管理者の unhide が無力化される。status 欠落は open 扱いで数える（iOS/旧 doc の回帰防止）。
  *   - hidden / reportCount は CF(admin) のみが書く（rules で本人編集から保護済み）。
  *   - 閾値未満でも reportCount を更新し、admin 画面で件数が見えるようにする。
  *   - 既に hidden の対象は再計算不要（早期 return）。
@@ -35,7 +38,8 @@ export const hideReportedContent = onDocumentCreated(
     if (!targetSnap.exists) return; // 既に削除済み
     if (targetSnap.data()?.hidden === true) return; // 既に非表示なら再計算不要
 
-    // 同一対象への通報を集計し、通報者(reporterUid)で重複排除
+    // 同一対象への通報を集計し、通報者(reporterUid)で重複排除。
+    // クエリは equality 2つのまま（複合 index 不要）。status は集計ループで判定する。
     const reportsSnap = await db()
       .collection('noxa_reports')
       .where('targetId', '==', targetId)
@@ -44,9 +48,14 @@ export const hideReportedContent = onDocumentCreated(
       .catch(() => null);
     if (!reportsSnap) return;
 
+    // 「未解決」の通報のみカウントする。admin が unhide + resolve した通報を数え続けると、
+    // 一度閾値を超えたコンテンツは新規通報 1 件で即再非表示になり管理者の unhide が無力化される。
+    // status 欠落（iOS/旧 doc 等）は open 扱いで数える＝除外は明示 resolved のみ（回帰防止）。
     const reporters = new Set<string>();
     for (const r of reportsSnap.docs) {
-      const uid = r.data().reporterUid;
+      const rd = r.data();
+      if (rd.status === 'resolved') continue;
+      const uid = rd.reporterUid;
       if (typeof uid === 'string' && uid) reporters.add(uid);
     }
     const distinct = reporters.size;

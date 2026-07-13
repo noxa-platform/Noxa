@@ -110,7 +110,12 @@ export function PostBlock({
         {!isMine && (
           <button
             type="button"
-            onClick={() => { setReported(true); onReport(); }}
+            onClick={() => {
+              // 通報は取り消せず、集まると自動非表示に繋がる。誤タップ防止に確認を挟む。
+              if (!window.confirm(isOp ? 'このスレッドを通報しますか？' : 'このレスを通報しますか？')) return;
+              setReported(true);
+              onReport();
+            }}
             disabled={reported}
             aria-label="通報する"
             style={{ appearance: 'none', cursor: reported ? 'default' : 'pointer', background: 'transparent', border: 'none', color: reported ? 'var(--noxa-status-success)' : 'var(--noxa-text-faint)', fontFamily: mono, fontSize: 11.5, minHeight: 36 }}
