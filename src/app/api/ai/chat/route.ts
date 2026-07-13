@@ -443,34 +443,43 @@ export async function POST(request: NextRequest) {
       }, { status: 429 });
     }
 
-    // メッセージから顧客名を抽出
-    const mentionedNames = extractMentionedNames(message, history);
+    // 予約後〜モデル呼出前のコンテキスト取得が失敗した場合もクレジットを返還する
+    // （ここが throw すると外側 catch は 500 を返すだけで、課金だけされて応答なしになる）
+    let fullSystemPrompt: string;
+    let prompt: string;
+    try {
+      // メッセージから顧客名を抽出
+      const mentionedNames = extractMentionedNames(message, history);
 
-    // 顧客データと顧客なし日売をコンテキストとして並列取得
-    const [customerContext, standaloneSalesContext] = await Promise.all([
-      getCustomerContext(ctx, mentionedNames),
-      getStandaloneSalesContext(ctx),
-    ]);
+      // 顧客データと顧客なし日売をコンテキストとして並列取得
+      const [customerContext, standaloneSalesContext] = await Promise.all([
+        getCustomerContext(ctx, mentionedNames),
+        getStandaloneSalesContext(ctx),
+      ]);
 
-    // 今日の日付をコンテキストに含める（相対日付の解決用）
-    const today = new Date().toISOString().split('T')[0];
-    const dayOfWeek = ['日', '月', '火', '水', '木', '金', '土'][new Date().getDay()];
+      // 今日の日付をコンテキストに含める（相対日付の解決用）
+      const today = new Date().toISOString().split('T')[0];
+      const dayOfWeek = ['日', '月', '火', '水', '木', '金', '土'][new Date().getDay()];
 
-    // プレイブック + 店舗プロファイル + 自分のベース文体を一括解決
-    const { storeType, selfData, storeProfile } = await resolveWorkspaceContext(ctx);
-    const { combined: playbookAndSelf } = composePlaybookAndSelf({
-      storeType,
-      compact: true,
-      selfData,
-      selfHeading: '## ユーザー（送信者）自身のプロファイル',
-      storeProfile,
-    });
-    const fullSystemPrompt = `${SYSTEM_PROMPT}\n\n${playbookAndSelf}`;
+      // プレイブック + 店舗プロファイル + 自分のベース文体を一括解決
+      const { storeType, selfData, storeProfile } = await resolveWorkspaceContext(ctx);
+      const { combined: playbookAndSelf } = composePlaybookAndSelf({
+        storeType,
+        compact: true,
+        selfData,
+        selfHeading: '## ユーザー（送信者）自身のプロファイル',
+        storeProfile,
+      });
+      fullSystemPrompt = `${SYSTEM_PROMPT}\n\n${playbookAndSelf}`;
 
-    const standaloneSection = standaloneSalesContext
-      ? `\n\n${standaloneSalesContext}`
-      : '';
-    const prompt = `今日は${today}（${dayOfWeek}曜日）です。\n\n以下は現在のワークスペースの顧客データです:\n${customerContext}${standaloneSection}\n\nユーザーの質問: ${message}`;
+      const standaloneSection = standaloneSalesContext
+        ? `\n\n${standaloneSalesContext}`
+        : '';
+      prompt = `今日は${today}（${dayOfWeek}曜日）です。\n\n以下は現在のワークスペースの顧客データです:\n${customerContext}${standaloneSection}\n\nユーザーの質問: ${message}`;
+    } catch (err) {
+      await refundAiCredit(uid, chatCost);
+      throw err;
+    }
 
     // 画像経路: 従来どおりマルチモーダル一括レスポンス（ストリーミング非対応）
     if (imageDataList.length > 0) {
@@ -499,6 +508,10 @@ export async function POST(request: NextRequest) {
       } catch (e) {
         console.error('chat history persist error:', e);
       }
+
+      // 画像経路も消費台帳に計上（テキスト経路と揃える。従来ここだけ logAiLedger
+      // 漏れがあり、画像チャットが Noxa 課金画面の履歴に残らなかった）
+      void logAiLedger(uid, 'chat', chatCost);
 
       return NextResponse.json({
         reply: reply || '回答を生成できませんでした。',
