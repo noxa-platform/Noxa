@@ -151,6 +151,11 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'AIクレジット不足', creditsRemaining: reserved.remaining, requiredCredits: replyCost }, { status: 429 });
     }
 
+    // 予約後〜モデル呼出前（画像エンコード・顧客/ワークスペース取得・プロンプト構築）が
+    // throw しても必ずクレジットを返還する。従来ここが未ガードで、外側 catch が 500 を
+    // 返すだけで課金だけ残る穴があった（chat Day28 と同型）。
+    let result: string;
+    try {
     // 画像をbase64エンコード
     const images = await Promise.all(
       imageFiles.map(async (file) => {
@@ -163,6 +168,8 @@ export async function POST(request: NextRequest) {
     // 顧客データ取得
     const customerData = await getCustomerContextForReply(ctx, customerId);
     if (!customerData) {
+      // 予約済みクレジットを返還してから 404（顧客不在は AI 未呼出なので課金しない）
+      await refundAiCredit(uid, replyCost);
       return NextResponse.json({ error: '顧客データが見つかりません' }, { status: 404 });
     }
 
@@ -342,8 +349,6 @@ JSON配列で3つの返信案:
       systemParts.push('', `## 集計ヒント\n${aggregateHint}`);
     }
 
-    let result: string;
-    try {
       result = await analyzeImages(images, prompt, {
         systemInstruction: systemParts.join('\n'),
         maxOutputTokens: 1500,

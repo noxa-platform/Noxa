@@ -156,6 +156,11 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'AIクレジット不足', creditsRemaining: reserved.remaining, requiredCredits: messageCost }, { status: 429 });
     }
 
+    // 予約後〜モデル呼出前（ワークスペース解決・Firestore フィードバック取得・プロンプト構築）が
+    // throw しても必ずクレジットを返還する。従来ここが未ガードで、外側 catch が 500 を
+    // 返すだけで課金だけ残る穴があった（chat Day28 と同型）。
+    let result: string;
+    try {
     // purpose → scene マッピング（プレイブックのシーン別ヒントを流用）
     const purposeToScene: Record<string, string> = {
       thank_you: 'first_contact',
@@ -227,8 +232,6 @@ export async function POST(request: NextRequest) {
       ? `${purposePrompt}\n\n追加の指示: ${customPrompt}`
       : purposePrompt;
 
-    let result: string;
-    try {
       result = await generateText(
         `顧客データ:\n${customerContext}${selfBaseBlock}${feedbackBlock}${globalBlock}\n\nメッセージの目的: ${requestPrompt}`,
       {
