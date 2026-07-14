@@ -12,3 +12,14 @@ export function businessDayKey(d: Date = new Date()): string {
 export function businessMonthKey(d: Date = new Date()): string {
   return businessDayKey(d).slice(0, 7);
 }
+
+/**
+ * JST の暦日と曜日（営業日切替はしない純カレンダー日）。
+ * サーバは UTC 動作のため +9h してから日付/曜日を取る。
+ * 例: AI に「今日は◯/◯（◯曜）」と伝える際、`new Date().toISOString()` や
+ * `getDay()` を直接使うと JST 00:00〜08:59 の間 UTC 前日になり相対日付がズレる。
+ */
+export function jstCalendarDate(d: Date = new Date()): { date: string; weekday: number } {
+  const j = new Date(d.getTime() + 9 * 60 * 60 * 1000);
+  return { date: j.toISOString().slice(0, 10), weekday: j.getUTCDay() };
+}

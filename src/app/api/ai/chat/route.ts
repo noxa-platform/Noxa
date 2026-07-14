@@ -8,6 +8,7 @@ import { AI_CONFIG } from '@/lib/ai-knowledge/constants';
 import { getAdminDb, verifyRequest, AuthError } from '../../lib/firebase-admin';
 import { resolveAccessContext, pathCustomers, pathStandaloneSales, pathAiThread, type AccessContext } from '../../lib/access-context';
 import { maskDeep } from '@/lib/ai-privacy';
+import { jstCalendarDate } from '@/lib/datetime';
 
 // 会話履歴の最大メッセージ数
 const MAX_HISTORY_MESSAGES = AI_CONFIG.maxHistoryMessages;
@@ -457,9 +458,10 @@ export async function POST(request: NextRequest) {
         getStandaloneSalesContext(ctx),
       ]);
 
-      // 今日の日付をコンテキストに含める（相対日付の解決用）
-      const today = new Date().toISOString().split('T')[0];
-      const dayOfWeek = ['日', '月', '火', '水', '木', '金', '土'][new Date().getDay()];
+      // 今日の日付をコンテキストに含める（相対日付の解決用）。
+      // JST 基準（サーバ UTC 直読みだと深夜〜早朝に前日になり相対日付がズレる）。
+      const { date: today, weekday } = jstCalendarDate();
+      const dayOfWeek = ['日', '月', '火', '水', '木', '金', '土'][weekday];
 
       // プレイブック + 店舗プロファイル + 自分のベース文体を一括解決
       const { storeType, selfData, storeProfile } = await resolveWorkspaceContext(ctx);

@@ -17,6 +17,7 @@ import { reserveAiCredit, refundAiCredit, logAiLedger } from '../../lib/credits'
 import { estimateAiCost } from '@/lib/ai-cost';
 import { getAdminDb, verifyRequest, AuthError } from '../../lib/firebase-admin';
 import { resolveAccessContext } from '../../lib/access-context';
+import { jstCalendarDate } from '@/lib/datetime';
 import { FieldValue } from 'firebase-admin/firestore';
 
 const MAX_BYTES = 1024 * 1024; // 1MB（日本語で約 33 万字相当）
@@ -181,7 +182,7 @@ export async function POST(request: NextRequest) {
     // AI 抽出値には [AI] プレフィックスと文字数上限を付ける。ユーザーが書いた値と
     // 機械生成値を識別可能にし、悪意あるテキスト混入を緩和する。
     const truncate = (s: string, max: number) => (s.length > max ? `${s.slice(0, max)}…` : s);
-    const aiTag = `[AI ${new Date().toISOString().slice(0, 10)}]`;
+    const aiTag = `[AI ${jstCalendarDate().date}]`; // JST 暦日（UTC 直読みだと早朝に前日）
 
     const patch: Record<string, unknown> = {
       chatAnalyzedAt: FieldValue.serverTimestamp(),
