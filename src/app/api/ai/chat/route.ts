@@ -42,7 +42,9 @@ async function getStandaloneSalesContext(ctx: AccessContext): Promise<string> {
       const ts = d.datetime;
       const date = ts && typeof ts.toDate === 'function' ? (ts.toDate() as Date) : null;
       return {
-        date: date ? date.toISOString().slice(0, 10) : null,
+        // JST 暦日（AI に渡す「今日」と同じ規約。UTC 直読みだと早朝に前日へズレて
+        //  「今月合計」が実際の当月とずれ、AI の相対日付回答と矛盾する）
+        date: date ? jstCalendarDate(date).date : null,
         salesAmount: d.salesAmount || 0,
         groupCount: d.groupCount || null,
         place: d.place || null,
@@ -50,9 +52,8 @@ async function getStandaloneSalesContext(ctx: AccessContext): Promise<string> {
       };
     });
 
-    // 当月合算
-    const now = new Date();
-    const monthKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+    // 当月合算（JST 基準・上の date と揃える）
+    const monthKey = jstCalendarDate().date.slice(0, 7);
     const thisMonth = items.filter((i) => i.date?.startsWith(monthKey));
     const thisMonthTotal = thisMonth.reduce((sum, i) => sum + i.salesAmount, 0);
     const thisMonthGroups = thisMonth.reduce((sum, i) => sum + (i.groupCount || 0), 0);
