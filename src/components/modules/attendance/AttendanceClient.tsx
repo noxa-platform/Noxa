@@ -8,6 +8,7 @@ import { useDeviceClaims } from '@/lib/useShopContext';
 import { getActiveShop, pickShopId } from '@/lib/workspace';
 import { useShopRole, hasShopRole } from '@/lib/useShopRole';
 import { summarizeTeamShifts, type TeamShift } from '@/lib/attendance/summary';
+import { resolveOvernightEndMs } from '@/lib/attendance/shift-time';
 import { Shell, Section, Empty, Eyebrow, chip } from '@/components/modules/schedule/ScheduleClient';
 
 /**
@@ -173,8 +174,11 @@ function StaleOpenFixer({ shopId, shift, onFixed }: { shopId: string; shift: Shi
   const fix = async () => {
     const ts = timeToTs(shift.date, hm);
     if (!ts || busy) return;
+    // 出勤と同暦日で入れた退勤が start 以下なら翌日扱い（夜職の日跨ぎ＝出勤23:00→翌05:00 等）。
+    // これをしないと end<start になり給与集計から丸ごと消えて無給になる。
+    const endMs = shift.startMs != null ? resolveOvernightEndMs(shift.startMs, ts.toMillis()) : ts.toMillis();
     setBusy(true);
-    try { await updateDoc(doc(db, `shop_shops/${shopId}/shifts/${shift.id}`), { endAt: ts, fixedAt: serverTimestamp() }); onFixed(); }
+    try { await updateDoc(doc(db, `shop_shops/${shopId}/shifts/${shift.id}`), { endAt: Timestamp.fromMillis(endMs), fixedAt: serverTimestamp() }); onFixed(); }
     catch (e) { window.alert(String((e as Error)?.message ?? e)); }
     finally { setBusy(false); }
   };
@@ -198,12 +202,14 @@ function ShiftRow({ shopId, shift, onChanged }: { shopId: string; shift: Shift; 
   const save = async () => {
     if (busy) return;
     const st = timeToTs(shift.date, start);
-    const en = end ? timeToTs(shift.date, end) : null;
+    const enBase = end ? timeToTs(shift.date, end) : null;
     if (!st) { window.alert('出勤時刻が不正です'); return; }
-    if (en && en.toMillis() <= st.toMillis()) { window.alert('退勤時刻は出勤より後にしてください'); return; }
+    // 退勤が出勤以下なら翌日扱い（日跨ぎ勤務。同暦日固定だと overnight を記録できず、
+    // end<start で給与から消える）。end 無しは未退勤のまま。
+    const enMs = enBase ? resolveOvernightEndMs(st.toMillis(), enBase.toMillis()) : null;
     setBusy(true);
     try {
-      await updateDoc(doc(db, `shop_shops/${shopId}/shifts/${shift.id}`), { startAt: st, ...(en ? { endAt: en } : {}), fixedAt: serverTimestamp() });
+      await updateDoc(doc(db, `shop_shops/${shopId}/shifts/${shift.id}`), { startAt: st, ...(enMs != null ? { endAt: Timestamp.fromMillis(enMs) } : {}), fixedAt: serverTimestamp() });
       setEditing(false); onChanged();
     } catch (e) { window.alert(String((e as Error)?.message ?? e)); }
     finally { setBusy(false); }

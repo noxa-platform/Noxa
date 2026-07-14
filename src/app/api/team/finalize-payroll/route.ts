@@ -75,8 +75,9 @@ export async function POST(request: NextRequest) {
       if (!x.castUid || !(x.date ?? '').startsWith(period)) continue;
       const st = toMs(x.startAt), en = toMs(x.endAt);
       if (st && en && en > st) minutesByUid.set(x.castUid, (minutesByUid.get(x.castUid) ?? 0) + (en - st) / 60000);
-      // 退勤打刻の無い勤務は 0 分＝黙って落とすと過少支給事故になるため件数で警告する
-      else if (st && !en) {
+      // 退勤打刻が無い(未退勤) or end<=start(日跨ぎを同暦日で締めた旧データ等)の勤務は
+      // 0 分＝黙って落とすと過少支給事故になるため、要修正として件数で警告する。
+      else if (st && (!en || en <= st)) {
         staleOpensByUid.set(x.castUid, (staleOpensByUid.get(x.castUid) ?? 0) + 1);
         if (!minutesByUid.has(x.castUid)) minutesByUid.set(x.castUid, 0); // 完了勤務ゼロでも行に出す
       }
