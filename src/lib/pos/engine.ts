@@ -374,9 +374,22 @@ export function calculateResult(state: CalculatorState, config: StoreConfig, opt
   let currentM = currentM_raw;
   let isOutOfHours = false;
 
-  if (originalNormalizedCurrentH < 20 || originalNormalizedCurrentH > config.closingHour || (originalNormalizedCurrentH === config.closingHour && currentM_raw > 0)) {
+  const beforeOpening = originalNormalizedCurrentH < 20;
+  const pastClosing =
+    originalNormalizedCurrentH > config.closingHour ||
+    (originalNormalizedCurrentH === config.closingHour && currentM_raw > 0);
+
+  if (beforeOpening) {
+    // 開店前/入店直後の無効な現在時刻 → 最初の1セット表示に丸める
     normalizedCurrentH = normalizedEntryH + 1;
     currentM = entryM;
+    isOutOfHours = true;
+  } else if (pastClosing) {
+    // 閉店時刻を過ぎた会計は現在時刻を閉店時刻でクランプする。
+    // 旧実装は 1 セットへ潰していたため、閉店をまたいだ卓を会計すると
+    // 延長分が全て消えて大幅な過少請求になっていた（会計既定額 = currentTotal）。
+    normalizedCurrentH = config.closingHour;
+    currentM = 0;
     isOutOfHours = true;
   }
 
