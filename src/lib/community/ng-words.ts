@@ -33,12 +33,16 @@ export interface NgResult {
 
 /** text を判定。hard が空でなければ投稿不可、soft のみなら警告で続行可。 */
 export function checkNg(text: string): NgResult {
-  const lower = text.toLowerCase();
+  // NFKC 正規化で全角→半角に寄せる。これをしないと全角入力（例: 電話「０９０…」・
+  // 「ＬＩＮＥ交換」・全角「＠」）が半角前提の \d やワード一致を素通りし、
+  // 連絡先交換ブロックを全角で回避できてしまう（半角入力には非破壊＝既存挙動は不変）。
+  const normalized = text.normalize('NFKC');
+  const lower = normalized.toLowerCase();
   const hard = new Set<string>();
   const soft = new Set<string>();
 
   for (const w of HARD_WORDS) if (lower.includes(w.toLowerCase())) hard.add(w);
-  for (const { label, re } of CONTACT_PATTERNS) if (re.test(text)) hard.add(label);
+  for (const { label, re } of CONTACT_PATTERNS) if (re.test(normalized)) hard.add(label);
   for (const w of SOFT_WORDS) if (lower.includes(w.toLowerCase())) soft.add(w);
 
   return { hard: [...hard], soft: [...soft] };
