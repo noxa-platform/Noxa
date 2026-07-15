@@ -8,6 +8,7 @@ import {
   deleteDoc,
   doc,
   onSnapshot,
+  runTransaction,
   serverTimestamp,
   updateDoc,
   type DocumentData,
@@ -17,6 +18,7 @@ import { db } from '@/lib/firebase/config';
 import { useShopId } from '@/lib/useShopId';
 import { useShopConfig, type ChoiceItem } from '@/lib/shopConfig';
 import { stockStatus, keepExpiryStatus, type StockStatus, type ExpiryStatus } from '@/lib/inventory/status';
+import { nextStockQty, nextRemainingPct, parseRemainingPct } from '@/lib/inventory/adjust';
 
 /**
  * ⑧ 在庫管理 — Noxa OS（実データ）
@@ -105,8 +107,7 @@ function mapKeep(id: string, d: DocumentData): BottleKeep {
   const expiresAt = toDateStr(d.expiresAt);
   const remainingRaw = d.remaining;
   const remaining = remainingRaw === undefined || remainingRaw === null ? '' : String(remainingRaw);
-  const pctMatch = remaining.match(/\d+(\.\d+)?/);
-  const remainingPct = pctMatch ? Math.max(0, Math.min(100, Number(pctMatch[0]))) : null;
+  const remainingPct = parseRemainingPct(remaining);
   return {
     id,
     customerName: (d.customerName as string) ?? '',
@@ -180,10 +181,16 @@ export function InventoryClient({ user }: { user: User }) {
 
   const adjustQty = async (item: StockItem, delta: number) => {
     if (!invPath || busy) return;
-    const next = Math.max(0, item.qty + delta);
     setBusy(true);
-    try { await updateDoc(doc(db, `${invPath}/${item.id}`), { qty: next }); }
-    finally { setBusy(false); }
+    // 同時操作の lost update を防ぐため、tx でサーバ最新値に delta を適用（規約: 会計/席回しと同じ）
+    try {
+      const ref = doc(db, `${invPath}/${item.id}`);
+      await runTransaction(db, async (tx) => {
+        const snap = await tx.get(ref);
+        if (!snap.exists()) return;
+        tx.update(ref, { qty: nextStockQty(num(snap.data().qty), delta) });
+      });
+    } finally { setBusy(false); }
   };
 
   const removeItem = async (item: StockItem) => {
@@ -252,12 +259,19 @@ export function InventoryClient({ user }: { user: User }) {
   // 残量の更新（±10% ステッパー。未入力（数値化不能）の場合は 100% から開始）
   const adjustKeepRemaining = async (k: BottleKeep, delta: number) => {
     if (!keepPath || busy) return;
-    const cur = k.remainingPct ?? 100;
-    const next = Math.max(0, Math.min(100, cur + delta));
-    if (next === cur && k.remainingPct !== null) return;
+    // 端の連打での無駄書き防止（未記録は初期化のため通す）
+    if (delta !== 0 && k.remainingPct !== null && nextRemainingPct(k.remainingPct, delta) === k.remainingPct) return;
     setBusy(true);
-    try { await updateDoc(doc(db, `${keepPath}/${k.id}`), { remaining: `${next}%`, remainingUpdatedAt: serverTimestamp() }); }
-    finally { setBusy(false); }
+    // 同時操作の lost update を防ぐため、tx でサーバ最新値に delta を適用
+    try {
+      const ref = doc(db, `${keepPath}/${k.id}`);
+      await runTransaction(db, async (tx) => {
+        const snap = await tx.get(ref);
+        if (!snap.exists()) return;
+        const cur = parseRemainingPct(snap.data().remaining);
+        tx.update(ref, { remaining: `${nextRemainingPct(cur, delta)}%`, remainingUpdatedAt: serverTimestamp() });
+      });
+    } finally { setBusy(false); }
   };
 
   // ─ ローディング / 未所属 ─
