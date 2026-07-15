@@ -35,7 +35,7 @@ function mapShift(id: string, d: DocumentData): Shift {
   return { id, date: (d.date as string) ?? '', startMs: toMs(d.startAt), endMs: toMs(d.endAt) };
 }
 const hhmm = (ms: number | null) => { if (!ms) return '—'; const d = new Date(ms); return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`; };
-function dur(a: number | null, b: number | null) { if (!a || !b) return ''; const m = Math.floor((b - a) / 60000); return `${Math.floor(m / 60)}h${String(m % 60).padStart(2, '0')}m`; }
+function dur(a: number | null, b: number | null) { if (!a || !b || b <= a) return ''; const m = Math.floor((b - a) / 60000); return `${Math.floor(m / 60)}h${String(m % 60).padStart(2, '0')}m`; }
 
 export function AttendanceClient({ user }: { user: User }) {
   const device = useDeviceClaims(user);
@@ -89,8 +89,11 @@ export function AttendanceClient({ user }: { user: User }) {
   // 旧実装は日付を見ずに最初の未退勤を対象にしていたため、前日の退勤忘れが
   // 今日の出勤をブロックし、退勤すると前日の記録に今日の時刻が入る事故があった。
   const openToday = shifts.find((s) => !s.endMs && s.date === today);
-  const staleOpens = shifts.filter((s) => !s.endMs && s.date !== today);
-  const todayDone = shifts.filter((s) => s.date === today && s.endMs);
+  // 過去日で「退勤忘れ(endMs 無し)」＝給与に乗らない勤務。加えて end<=start の破損
+  // （日跨ぎを同暦日で締めた旧データ）も 0 分で落ちるので同じ警告＆締め直し UI に載せる。
+  const isCorrupted = (s: Shift) => s.startMs != null && s.endMs != null && s.endMs <= s.startMs;
+  const staleOpens = shifts.filter((s) => s.date !== today && (!s.endMs || isCorrupted(s)));
+  const todayDone = shifts.filter((s) => s.date === today && s.endMs && !isCorrupted(s));
 
   const clockIn = async () => {
     if (!shopId || busy) return; setBusy(true);

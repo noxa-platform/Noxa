@@ -34,6 +34,17 @@ describe('summarizeTeamShifts', () => {
     expect(a.today).toBe('none');
   });
 
+  it('過去日の end<=start（日跨ぎを同暦日で締めた破損データ）を退勤忘れとして警告に載せる', () => {
+    const shifts: TeamShift[] = [
+      // 出勤23:00・退勤を同暦日05:00 で締めた旧データ＝end<start。0 分で黙って落ちる → 要警告
+      { castUid: 'a', date: '2026-07-01', startMs: at('23:00', '2026-07-01'), endMs: at('05:00', '2026-07-01') },
+      { castUid: 'a', date: '2026-07-02', startMs: at('19:00', '2026-07-02'), endMs: at('21:00', '2026-07-02') }, // 正常
+    ];
+    const [a] = summarizeTeamShifts(shifts, TODAY, NOW);
+    expect(a.monthMinutes).toBe(120); // 破損分は 0、正常 2h のみ
+    expect(a.staleOpenCount).toBe(1); // 破損 end<=start を退勤忘れとして計上
+  });
+
   it('castUid 欠損や start>end の壊れデータに耐える', () => {
     const shifts: TeamShift[] = [
       { castUid: '', date: TODAY, startMs: at('19:00'), endMs: at('20:00') },

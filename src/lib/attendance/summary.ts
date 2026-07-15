@@ -50,7 +50,11 @@ export function summarizeTeamShifts(shifts: TeamShift[], todayKey: string, nowMs
         if (!s.endMs) { today = 'working'; todayStartMs = s.startMs; }
         else if (today !== 'working') today = 'done';
       }
-      if (!s.endMs && !isToday) staleOpenCount += 1;
+      // 過去日で時間計上されない勤務は警告に載せる（給与 finalize-payroll と同基準）:
+      //   未退勤(endMs 無し) だけでなく、end<=start の破損（日跨ぎを同暦日で締めた旧データ）も
+      //   0 分で黙って落ちるので staleOpen としてカウントする。放置＝過少支給の温床。
+      const corruptedEnd = s.startMs != null && s.endMs != null && s.endMs <= s.startMs;
+      if (!isToday && (!s.endMs || corruptedEnd)) staleOpenCount += 1;
     }
     out.push({ castUid, today, todayStartMs, todayMinutes, monthDays: days.size, monthMinutes, staleOpenCount });
   }
