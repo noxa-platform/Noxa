@@ -16,6 +16,7 @@ import type { User } from 'firebase/auth';
 import { db } from '@/lib/firebase/config';
 import { useShopId } from '@/lib/useShopId';
 import { useShopConfig, type ChoiceItem } from '@/lib/shopConfig';
+import { stockStatus, keepExpiryStatus, type StockStatus, type ExpiryStatus } from '@/lib/inventory/status';
 
 /**
  * ⑧ 在庫管理 — Noxa OS（実データ）
@@ -30,7 +31,6 @@ import { useShopConfig, type ChoiceItem } from '@/lib/shopConfig';
 // ─────────────────────────────────────────────
 
 type ItemCategory = string; // 店舗設定 inventoryCategories の id（既定: bottle/food/supply）
-type StockStatus = 'ok' | 'low' | 'out';
 
 type StockItem = {
   id: string;
@@ -48,7 +48,7 @@ type BottleKeep = {
   openedAt: string;            // YYYY-MM-DD
   expiresAt: string;           // YYYY-MM-DD（空可）
   remaining: string;           // 表示用（"65%" など、空可）
-  nearExpiry: boolean;         // 期限まで 7 日以内
+  expiry: ExpiryStatus;        // none:期限内/near:7日以内/expired:期限切れ
   remainingPct: number | null; // 数値化できれば 0-100、できなければ null
 };
 
@@ -63,16 +63,16 @@ function catLabelOf(cats: ChoiceItem[], id: string): string {
 
 const mono = 'var(--noxa-font-mono)';
 
-function getStockStatus(item: StockItem): StockStatus {
-  if (item.qty <= 0) return 'out';
-  if (item.qty < item.par) return 'low';
-  return 'ok';
-}
-
 const STATUS_META: Record<StockStatus, { label: string; color: string; bgAlpha: string }> = {
   ok:  { label: '十分',   color: 'var(--noxa-status-success)', bgAlpha: 'rgba(123, 232, 161, 0.10)' },
   low: { label: '少ない', color: 'var(--noxa-status-warning)', bgAlpha: 'rgba(245, 212, 114, 0.10)' },
   out: { label: '切れ',   color: 'var(--noxa-status-error)',   bgAlpha: 'rgba(196,  56,  74, 0.10)' },
+};
+
+/** ボトルキープ期限バッジ（near:期限間近=黄 / expired:期限切れ=赤）。none は表示しない */
+const EXPIRY_META: Record<Exclude<ExpiryStatus, 'none'>, { color: string; label: string; rowBg: string }> = {
+  near:    { color: 'var(--noxa-status-warning)', label: '期限間近', rowBg: 'rgba(245, 212, 114, 0.04)' },
+  expired: { color: 'var(--noxa-status-error)',   label: '期限切れ', rowBg: 'rgba(196,  56,  74, 0.06)' },
 };
 
 const num = (v: unknown): number => {
@@ -107,11 +107,6 @@ function mapKeep(id: string, d: DocumentData): BottleKeep {
   const remaining = remainingRaw === undefined || remainingRaw === null ? '' : String(remainingRaw);
   const pctMatch = remaining.match(/\d+(\.\d+)?/);
   const remainingPct = pctMatch ? Math.max(0, Math.min(100, Number(pctMatch[0]))) : null;
-  let nearExpiry = false;
-  if (expiresAt) {
-    const diff = (new Date(expiresAt + 'T00:00:00').getTime() - Date.now()) / 86400000;
-    nearExpiry = diff <= 7;
-  }
   return {
     id,
     customerName: (d.customerName as string) ?? '',
@@ -119,7 +114,7 @@ function mapKeep(id: string, d: DocumentData): BottleKeep {
     openedAt: toDateStr(d.openedAt),
     expiresAt,
     remaining,
-    nearExpiry,
+    expiry: keepExpiryStatus(expiresAt, Date.now()),
     remainingPct,
   };
 }
@@ -173,7 +168,7 @@ export function InventoryClient({ user }: { user: User }) {
   }, [keepPath]);
 
   // 発注アラート対象（適正在庫割れ）
-  const alertItems = useMemo(() => items.filter((i) => getStockStatus(i) !== 'ok'), [items]);
+  const alertItems = useMemo(() => items.filter((i) => stockStatus(i.qty, i.par) !== 'ok'), [items]);
 
   // カテゴリフィルタ適用済みリスト
   const filteredStock = useMemo(
@@ -416,7 +411,7 @@ export function InventoryClient({ user }: { user: User }) {
               style={{ gap: 10 }}
             >
               {alertItems.map((item) => {
-                const st = getStockStatus(item);
+                const st = stockStatus(item.qty, item.par);
                 const meta = STATUS_META[st];
                 return (
                   <div
@@ -609,7 +604,7 @@ export function InventoryClient({ user }: { user: User }) {
                 </thead>
                 <tbody>
                   {filteredStock.map((item, idx) => {
-                    const st = getStockStatus(item);
+                    const st = stockStatus(item.qty, item.par);
                     return (
                       <tr
                         key={item.id}
@@ -772,7 +767,9 @@ export function InventoryClient({ user }: { user: User }) {
                   </tr>
                 </thead>
                 <tbody>
-                  {keeps.map((k, idx) => (
+                  {keeps.map((k, idx) => {
+                    const em = k.expiry !== 'none' ? EXPIRY_META[k.expiry] : null;
+                    return (
                     <tr
                       key={k.id}
                       style={{
@@ -780,9 +777,7 @@ export function InventoryClient({ user }: { user: User }) {
                           idx < keeps.length - 1
                             ? '1px solid var(--noxa-divider)'
                             : 'none',
-                        background: k.nearExpiry
-                          ? 'rgba(245, 212, 114, 0.04)'
-                          : 'transparent',
+                        background: em ? em.rowBg : 'transparent',
                       }}
                     >
                       {/* 客名 */}
@@ -795,15 +790,15 @@ export function InventoryClient({ user }: { user: User }) {
                         }}
                       >
                         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                          {k.nearExpiry && (
+                          {em && (
                             <span
                               aria-hidden
                               style={{
                                 width: 6,
                                 height: 6,
                                 borderRadius: 3,
-                                background: 'var(--noxa-status-warning)',
-                                boxShadow: '0 0 6px var(--noxa-status-warning)',
+                                background: em.color,
+                                boxShadow: `0 0 6px ${em.color}`,
                                 flex: 'none',
                               }}
                             />
@@ -833,22 +828,22 @@ export function InventoryClient({ user }: { user: User }) {
                           padding: '12px 16px',
                           fontFamily: mono,
                           fontSize: 12,
-                          color: k.nearExpiry ? 'var(--noxa-status-warning)' : 'var(--noxa-text-muted)',
-                          fontWeight: k.nearExpiry ? 600 : 400,
+                          color: em ? em.color : 'var(--noxa-text-muted)',
+                          fontWeight: em ? 600 : 400,
                           whiteSpace: 'nowrap',
                         }}
                       >
                         {k.expiresAt || '—'}
-                        {k.nearExpiry && (
+                        {em && (
                           <span
                             style={{
                               marginLeft: 8,
                               fontSize: 10,
                               letterSpacing: '0.06em',
-                              color: 'var(--noxa-status-warning)',
+                              color: em.color,
                             }}
                           >
-                            期限間近
+                            {em.label}
                           </span>
                         )}
                       </td>
@@ -929,13 +924,14 @@ export function InventoryClient({ user }: { user: User }) {
                         </button>
                       </td>
                     </tr>
-                  ))}
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
           )}
 
-          {/* 期限間近の注意書き */}
+          {/* 期限の注意書き */}
           <p
             style={{
               margin: '12px 0 0',
@@ -945,7 +941,7 @@ export function InventoryClient({ user }: { user: User }) {
               lineHeight: 1.6,
             }}
           >
-            ※ 黄色のドット = 期限まで 7 日以内。
+            ※ <span style={{ color: 'var(--noxa-status-warning)' }}>黄</span> = 期限まで7日以内 ／ <span style={{ color: 'var(--noxa-status-error)' }}>赤</span> = 期限切れ。
           </p>
         </section>
       </div>
