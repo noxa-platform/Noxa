@@ -53,7 +53,20 @@ export async function tryClaimMission(uid: string, missionId: MissionId | string
     return { granted: 0, alreadyClaimed: true, missionId };
   }
 
-  await grantBonusCredits(uid, def.rewardCredits);
+  // 付与は claimed を立てた後（別 doc の月次カウンタ）。ここで失敗すると
+  // 「受領済みなのにクレジット未付与」で報酬が永久消失し再受領も不可になるため、
+  // 失敗したら claimed フラグを戻して再受領可能にする。
+  // grantBonusCredits は単一 doc の runTransaction＝原子的で、適用前に throw なら未付与＝
+  // フラグを戻しても二重付与にはならない。
+  try {
+    await grantBonusCredits(uid, def.rewardCredits);
+  } catch (e) {
+    await ref.set(
+      { claimed: { [missionId]: FieldValue.delete() }, updatedAt: FieldValue.serverTimestamp() },
+      { merge: true },
+    ).catch(() => { /* 巻き戻しも失敗＝claimed は残るが、二重付与よりは安全側 */ });
+    throw e;
+  }
   return { granted: def.rewardCredits, alreadyClaimed: false, missionId };
 }
 
