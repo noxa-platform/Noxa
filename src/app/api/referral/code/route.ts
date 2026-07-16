@@ -50,8 +50,13 @@ export async function GET(request: NextRequest) {
       code = generateCode();
     }
 
-    // 衝突しない確証が取れたら作成（race condition は usedCount=0 で merge:false の create で防ぐ）
-    await db.runTransaction(async (tx) => {
+    // 発行を tx で冪等化する。tx 内で ownerRef を読み直し、既にコードがあれば作らず
+    // それを返す。これをしないと同一ユーザーの並行初回 GET が別々のコードを生成して
+    // 二重発行され（1ユーザーに有効コードが複数・usedCount 分裂）、冪等性が壊れる。
+    const issued = await db.runTransaction(async (tx) => {
+      const ownerSnapTx = await tx.get(ownerRef);
+      const existingCode = ownerSnapTx.exists ? (ownerSnapTx.data()?.code as string | undefined) : undefined;
+      if (existingCode) return existingCode; // 並行発行済み＝それを採用（二重作成しない）
       const codeRef = db.doc(`reward_referral_codes/${code}`);
       const codeSnap = await tx.get(codeRef);
       if (codeSnap.exists) {
@@ -64,9 +69,15 @@ export async function GET(request: NextRequest) {
         usedCount: 0,
       });
       tx.set(ownerRef, { code, updatedAt: new Date() }, { merge: true });
+      return code;
     });
 
-    return NextResponse.json({ code, usedCount: 0 });
+    // 採用コードの usedCount を返す（並行発行済みを拾った場合も正しい値を返す）
+    const issuedSnap = await db.doc(`reward_referral_codes/${issued}`).get();
+    return NextResponse.json({
+      code: issued,
+      usedCount: issuedSnap.exists ? (issuedSnap.data()?.usedCount ?? 0) : 0,
+    });
   } catch (error) {
     if (error instanceof AuthError) {
       return NextResponse.json({ error: '認証が必要です' }, { status: 401 });
