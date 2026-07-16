@@ -494,7 +494,7 @@ export async function POST(request: NextRequest) {
         : '';
       prompt = `今日は${today}（${dayOfWeek}曜日）です。\n\n以下は現在のワークスペースの顧客データです:\n${customerContext}${standaloneSection}\n\nユーザーの質問: ${message}`;
     } catch (err) {
-      await refundAiCredit(uid, chatCost);
+      await refundAiCredit(uid, chatCost, reserved);
       throw err;
     }
 
@@ -509,7 +509,7 @@ export async function POST(request: NextRequest) {
           responseMimeType: 'application/json',
         });
       } catch (err) {
-        await refundAiCredit(uid, chatCost);
+        await refundAiCredit(uid, chatCost, reserved);
         throw err;
       }
 
@@ -625,7 +625,7 @@ export async function POST(request: NextRequest) {
           controller.close();
         } catch (err) {
           console.error('AI chat stream error:', err);
-          await refundAiCredit(uid, chatCost);
+          await refundAiCredit(uid, chatCost, reserved);
           controller.enqueue(encoder.encode(
             `data: ${JSON.stringify({ type: 'error', message: 'AI応答の生成に失敗しました' })}\n\n`,
           ));

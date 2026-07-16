@@ -169,7 +169,7 @@ export async function POST(request: NextRequest) {
     const customerData = await getCustomerContextForReply(ctx, customerId);
     if (!customerData) {
       // 予約済みクレジットを返還してから 404（顧客不在は AI 未呼出なので課金しない）
-      await refundAiCredit(uid, replyCost);
+      await refundAiCredit(uid, replyCost, reserved);
       return NextResponse.json({ error: '顧客データが見つかりません' }, { status: 404 });
     }
 
@@ -356,7 +356,7 @@ JSON配列で3つの返信案:
         responseMimeType: 'application/json',
       });
     } catch (err) {
-      await refundAiCredit(uid, replyCost);
+      await refundAiCredit(uid, replyCost, reserved);
       throw err;
     }
 
@@ -368,7 +368,7 @@ JSON配列で3つの返信案:
     }
 
     if (replies.length === 0) {
-      await refundAiCredit(uid, replyCost);
+      await refundAiCredit(uid, replyCost, reserved);
       return NextResponse.json({ error: '返信案の生成に失敗しました' }, { status: 500 });
     }
     void logAiLedger(uid, 'message-reply', replyCost);

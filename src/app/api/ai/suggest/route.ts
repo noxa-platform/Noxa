@@ -74,7 +74,7 @@ export async function POST(request: NextRequest) {
         }
       );
     } catch (err) {
-      await refundAiCredit(uid, suggestCost);
+      await refundAiCredit(uid, suggestCost, reserved);
       throw err;
     }
     void logAiLedger(uid, 'suggest', suggestCost);

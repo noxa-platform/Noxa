@@ -133,7 +133,7 @@ export async function POST(request: NextRequest) {
         },
       );
     } catch (e) {
-      await refundAiCredit(uid, cost);
+      await refundAiCredit(uid, cost, reserved);
       throw e;
     }
     void logAiLedger(uid, 'learn-from-text', cost);
@@ -173,7 +173,7 @@ export async function POST(request: NextRequest) {
     const ref = db.doc(`shop_shops/${workspaceId}/customers/${customerId}`);
     const snap = await ref.get();
     if (!snap.exists) {
-      await refundAiCredit(uid, cost);
+      await refundAiCredit(uid, cost, reserved);
       return NextResponse.json({ error: '顧客が見つかりません' }, { status: 404 });
     }
     const cur = snap.data() ?? {};
@@ -224,7 +224,8 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: '認証が必要です' }, { status: 401 });
     }
     if (uid) {
-      // ネットワーク失敗時など、try 内 refund に乗らないケースの保険
+      // ネットワーク失敗時など、try 内 refund に乗らないケースの保険。
+      // ここは reserved がスコープ外（try 内 const・reserve 未確定もあり得る）ため内訳なしで払い戻す
       try {
         await refundAiCredit(uid, cost);
       } catch {

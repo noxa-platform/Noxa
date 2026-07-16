@@ -68,7 +68,8 @@ export async function withReservedCredits<T extends NextResponse>(
     return result;
   } finally {
     if (!acked) {
-      await refundAiCredit(uid, cost);
+      // reserve の消費内訳どおりに払い戻す（purchased から引いた分を月次に化けさせない）
+      await refundAiCredit(uid, cost, reserved);
     }
   }
 }

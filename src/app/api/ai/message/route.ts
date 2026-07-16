@@ -277,7 +277,7 @@ JSON配列で3つのメッセージを出力:
         }
       );
     } catch (err) {
-      await refundAiCredit(uid, messageCost);
+      await refundAiCredit(uid, messageCost, reserved);
       throw err;
     }
 
@@ -297,7 +297,7 @@ JSON配列で3つのメッセージを出力:
 
     // 空の場合はエラー（クレジットは返却）
     if (messages.length === 0) {
-      await refundAiCredit(uid, messageCost);
+      await refundAiCredit(uid, messageCost, reserved);
       return NextResponse.json({ error: 'メッセージ生成に失敗しました' }, { status: 500 });
     }
     void logAiLedger(uid, 'message', messageCost);

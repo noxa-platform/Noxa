@@ -52,7 +52,7 @@ ${existingTagsPrompt}
         }
       );
     } catch (err) {
-      await refundAiCredit(uid, tagsCost);
+      await refundAiCredit(uid, tagsCost, reserved);
       throw err;
     }
     void logAiLedger(uid, 'tags', tagsCost);

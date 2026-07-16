@@ -88,7 +88,7 @@ export async function POST(request: NextRequest) {
         responseMimeType: 'application/json',
       });
     } catch (err) {
-      await refundAiCredit(uid, cost);
+      await refundAiCredit(uid, cost, reserved);
       throw err;
     }
 
@@ -103,7 +103,7 @@ export async function POST(request: NextRequest) {
     }
 
     if (drafts.length === 0) {
-      await refundAiCredit(uid, cost);
+      await refundAiCredit(uid, cost, reserved);
       return NextResponse.json({ error: 'メッセージ生成に失敗しました' }, { status: 500 });
     }
     void logAiLedger(uid, 'sales-message', cost);

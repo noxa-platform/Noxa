@@ -159,7 +159,7 @@ export async function POST(request: NextRequest) {
         }
       );
     } catch (err) {
-      await refundAiCredit(uid, insightsCost);
+      await refundAiCredit(uid, insightsCost, reserved);
       throw err;
     }
 
@@ -169,7 +169,7 @@ export async function POST(request: NextRequest) {
       parsed = JSON.parse(content);
     } catch {
       console.error('AI insights JSON parse failed (content length:', content.length, ')');
-      await refundAiCredit(uid, insightsCost);
+      await refundAiCredit(uid, insightsCost, reserved);
       return NextResponse.json(
         { error: '分析結果のパースに失敗しました。再度お試しください。' },
         { status: 500 }

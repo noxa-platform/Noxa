@@ -101,7 +101,7 @@ export async function incrementAiUsage(uid: string, cost: number = 1): Promise<v
 export async function reserveAiCredit(
   uid: string,
   cost: number = 1,
-): Promise<{ ok: boolean; remaining: number; total: number }> {
+): Promise<{ ok: boolean; remaining: number; total: number; consumedMonthly: number; consumedPurchased: number }> {
   const db = getAdminDb();
   const month = getCurrentMonth();
   const usageRef = db.doc(`account_ai_usage/${uid}/monthly/${month}`);
@@ -133,13 +133,15 @@ export async function reserveAiCredit(
           ok: true,
           monthlyRemaining: monthlyRemaining - amount,
           purchasedRemaining: purchased,
+          consumedMonthly: amount,
+          consumedPurchased: 0,
         };
       }
 
       // 不足分を購入クレジット（永続）から消費
       const shortage = amount - monthlyRemaining;
       if (purchased < shortage) {
-        return { ok: false, monthlyRemaining, purchasedRemaining: purchased };
+        return { ok: false, monthlyRemaining, purchasedRemaining: purchased, consumedMonthly: 0, consumedPurchased: 0 };
       }
 
       // 月次枠は全消費 + 不足分を purchased から減算
@@ -162,25 +164,37 @@ export async function reserveAiCredit(
         ok: true,
         monthlyRemaining: 0,
         purchasedRemaining: purchased - shortage,
+        // 内訳を返す: refund がこの通りに戻す（買ったクレジットを月次に化けさせない）
+        consumedMonthly: monthlyRemaining,
+        consumedPurchased: shortage,
       };
     });
 
     const total = monthlyTotal; // UI 互換: 月次プランの上限を返す
     const remaining = result.monthlyRemaining + result.purchasedRemaining;
-    return { ok: result.ok, remaining, total };
+    return { ok: result.ok, remaining, total, consumedMonthly: result.consumedMonthly, consumedPurchased: result.consumedPurchased };
   } catch (error) {
     console.error('reserveAiCredit error: uid:', uid, error);
-    return { ok: false, remaining: 0, total: monthlyTotal };
+    return { ok: false, remaining: 0, total: monthlyTotal, consumedMonthly: 0, consumedPurchased: 0 };
   }
 }
 
 /**
  * 予約済みの AI クレジットを払い戻す（Gemini 呼出失敗時など）。
  *
- * 消費順序が「月次 → purchased」だったので、refund も「purchased → 月次」の逆順で返す。
- * これによりユーザーが買ったクレジットが先に戻り、月内利用に再使用しやすくなる。
+ * consumed（reserveAiCredit の戻り＝消費内訳）が渡されたら、**その内訳どおりに**戻す
+ * （月次から取った分は月次へ、purchased から取った分は purchased へ）。これにより
+ * 「月次不足で purchased から引いた予約」を refund すると買った永続クレジットが月次
+ * （月末失効）に化ける過少払い戻しバグを防ぐ。
+ *
+ * consumed 未指定（旧直接呼び出し等）は従来ヒューリスティック（月次優先で最大 amount 減算）に
+ * フォールバック＝挙動不変。
  */
-export async function refundAiCredit(uid: string, cost: number = 1): Promise<void> {
+export async function refundAiCredit(
+  uid: string,
+  cost: number = 1,
+  consumed?: { consumedMonthly?: number; consumedPurchased?: number },
+): Promise<void> {
   try {
     const db = getAdminDb();
     const month = getCurrentMonth();
@@ -188,13 +202,18 @@ export async function refundAiCredit(uid: string, cost: number = 1): Promise<voi
     const subRef = db.doc(`account_subscriptions/${uid}`);
     const amount = Math.max(1, Math.floor(cost));
 
+    // 内訳が渡されていれば reserve と対称に戻す（買ったクレジットを月次に化けさせない）
+    const cm = Math.max(0, Math.floor(consumed?.consumedMonthly ?? 0));
+    const cp = Math.max(0, Math.floor(consumed?.consumedPurchased ?? 0));
+    const useSplit = !!consumed && cm + cp > 0;
+
     await db.runTransaction(async (tx) => {
+      // reads を先に（Firestore の tx 制約）
       const usageSnap = await tx.get(usageRef);
       const monthlyUsed = usageSnap.exists ? (usageSnap.data()?.count || 0) : 0;
 
-      // まずは月次の used を最大 amount まで減算
-      const refundFromMonthly = Math.min(monthlyUsed, amount);
-      const refundFromPurchased = amount - refundFromMonthly;
+      const refundFromMonthly = useSplit ? Math.min(monthlyUsed, cm) : Math.min(monthlyUsed, amount);
+      const refundFromPurchased = useSplit ? cp : amount - refundFromMonthly;
 
       if (refundFromMonthly > 0) {
         tx.set(
