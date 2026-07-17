@@ -9,16 +9,33 @@
  */
 
 // 重大語（ブロック）
+// ※ 'line id' は単純部分一致だと "online identity" / "online idea" まで誤ブロックするため、
+//   語境界を見る CONTACT_PATTERNS の 'LINE ID' へ移した（真陽性は落とさない）。
 const HARD_WORDS: readonly string[] = [
   '援交', '売春', '枕営業', '未成年', '児童', '児童買春',
-  'ライン交換', 'line交換', 'line id', 'カカオ', 'テレグラム', '連絡先交換',
+  'ライン交換', 'らいん交換', 'line交換', 'カカオ', 'テレグラム', '連絡先交換',
 ];
 
 // 連絡先パターン（ブロック）
+// 区切り文字は NFKC 後の半角を対象にする（全角は checkNg 側の正規化で寄せ済み）。
+const PHONE_SEP = '[-‐.・_ ]?';
+
 const CONTACT_PATTERNS: readonly { label: string; re: RegExp }[] = [
   { label: 'URL', re: /https?:\/\/[^\s]+/i },
   { label: 'メールアドレス', re: /[\w.+-]+@[\w-]+\.[\w.-]+/ },
-  { label: '電話番号', re: /0\d{1,3}[-‐ ]?\d{2,4}[-‐ ]?\d{3,4}/ },
+  // 電話番号: 0始まり／+81（国際表記）。区切りは -・._ と空白を許容する。
+  // 旧実装は区切りが「-‐ 」のみで、"090.1234.5678" や "090・1234・5678"、
+  // "+81 90 1234 5678" が素通りしていた。
+  { label: '電話番号', re: new RegExp(`(\\+81|0)${PHONE_SEP}\\d{1,3}${PHONE_SEP}\\d{2,4}${PHONE_SEP}\\d{3,4}`) },
+  // スキーム無しのメッセンジャー/SNS リンク（"line.me/ti/p/..." 等は URL パターンを素通りする）。
+  // ドメイン限定なので誤検知は起きにくい。先頭は語境界（"online.me" を拾わない）。
+  {
+    label: '連絡先リンク',
+    re: /(^|[^\w.])(line\.me|t\.me|open\.kakao\.com|instagram\.com|twitter\.com|x\.com)\//i,
+  },
+  // LINE ID の提示（"LINE ID 教えて" / "line@..." / "line:xxx"）。
+  // 直前が英数字なら語の途中＝誤検知（"online id..."）なので除外する。
+  { label: 'LINE ID', re: /(^|[^a-z0-9])line\s*(id|@|:)/i },
 ];
 
 // 改正風営法ワード等（警告のみ・続行可）

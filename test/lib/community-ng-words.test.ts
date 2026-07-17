@@ -42,7 +42,56 @@ describe('checkNg', () => {
     expect(r.hard).toContain('line交換');
   });
 
-  it('大文字/全角混在でも小文字ワードに一致（LINE ID）', () => {
-    expect(checkNg('LINE ID おしえて').hard).toContain('line id');
+  it('大文字/全角混在でも LINE ID の提示は hard で検出', () => {
+    // Day43: 単純部分一致の重大語 'line id' から語境界を見るパターン 'LINE ID' へ移設。
+    // ブロックされる挙動は不変（ラベルのみ変更）。
+    expect(checkNg('LINE ID おしえて').hard).toContain('LINE ID');
+    expect(checkNg('ＬＩＮＥ　ＩＤ おしえて').hard).toContain('LINE ID');
+    expect(checkNg('line@abc123 まで').hard).toContain('LINE ID');
+  });
+
+  // ─ Day43: 誤ブロック（偽陽性）の回帰 ─
+  it('「online identity」等の無関係語を LINE ID として誤ブロックしない', () => {
+    // 旧実装は重大語 'line id' の部分一致で "onLINE IDentity" にヒットし、
+    // 無関係な投稿まで hard（投稿不可）になっていた。
+    expect(checkNg('online identity について考える').hard).toEqual([]);
+    expect(checkNg('online ideaを共有したい').hard).toEqual([]);
+  });
+
+  it('日付・金額・時刻を電話番号として誤検出しない', () => {
+    // 区切り文字に . を許容した副作用チェック
+    expect(checkNg('2026.07.17 に出勤').hard).toEqual([]);
+    expect(checkNg('料金は0円です').hard).toEqual([]);
+    expect(checkNg('今日は20:00から').hard).toEqual([]);
+  });
+
+  // ─ Day43: 連絡先交換の回避を塞ぐ ─
+  it('区切り文字を変えた電話番号（. ・ _ 空白）も検出する', () => {
+    // 旧実装は区切りが「-‐ 半角空白」のみで、これらは素通りしていた
+    expect(checkNg('090.1234.5678').hard).toContain('電話番号');
+    expect(checkNg('090・1234・5678').hard).toContain('電話番号');
+    expect(checkNg('090_1234_5678').hard).toContain('電話番号');
+    expect(checkNg('090 1234 5678').hard).toContain('電話番号');
+  });
+
+  it('国際表記（+81）の電話番号も検出する', () => {
+    expect(checkNg('+81 90 1234 5678 に連絡ちょうだい').hard).toContain('電話番号');
+    expect(checkNg('+81-90-1234-5678').hard).toContain('電話番号');
+  });
+
+  it('スキーム無しのメッセンジャー/SNS リンクも検出する', () => {
+    // https:// が無いため URL パターンを素通りしていた経路
+    expect(checkNg('line.me/ti/p/xxxx で追加して').hard).toContain('連絡先リンク');
+    expect(checkNg('t.me/foo きて').hard).toContain('連絡先リンク');
+    expect(checkNg('open.kakao.com/o/abc').hard).toContain('連絡先リンク');
+    expect(checkNg('instagram.com/someone').hard).toContain('連絡先リンク');
+  });
+
+  it('ドメイン風の語の途中は連絡先リンクとして誤検出しない', () => {
+    expect(checkNg('online.me という架空の話').hard).toEqual([]);
+  });
+
+  it('ひらがなの「らいん交換」も検出する', () => {
+    expect(checkNg('よかったららいん交換しよ').hard).toContain('らいん交換');
   });
 });
