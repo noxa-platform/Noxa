@@ -177,14 +177,18 @@ function syncHalfOffOrders(
       });
     } else if (isInitialOrR && !initialRHalfUsed && config.halfOffRules.initialROneBottleLimit) {
       initialRHalfUsed = true;
+      // 分割 id は base（末尾の _full を剥がす）から導出する。template.id が前回分割の
+      // full 側（..._full）でも、半額行を消して再同期すると _full_full… と無限に伸びるため、
+      // 常に baseId / baseId_full の2種に正規化して再入で安定させる。
+      const baseId = template.id.replace(/_full$/, '');
       mergedOrders.push({
-        ...template, id: template.id, count: 1, isHalfOff: true,
+        ...template, id: baseId, count: 1, isHalfOff: true,
         price: calcHalfOffPrice(template.baseName, template.originalPrice, config),
         name: `${template.baseName} (半額)`,
       });
       if (total > 1) {
         mergedOrders.push({
-          ...template, id: template.id + '_full', count: total - 1,
+          ...template, id: `${baseId}_full`, count: total - 1,
           isHalfOff: false, price: template.originalPrice, name: template.baseName,
         });
       }
