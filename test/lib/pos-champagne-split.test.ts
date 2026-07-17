@@ -8,9 +8,10 @@ import { createDefaultStoreConfig } from '../../src/lib/pos/defaultConfig';
 const config = createDefaultStoreConfig();
 const CHAMP = config.halfOffRules.champagneNames[0]; // 'リステル'
 const PRICE = 20000; // blueToGold レンジ(35000-150000)外＝女子会分岐に落ちない
+const RANGE_PRICE = 50000; // blueToGold レンジ内＝女子会は全本半額
 
-const champOrder = (id: string, count: number): OrderItem => ({
-  id, name: CHAMP, baseName: CHAMP, price: PRICE, originalPrice: PRICE, count,
+const champOrder = (id: string, count: number, price = PRICE): OrderItem => ({
+  id, name: CHAMP, baseName: CHAMP, price, originalPrice: price, count,
   canHalfOff: true, isHalfOff: false,
 });
 
@@ -52,5 +53,38 @@ describe('シャンパン 1本半額の統合→再分割', () => {
     // 総本数(2)と半額1本の不変条件も維持
     expect(second.reduce((s, o) => s + o.count, 0)).toBe(2);
     expect(second.filter((o) => o.isHalfOff)).toHaveLength(1);
+  });
+
+  it('id 正規化: 分割の full 側だけ残して女子会/定価へ移っても _full が id に残らない', () => {
+    // 初回分割 → 半額行を消して定価行(id=c1_full)だけ残す、をレンジ内価格で作る
+    const base = createInitialState(config);
+    const split = calculatorReducer(
+      { ...base, orders: [champOrder('c1', 3, RANGE_PRICE)] },
+      { type: 'SET_CUSTOMER_TYPE', payload: 'initial' }, config,
+    );
+    const onlyFull = split.orders.filter((o) => !(o.baseName === CHAMP && o.isHalfOff));
+
+    // 女子会トグル（統合1行になる分岐）: 分割ではないので _full を引きずってはいけない
+    const girls = calculatorReducer({ ...split, orders: onlyFull }, { type: 'TOGGLE_GIRLS_PARTY' }, config);
+    const gChamps = girls.orders.filter((o) => o.baseName === CHAMP);
+    expect(gChamps).toHaveLength(1);
+    expect(gChamps[0]).toMatchObject({ id: 'c1', count: 2, isHalfOff: true, price: 25000 });
+
+    // 定価分岐（半額対象外の客層）でも同様に base へ正規化される
+    const regular = calculatorReducer({ ...split, orders: onlyFull }, { type: 'SET_CUSTOMER_TYPE', payload: 'regular' }, config);
+    const rChamps = regular.orders.filter((o) => o.baseName === CHAMP);
+    expect(rChamps).toHaveLength(1);
+    expect(rChamps[0]).toMatchObject({ id: 'c1', count: 2, isHalfOff: false, price: RANGE_PRICE });
+  });
+
+  it('女子会: レンジ内シャンパンは全本半額（1本だけ制限は初回/リピ専用）', () => {
+    const base = createInitialState(config);
+    const next = calculatorReducer(
+      { ...base, orders: [champOrder('c1', 3, RANGE_PRICE)] },
+      { type: 'TOGGLE_GIRLS_PARTY' }, config,
+    );
+    const champs = next.orders.filter((o) => o.baseName === CHAMP);
+    expect(champs).toHaveLength(1);
+    expect(champs[0]).toMatchObject({ id: 'c1', count: 3, isHalfOff: true, price: 25000 });
   });
 });

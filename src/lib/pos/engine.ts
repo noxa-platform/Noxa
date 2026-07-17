@@ -168,19 +168,20 @@ function syncHalfOffOrders(
     const { template, total } = entry;
     const price = template.originalPrice;
     const inBlueGoldRange = price >= blueToGoldMinPrice && price <= blueToGoldMaxPrice;
+    // id は常に base（末尾の _full を剥がす）に正規化してから使う。template は統合時の
+    // 先頭行なので、前回分割の full 側（..._full）が template になることがある。そのまま
+    // 使うと ①分割の再入で _full_full… と無限に伸びる ②統合1行なのに _full が残り、
+    // 客層/イベントのトグルのたび id が c1 ⇄ c1_full と往復して React key が不安定になる。
+    const baseId = template.id.replace(/_full$/, '');
 
     if (isGirlsOrSeven && inBlueGoldRange) {
       mergedOrders.push({
-        ...template, count: total, isHalfOff: true,
+        ...template, id: baseId, count: total, isHalfOff: true,
         price: calcHalfOffPrice(template.baseName, template.originalPrice, config),
         name: `${template.baseName} (半額)`,
       });
     } else if (isInitialOrR && !initialRHalfUsed && config.halfOffRules.initialROneBottleLimit) {
       initialRHalfUsed = true;
-      // 分割 id は base（末尾の _full を剥がす）から導出する。template.id が前回分割の
-      // full 側（..._full）でも、半額行を消して再同期すると _full_full… と無限に伸びるため、
-      // 常に baseId / baseId_full の2種に正規化して再入で安定させる。
-      const baseId = template.id.replace(/_full$/, '');
       mergedOrders.push({
         ...template, id: baseId, count: 1, isHalfOff: true,
         price: calcHalfOffPrice(template.baseName, template.originalPrice, config),
@@ -194,7 +195,7 @@ function syncHalfOffOrders(
       }
     } else {
       mergedOrders.push({
-        ...template, count: total, isHalfOff: false,
+        ...template, id: baseId, count: total, isHalfOff: false,
         price: template.originalPrice, name: template.baseName,
       });
     }
