@@ -13,6 +13,7 @@ import type { AreaTag, Board, JobTag, Thread, ThreadFilter } from './types';
 import { isFirestoreCommunityBackend, type CommunityRepository } from './repository';
 import { MockCommunityRepository } from './mock-repository';
 import { FirestoreCommunityRepository } from './firestore-repository';
+import { setLikeKey } from './like-state';
 
 export type CommunityView = 'boards' | 'threads' | 'thread';
 
@@ -189,14 +190,16 @@ export function useCommunity(uid?: string): UseCommunity {
   const toggleLike = useCallback(async (target: { kind: 'thread'; threadId: string } | { kind: 'reply'; threadId: string; replyId: string }) => {
     const key = likeKey(target);
     const liked = likedIds.has(key);
-    // 表示用 liked 集合を更新（更新関数をネストしない＝ StrictMode 二重実行対策）
-    setLikedIds((prev) => {
-      const next = new Set(prev);
-      if (liked) next.delete(key); else next.add(key);
-      return next;
-    });
-    const updated = await repoRef.current.toggleLike(target, liked);
-    upsertThread(updated);
+    // 表示用 liked 集合を楽観更新（点いていれば消す/なければ点ける）。
+    setLikedIds((prev) => setLikeKey(prev, key, !liked));
+    try {
+      const updated = await repoRef.current.toggleLike(target, liked);
+      upsertThread(updated);
+    } catch {
+      // 失敗時は楽観更新を巻き戻す。従来は握りつぶしで「ハートは点いたのに backend 未記録」の
+      // 表示ズレが再マウントまで残っていた（呼び出しは fire-and-forget のため rethrow はしない）。
+      setLikedIds((prev) => setLikeKey(prev, key, liked));
+    }
   }, [likedIds, likeKey, upsertThread]);
 
   const report = useCallback(async (target: { kind: 'thread'; threadId: string } | { kind: 'reply'; threadId: string; replyId: string }) => {
