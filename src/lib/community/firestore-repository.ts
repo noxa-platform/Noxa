@@ -18,12 +18,13 @@
 
 import {
   addDoc, collection, deleteDoc, doc, getDoc, getDocs,
-  increment, limit, orderBy, query, runTransaction, serverTimestamp, updateDoc,
+  increment, limit, orderBy, query, runTransaction, serverTimestamp, setDoc, updateDoc,
   Timestamp, where,
   type DocumentData, type QueryDocumentSnapshot,
 } from 'firebase/firestore';
 import { db } from '@/lib/firebase/config';
 import { anonId, dayKeyFromMillis } from './anon-id';
+import { reportDocId } from './report-id';
 import type { Board, Reply, Thread, ThreadFilter } from './types';
 import type {
   AddReplyInput, CommunityRepository, CreateThreadInput, EditReplyInput, EditThreadInput,
@@ -264,7 +265,12 @@ export class FirestoreCommunityRepository implements CommunityRepository {
 
   async report(target: ReportTarget): Promise<void> {
     const targetId = target.kind === 'thread' ? target.threadId : target.replyId;
-    await addDoc(collection(db, C.reports), {
+    // 決定的 ID で「1ユーザー1対象=1通報」に冪等化（重複 doc・reportCount 水増し防止）。
+    // rules は create のみ許可のため、既存なら何もしない（overwrite=update は拒否されるので叩かない）。
+    const ref = doc(db, C.reports, reportDocId(target.kind, targetId, this.uid));
+    const existing = await getDoc(ref);
+    if (existing.exists()) return;
+    await setDoc(ref, {
       targetType: target.kind,
       targetId,
       postId: target.threadId,
