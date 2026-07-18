@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getValidToken } from '../lib';
 import { verifyRequest } from '../../lib/firebase-admin';
+import { jstDayWindow } from '@/lib/datetime';
 
 // イベントを取得。
 // クエリ:
@@ -23,11 +24,11 @@ export async function GET(request: NextRequest) {
 
   const explicitMin = request.nextUrl.searchParams.get('timeMin');
   const explicitMax = request.nextUrl.searchParams.get('timeMax');
-  const now = new Date();
-  const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate()).toISOString();
-  const endOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1).toISOString();
-  const timeMin = explicitMin || startOfDay;
-  const timeMax = explicitMax || endOfDay;
+  // 既定は「今日 1 日分」。サーバは UTC 動作(Vercel)のため、JST 暦日で窓を組む
+  // （旧実装は new Date(y,m,d)=UTC 暦日で JST 早朝帯に前日/翌朝へズレていた）。
+  const { startIso, endIso } = jstDayWindow();
+  const timeMin = explicitMin || startIso;
+  const timeMax = explicitMax || endIso;
 
   try {
     const allEvents = [];

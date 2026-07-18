@@ -30,3 +30,16 @@ export function jstCalendarDate(d: Date = new Date()): { date: string; weekday: 
   const j = new Date(d.getTime() + JST_OFFSET_MS);
   return { date: j.toISOString().slice(0, 10), weekday: j.getUTCDay() };
 }
+
+/**
+ * JST 暦日「その日 1 日分」の絶対時刻ウィンドウ [start, end)（ISO Z 文字列）。
+ * start = JST その日の 00:00、end = 翌 JST 00:00。
+ * サーバ(UTC=Vercel)で `new Date(y, m, d)` を使うと UTC 暦日の窓になり JST 早朝帯で
+ * 前日/翌朝へズレるため、JST 固定でウィンドウを組む用途に使う（例: カレンダーの今日分取得）。
+ */
+export function jstDayWindow(d: Date = new Date()): { startIso: string; endIso: string } {
+  const { date } = jstCalendarDate(d);
+  const start = new Date(`${date}T00:00:00+09:00`);
+  const end = new Date(start.getTime() + 24 * 60 * 60 * 1000);
+  return { startIso: start.toISOString(), endIso: end.toISOString() };
+}

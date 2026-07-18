@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { businessDayKey, businessMonthKey, jstCalendarDate } from '../../src/lib/datetime';
+import { businessDayKey, businessMonthKey, jstCalendarDate, jstDayWindow } from '../../src/lib/datetime';
 
 // 営業日キー（深夜6時切替・JST）——POS 書込と売上集計の両方が従う日付規約の心臓部（Day25）。
 // Day46: 入力は全て絶対時刻(Z 明示)で書く。これによりランナーの TZ に関係なく
@@ -43,6 +43,14 @@ describe('businessDayKey', () => {
     // 旧実装の穴: UTC の getHours()=0<6 で前日に誤って落ちていた
     expect(businessDayKey(new Date('2026-07-11T00:00:00Z'))).toBe('2026-07-11');
   });
+
+  // ─ Day46-PM: 6時ちょうどは当日側（境界は inclusive）・直前ミリ秒は前日 ─
+  it('JST 6:00:00 ちょうどは当日、5:59:59.999 は前日（境界の inclusive 検証）', () => {
+    // JST 06:00:00.000 = UTC 前日 21:00:00.000
+    expect(businessDayKey(new Date('2026-07-10T21:00:00.000Z'))).toBe('2026-07-11');
+    // JST 05:59:59.999 = UTC 前日 20:59:59.999
+    expect(businessDayKey(new Date('2026-07-10T20:59:59.999Z'))).toBe('2026-07-10');
+  });
 });
 
 describe('businessMonthKey', () => {
@@ -70,5 +78,26 @@ describe('jstCalendarDate', () => {
     const { date, weekday } = jstCalendarDate(new Date('2026-07-13T20:00:00Z'));
     // 返す weekday は返す date の曜日と一致する（UTC 直読みのズレがない）
     expect(weekday).toBe(new Date(`${date}T00:00:00Z`).getUTCDay());
+  });
+});
+
+describe('jstDayWindow — JST 今日1日分の絶対時刻ウィンドウ（Day46-PM）', () => {
+  it('JST 暦日 00:00〜翌00:00 を UTC Z で返す（= 前日15:00Z 〜 当日15:00Z）', () => {
+    // JST 2026-07-14 の 1 日分。JST 00:00 = UTC 前日 15:00
+    const { startIso, endIso } = jstDayWindow(new Date('2026-07-13T20:00:00Z')); // JST 07-14 05:00
+    expect(startIso).toBe('2026-07-13T15:00:00.000Z');
+    expect(endIso).toBe('2026-07-14T15:00:00.000Z');
+  });
+
+  it('UTC 昼でも JST 当日の窓になる（サーバ UTC でもズレない）', () => {
+    // JST 2026-07-14 12:00 = UTC 2026-07-14 03:00 → 窓は JST 07-14
+    const { startIso, endIso } = jstDayWindow(new Date('2026-07-14T03:00:00Z'));
+    expect(startIso).toBe('2026-07-13T15:00:00.000Z');
+    expect(endIso).toBe('2026-07-14T15:00:00.000Z');
+  });
+
+  it('窓幅は常に24時間', () => {
+    const { startIso, endIso } = jstDayWindow(new Date('2026-07-14T03:00:00Z'));
+    expect(new Date(endIso).getTime() - new Date(startIso).getTime()).toBe(24 * 60 * 60 * 1000);
   });
 });
