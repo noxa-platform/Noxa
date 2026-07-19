@@ -25,6 +25,14 @@ describe('sanitizePii — 基本の伏字化', () => {
     expect(sanitizePii('ミラージュ店')).toBe('[STORE]');
   });
 
+  // ─ Day50-PM 回帰: ドット/中黒/アンダースコア区切りの電話が匿名化を素通りしていた ─
+  // Day50 で ai-privacy.maskContactInfo に対して塞いだ区切りギャップの sibling（同じ弱点の別ファイル）。
+  it('ドット・中黒・アンダースコア区切りの電話番号も伏字化する', () => {
+    expect(sanitizePii('090.1234.5678')).toBe('[PHONE]');
+    expect(sanitizePii('090・1234・5678')).toBe('[PHONE]');
+    expect(sanitizePii('090_1234_5678')).toBe('[PHONE]');
+  });
+
   it('空文字は空文字を返す', () => {
     expect(sanitizePii('')).toBe('');
   });
