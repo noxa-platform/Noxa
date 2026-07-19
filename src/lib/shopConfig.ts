@@ -112,7 +112,9 @@ export function mergeModules(cfg: ModuleCfg[] | undefined): ModuleCfg[] {
   const out: ModuleCfg[] = [];
   const seen = new Set<string>();
   for (const m of cfg ?? []) {
-    if (DEFAULT_MODULES.some((d) => d.key === m.key)) { out.push(m); seen.add(m.key); }
+    // 既知モジュールのみ採用。重複キー（保存データの破損等）は先勝ちで1つに畳む
+    // （dedup しないと設定 UI に同一モジュールが二重表示され enabled も不整合になる）。
+    if (!seen.has(m.key) && DEFAULT_MODULES.some((d) => d.key === m.key)) { out.push(m); seen.add(m.key); }
   }
   for (const d of DEFAULT_MODULES) if (!seen.has(d.key)) out.push({ key: d.key, enabled: CORE_MODULE_KEYS.has(d.key) });
   return out;
