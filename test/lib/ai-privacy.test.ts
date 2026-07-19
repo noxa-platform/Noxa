@@ -31,6 +31,23 @@ describe('maskContactInfo', () => {
     expect(out).not.toContain('a@b.com');
     expect(out).not.toContain('070-3333');
   });
+
+  // ─ Day50 回帰: ドット/中黒/アンダースコア区切りの電話が AI 送信マスクを素通りしていた ─
+  it('ドット・中黒・アンダースコア区切りの電話番号もマスクする', () => {
+    // 旧実装は区切りが -/空白/長音/ダッシュ類のみで、以下が素通り＝AI へ生の連絡先が漏れていた
+    expect(maskContactInfo('090.1234.5678')).toBe('[電話番号非表示]');
+    expect(maskContactInfo('連絡は090・1234・5678')).toBe('連絡は[電話番号非表示]');
+    expect(maskContactInfo('090_1234_5678 まで')).toBe('[電話番号非表示] まで');
+  });
+
+  it('区切り拡張後もドット付き日付・金額・バージョン番号を誤爆しない（10桁ガード）', () => {
+    // 0/+81 始まり計10桁以上のみが対象なので、これらは温存される
+    expect(maskContactInfo('2026.07.19 の予約')).toBe('2026.07.19 の予約');
+    expect(maskContactInfo('01.02.2026 開始')).toBe('01.02.2026 開始');
+    expect(maskContactInfo('会計は50000円')).toBe('会計は50000円');
+    expect(maskContactInfo('バージョン1.2.3')).toBe('バージョン1.2.3');
+    expect(maskContactInfo('比率は3.14です')).toBe('比率は3.14です');
+  });
 });
 
 describe('maskDeep', () => {

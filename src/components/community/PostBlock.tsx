@@ -27,7 +27,7 @@ export function PostBlock({
   isMine?: boolean;
   official?: boolean;
   onLike: () => void;
-  onReport: () => void;
+  onReport: () => void | Promise<void>;
   onEdit?: (body: string) => void | Promise<void>;
   onDelete?: () => void | Promise<void>;
   isOp?: boolean;
@@ -110,11 +110,16 @@ export function PostBlock({
         {!isMine && (
           <button
             type="button"
-            onClick={() => {
+            onClick={async () => {
               // 通報は取り消せず、集まると自動非表示に繋がる。誤タップ防止に確認を挟む。
               if (!window.confirm(isOp ? 'このスレッドを通報しますか？' : 'このレスを通報しますか？')) return;
-              setReported(true);
-              onReport();
+              setReported(true); // 楽観表示
+              try {
+                await onReport();
+              } catch {
+                // 送信失敗時は巻き戻す（「受け付けました」の誤表示を残さない・Day47 like と同型）
+                setReported(false);
+              }
             }}
             disabled={reported}
             aria-label="通報する"
