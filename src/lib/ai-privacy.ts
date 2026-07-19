@@ -8,6 +8,7 @@
  *      LINE ID や住所は機械検出が困難（誤爆リスク）なため、ポリシー文書で運用注意とする。
  *   3. 氏名は接客 AI の中核文脈のため送る（源氏名/ニックネーム推奨を UI 文言で促す）。
  */
+import { PHONE_SEP_CLASS } from '@/lib/contact-patterns';
 
 /** AI 機能の初回利用時に表示する同意文言（docs/ai-privacy-policy.md の文言案と同一） */
 export const AI_CONSENT_TEXT =
@@ -25,11 +26,11 @@ export const AI_CUSTOMER_FIELDS = [
 /** 来店ログから AI に渡してよいフィールド */
 export const AI_LOG_FIELDS = ['type', 'date', 'datetime', 'salesAmount', 'memo', 'note', 'countAsGroup'] as const;
 
-// 日本の電話番号（0始まり10-11桁・区切りはハイフン/空白/長音「ー」/各種ダッシュ類/ドット・中黒・
-// アンダースコアを許容・+81 形式）。U+2212(−)・U+2010(‐)・U+2015(―) は NFKC 正規化でも '-' に
-// ならないため個別に含める。ドット/中黒/アンダースコア(例: 090.1234.5678・090・1234・5678)は
-// 10桁ガードと併用しても日付/金額の誤爆を招かない（0 または +81 始まり計10桁以上に限るため）。
-const PHONE_SEP = '[-\\sー−‐―.・_]';
+// 日本の電話番号（0始まり10-11桁・+81 形式）。区切りは共通の PHONE_SEP_CLASS に集約
+// （3ファイルで個別定義され区切り漏れが繰り返したため単一ソース化・Day51）。
+// ドット/中黒/アンダースコア等は 10桁ガードと併用するため日付/金額の誤爆を招かない
+// （0 または +81 始まり計10桁以上に限るため）。
+const PHONE_SEP = PHONE_SEP_CLASS;
 const PHONE_RE = new RegExp(`(?:\\+81${PHONE_SEP}?|0)\\d{1,4}${PHONE_SEP}?\\d{1,4}${PHONE_SEP}?\\d{3,4}(?!\\d)`, 'g');
 // メールアドレス（一般形）
 const EMAIL_RE = /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g;

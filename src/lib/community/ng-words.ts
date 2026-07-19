@@ -7,6 +7,7 @@
  *
  * モック用の最小セット。実装時は店舗名リスト・連絡先正規表現・運営管理リストへ拡張する。
  */
+import { PHONE_SEP_CLASS } from '@/lib/contact-patterns';
 
 // 重大語（ブロック）
 // ※ 'line id' は単純部分一致だと "online identity" / "online idea" まで誤ブロックするため、
@@ -17,15 +18,15 @@ const HARD_WORDS: readonly string[] = [
 ];
 
 // 連絡先パターン（ブロック）
-// 区切り文字は NFKC 後の半角を対象にする（全角は checkNg 側の正規化で寄せ済み）。
-const PHONE_SEP = '[-‐.・_ ]?';
+// 区切りは共通の PHONE_SEP_CLASS に集約（3ファイルで個別定義され漏れが繰り返したため・Day51）。
+// 旧定義 '[-‐.・_ ]' は長音「ー」・マイナス「−」・全角ダッシュ「―」を含まず、
+// "090ー1234ー5678" / "090−1234−5678" が連絡先ブロックを素通りしていた（NFKC でも '-' にならない）。
+const PHONE_SEP = `${PHONE_SEP_CLASS}?`;
 
 const CONTACT_PATTERNS: readonly { label: string; re: RegExp }[] = [
   { label: 'URL', re: /https?:\/\/[^\s]+/i },
   { label: 'メールアドレス', re: /[\w.+-]+@[\w-]+\.[\w.-]+/ },
-  // 電話番号: 0始まり／+81（国際表記）。区切りは -・._ と空白を許容する。
-  // 旧実装は区切りが「-‐ 」のみで、"090.1234.5678" や "090・1234・5678"、
-  // "+81 90 1234 5678" が素通りしていた。
+  // 電話番号: 0始まり／+81（国際表記）。区切りは PHONE_SEP_CLASS（-・._ 空白・長音・ダッシュ類）を許容。
   { label: '電話番号', re: new RegExp(`(\\+81|0)${PHONE_SEP}\\d{1,3}${PHONE_SEP}\\d{2,4}${PHONE_SEP}\\d{3,4}`) },
   // スキーム無しのメッセンジャー/SNS リンク（"line.me/ti/p/..." 等は URL パターンを素通りする）。
   // ドメイン限定なので誤検知は起きにくい。先頭は語境界（"online.me" を拾わない）。

@@ -9,13 +9,11 @@
  *   const clean = sanitizePii(rawText);        // 伏字化テキスト
  *   const features = extractStructuralFeatures(rawText); // 構造特徴のみ
  */
+import { PHONE_SEP_CLASS } from '@/lib/contact-patterns';
 
-// 電話番号（日本国内の一般的なフォーマット）。
-// 区切りはハイフン/空白に加えドット・中黒・アンダースコア・長音/ダッシュ類も許容する
-// （090.1234.5678 / 090・1234・5678 等が匿名化を素通りして学習集合へ漏れるのを防ぐ。
-//  ai-privacy.maskContactInfo と同じ区切り集合＝Day50 で塞いだ漏れの sibling を Day50-PM で解消）。
-const PHONE_SEP = '[-\\sー−‐―.・_]';
-const PHONE_RE = new RegExp(`(?:\\+?81${PHONE_SEP}?|0)(?:\\d{1,4}${PHONE_SEP}?){1,3}\\d{3,4}`, 'g');
+// 電話番号（日本国内の一般的なフォーマット）。区切りは共通の PHONE_SEP_CLASS に集約
+// （3ファイルで個別定義され区切り漏れが繰り返したため単一ソース化・Day51）。
+const PHONE_RE = new RegExp(`(?:\\+?81${PHONE_SEP_CLASS}?|0)(?:\\d{1,4}${PHONE_SEP_CLASS}?){1,3}\\d{3,4}`, 'g');
 
 // メールアドレス
 const EMAIL_RE = /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g;

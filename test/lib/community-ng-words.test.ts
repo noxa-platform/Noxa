@@ -79,6 +79,15 @@ describe('checkNg', () => {
     expect(checkNg('+81-90-1234-5678').hard).toContain('電話番号');
   });
 
+  // ─ Day51 回帰: 長音「ー」・マイナス「−」・全角ダッシュ「―」区切りの電話も検出する ─
+  // 旧 PHONE_SEP は '[-‐.・_ ]' で ー(U+30FC)/−(U+2212)/―(U+2015) を含まず素通りしていた
+  // （NFKC でも '-' にならない）。共通 PHONE_SEP_CLASS へ集約して塞いだ。
+  it('長音・マイナス・全角ダッシュ区切りの電話番号も検出する', () => {
+    expect(checkNg('090ー1234ー5678').hard).toContain('電話番号');
+    expect(checkNg('090−1234−5678').hard).toContain('電話番号');
+    expect(checkNg('090―1234―5678').hard).toContain('電話番号');
+  });
+
   it('スキーム無しのメッセンジャー/SNS リンクも検出する', () => {
     // https:// が無いため URL パターンを素通りしていた経路
     expect(checkNg('line.me/ti/p/xxxx で追加して').hard).toContain('連絡先リンク');
