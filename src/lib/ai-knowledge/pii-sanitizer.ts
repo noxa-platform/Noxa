@@ -55,7 +55,13 @@ const STORE_NAME_RE = new RegExp(`(?<![お御そこあど])[一-龠${KATA}A-Za-z
 export function sanitizePii(text: string): string {
   if (!text) return '';
 
+  // NFKC 正規化で全角→半角に寄せてから伏字化する。これをしないと全角入力
+  // （＠・全角数字の電話/SNS ID・全角英字メール等）が半角前提の各正規表現を素通りし、
+  // 匿名化学習集合へ生の PII が漏れる（sibling の ai-privacy.maskContactInfo /
+  // community/ng-words は正規化済みで、pii-sanitizer だけ欠けていた・Day52）。
+  // 出力は匿名化集合用の変換なので正規化済み文字列を返してよい。
   return text
+    .normalize('NFKC')
     .replace(URL_RE, '[URL]')
     .replace(EMAIL_RE, '[EMAIL]')
     .replace(PHONE_RE, '[PHONE]')

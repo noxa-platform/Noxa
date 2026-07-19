@@ -33,6 +33,15 @@ describe('sanitizePii — 基本の伏字化', () => {
     expect(sanitizePii('090_1234_5678')).toBe('[PHONE]');
   });
 
+  // ─ Day52 回帰: 全角入力の PII が匿名化を素通りしていた（NFKC 正規化欠如）─
+  // sibling の ai-privacy/ng-words は正規化済みだったが pii-sanitizer だけ欠けており、
+  // 全角メール/電話/SNS ID が学習集合へ生で漏れていた。
+  it('全角のメール・電話・SNS ID も伏字化する（NFKC 正規化）', () => {
+    expect(sanitizePii('ａｂｃ＠ｅｘａｍｐｌｅ．ｃｏｍ')).toBe('[EMAIL]');
+    expect(sanitizePii('０９０−１２３４−５６７８')).toBe('[PHONE]');
+    expect(sanitizePii('＠ｔａｎａｋａ＿ｌｏｖｅ')).toBe('[SOCIAL_ID]');
+  });
+
   it('空文字は空文字を返す', () => {
     expect(sanitizePii('')).toBe('');
   });
