@@ -1,4 +1,5 @@
 import { Timestamp } from 'firebase/firestore';
+import { countsAsGroup } from '@/lib/log-metrics';
 
 // 店舗業種
 export type StoreType =
@@ -683,9 +684,7 @@ export interface GoogleToken {
  * iOS の ContactLog.isCountedAsGroup と同等。
  */
 export function isCountedAsGroup(log: Pick<ContactLog, 'type' | 'countAsGroup'>): boolean {
-  if (log.countAsGroup === true) return true;
-  if (log.countAsGroup === false) return false;
-  return log.type === 'visit' || log.type === 'outside';
+  return countsAsGroup(log.type, log.countAsGroup);
 }
 
 // ログ種別の表示名

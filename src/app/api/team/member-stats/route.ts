@@ -10,6 +10,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { Timestamp } from 'firebase-admin/firestore';
 import { verifyRequest, getAdminDb, AuthError } from '../../lib/firebase-admin';
+import { countsAsGroup } from '@/lib/log-metrics';
 
 // キャスト×顧客の集計は読み取り回数が多いので関数タイムアウトを延長。
 export const maxDuration = 60;
@@ -103,7 +104,8 @@ export async function POST(request: NextRequest) {
       const cur = logsAgg.get(castUid) ?? { s: 0, g: 0 };
       const amount = d.salesAmount || 0;
       cur.s += amount;
-      const counted = typeof d.countAsGroup === 'boolean' ? d.countAsGroup : d.type === 'visit';
+      // 組数判定は正準ルール（visit || outside）に一本化。旧実装は outside を取りこぼしていた（Day58）
+      const counted = countsAsGroup(d.type, d.countAsGroup);
       if (counted) cur.g += 1;
       logsAgg.set(castUid, cur);
       // 日次内訳にも反映（count は countAsGroup 準拠）
