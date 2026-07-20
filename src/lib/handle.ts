@@ -14,7 +14,7 @@ export type { Visibility };
 
 // 純ルール（検証・候補生成）は firebase 非依存の handle-rules に分離（テスト対象・Day25）
 export { HANDLE_RE, validateHandle, suggestHandle } from '@/lib/handle-rules';
-import { validateHandle } from '@/lib/handle-rules';
+import { validateHandle, planHandleChange } from '@/lib/handle-rules';
 
 export type ProfileType = 'user' | 'shop';
 
@@ -101,10 +101,13 @@ export async function updateProfilePage(handle: string, patch: Partial<Omit<Prof
  * 旧 /u/<oldHandle> は404になる点に注意（呼び出し側で警告）。
  */
 export async function changeUserHandle(uid: string, oldHandle: string, newHandleRaw: string): Promise<string> {
-  const newH = validateHandle(newHandleRaw);
-  if (!newH) throw new Error('INVALID_HANDLE');
-  if (newH === oldHandle) return newH;
-  const oldRef = doc(db, `profile_pages/${oldHandle}`);
+  // old も正規化して比較・参照する（doc パスは case-sensitive のため未正規化 old は
+  // 誤 doc を指しデータ損失＝孤児プロフィールになる。planHandleChange で一元化・Day57）
+  const plan = planHandleChange(oldHandle, newHandleRaw);
+  if (!plan) throw new Error('INVALID_HANDLE');
+  if (plan.noop) return plan.newH;
+  const { oldH, newH } = plan;
+  const oldRef = doc(db, `profile_pages/${oldH}`);
   const newRef = doc(db, `profile_pages/${newH}`);
   const userRef = doc(db, `account_users/${uid}`);
   await runTransaction(db, async (tx) => {

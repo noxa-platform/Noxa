@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { suggestHandle, validateHandle } from '../../src/lib/handle-rules';
+import { suggestHandle, validateHandle, planHandleChange } from '../../src/lib/handle-rules';
 
 // ハンドル（/u/<handle> の URL キー）の検証・候補生成（Day25）
 
@@ -43,5 +43,29 @@ describe('suggestHandle', () => {
       const s = suggestHandle(seed);
       expect(validateHandle(s), `seed=${seed} -> ${s}`).toBe(s);
     }
+  });
+});
+
+describe('planHandleChange', () => {
+  it('new が不正/予約語なら null', () => {
+    expect(planHandleChange('taro', 'ab')).toBeNull();       // 短すぎ
+    expect(planHandleChange('taro', 'admin')).toBeNull();    // 予約語
+    expect(planHandleChange('taro', 'た なか')).toBeNull();   // 不正文字
+  });
+  it('new を正規化して返す', () => {
+    expect(planHandleChange('taro', '  Jiro_02 ')).toEqual({ oldH: 'taro', newH: 'jiro_02', noop: false });
+  });
+  it('old も正規化してから比較する（大文字・空白の差は noop 扱い）', () => {
+    // doc パスは case-sensitive。未正規化の old を渡しても正規化後の同一性で noop 判定する
+    expect(planHandleChange('Taro', 'taro')).toEqual({ oldH: 'taro', newH: 'taro', noop: true });
+    expect(planHandleChange('  TARO ', 'taro')).toEqual({ oldH: 'taro', newH: 'taro', noop: true });
+  });
+  it('old を正規化して参照キーに使える（誤 doc パス＝データ損失を防ぐ）', () => {
+    // 変更前は old が未正規化のまま profile_pages/{old} を指し、Mixed-case で誤 doc を読んでいた
+    const plan = planHandleChange('MyHandle', 'newhandle');
+    expect(plan).toEqual({ oldH: 'myhandle', newH: 'newhandle', noop: false });
+  });
+  it('old が空でも new が妥当なら変更プランを返す', () => {
+    expect(planHandleChange('', 'taro')).toEqual({ oldH: '', newH: 'taro', noop: false });
   });
 });

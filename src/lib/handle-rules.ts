@@ -18,6 +18,24 @@ export function validateHandle(raw: string): string | null {
   return h;
 }
 
+export type HandleChangePlan = { oldH: string; newH: string; noop: boolean };
+
+/**
+ * ハンドル変更の正規化プラン（firebase 非依存・テスト対象・Day57）。
+ * new が不正/予約語なら null。old も new と同じく正規化（trim・小文字化）してから比較する。
+ *
+ * 目的: changeUserHandle の doc パス（profile_pages/{handle}）は case-sensitive のため、
+ * 未正規化の old を渡すと存在しない doc を読み（空データで新 doc 作成＋旧 doc 未削除＝
+ * データ損失・孤児プロフィール）になる。正規化を一元化してこの footgun を塞ぐ。
+ * 同一（正規化後）は noop=true（再ケーシングでの誤 HANDLE_TAKEN も回避）。
+ */
+export function planHandleChange(oldHandleRaw: string, newHandleRaw: string): HandleChangePlan | null {
+  const newH = validateHandle(newHandleRaw);
+  if (!newH) return null;
+  const oldH = (oldHandleRaw ?? '').trim().toLowerCase();
+  return { oldH, newH, noop: oldH === newH };
+}
+
 /** 表示名/メールから候補ハンドルを生成（英数字以外を除去、3〜20字に整形・予約語を回避） */
 export function suggestHandle(seed: string): string {
   let s = (seed ?? '').toLowerCase().replace(/[^a-z0-9_]/g, '');
