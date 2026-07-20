@@ -39,6 +39,9 @@ export function isAllowedRedirect(redirectUrl: string | null | undefined): boole
   if (!redirectUrl) return false;
   try {
     const u = new URL(redirectUrl);
+    // スキームを http(s) に限定。ftp:/ws: 等の非 http スキームは、ホストが許可リストに
+    // 一致しても custom token を載せた遷移を許さない（オープン redirect ハードニング）。
+    if (u.protocol !== 'https:' && u.protocol !== 'http:') return false;
     return ALLOWED_REDIRECT_HOSTS.some((h) => u.hostname === h || u.hostname.endsWith(`.${h}`));
   } catch {
     return false;
