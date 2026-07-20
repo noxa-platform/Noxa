@@ -4,7 +4,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { onAuthStateChanged } from 'firebase/auth';
 import type { AuthCredential } from 'firebase/auth';
-import { loginWithEmail, signinWithGoogle, signinWithApple, handlePostLoginRedirect, LinkPasswordRequiredError } from '@/lib/auth';
+import { loginWithEmail, signinWithGoogle, signinWithApple, handlePostLoginRedirect, isAllowedRedirect, LinkPasswordRequiredError } from '@/lib/auth';
 import { startLineLogin, isLineLoginEnabled } from '@/lib/auth/line';
 import { LinkAccountDialog } from '@/components/auth/LinkAccountDialog';
 import { auth } from '@/lib/firebase/config';
@@ -187,7 +187,7 @@ function LoginForm() {
           </h1>
           <p style={{ color: 'var(--noxa-text-muted)', fontSize: 14, margin: 0 }}>
             Noxa アカウントでログイン
-            {redirect && (
+            {redirect && isAllowedRedirect(redirect) && (
               <>
                 <br />
                 <span style={{ fontSize: 12 }}>
