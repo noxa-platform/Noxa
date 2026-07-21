@@ -62,6 +62,14 @@ describe('resolveMemberPermissions — override 意味論と安全フォール�
     expect(p.canSeeMembers).toBe(true);
     expect(p.canSeeBilling).toBe(false);
   });
+  it('全 role が 5 キーすべてを boolean で返す（Required の完全性）', () => {
+    const KEYS = ['canSeeAllCustomers', 'canSeeAllSales', 'canSeeMembers', 'canSeeBilling', 'canEditWorkspace'] as const;
+    for (const role of ['owner', 'sub_owner', 'editor', 'viewer'] as MemberRole[]) {
+      const p = resolveMemberPermissions({ role });
+      expect(Object.keys(p).sort()).toEqual([...KEYS].sort());
+      for (const k of KEYS) expect(typeof p[k], `${role}.${k}`).toBe('boolean');
+    }
+  });
 });
 
 describe('getWorkspaceType', () => {
@@ -82,6 +90,9 @@ describe('normalizePlaceTags', () => {
   it('tags 空で旧 category があれば 1 タグに合流', () => {
     expect(normalizePlaceTags({ name: 'X', tags: [], category: '焼肉' })).toEqual(['焼肉']);
     expect(normalizePlaceTags({ name: 'X', category: '寿司' })).toEqual(['寿司']);
+  });
+  it('tags と category が併存する場合は tags が優先（旧 category は無視）', () => {
+    expect(normalizePlaceTags({ name: 'X', tags: ['ワイン'], category: '焼肉' })).toEqual(['ワイン']);
   });
   it('どちらも無ければ空配列', () => {
     expect(normalizePlaceTags({ name: 'X' })).toEqual([]);
