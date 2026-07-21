@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getAdminDb, verifyRequest, AuthError } from '../../lib/firebase-admin';
-import { resolveAccessContext } from '../../lib/access-context';
+import { resolveAccessContext, pathAiThreads } from '../../lib/access-context';
 
 /**
  * AI チャットスレッド（複数会話セッション）の一覧取得 / 新規作成。
@@ -48,7 +48,7 @@ export async function GET(request: NextRequest) {
     const ctx = await resolveAccessContext(uid, workspaceId);
 
     const db = getAdminDb();
-    const threadsRef = db.collection(`shop_shops/${workspaceId}/ai_threads`);
+    const threadsRef = db.collection(pathAiThreads(ctx));
 
     // ownerUid + orderBy(updatedAt) の組合せは複合インデックスが必要なので、
     // 単純な where だけ走らせて JS 側でソートする（thread 数はユーザーあたり数百以下を想定）。
@@ -121,7 +121,7 @@ export async function POST(request: NextRequest) {
     const title = (titleInput && titleInput.trim()) || '新しいトーク';
 
     const db = getAdminDb();
-    const threadsRef = db.collection(`shop_shops/${workspaceId}/ai_threads`);
+    const threadsRef = db.collection(pathAiThreads(ctx));
     const docRef = await threadsRef.add({
       ownerUid: uid,
       title,

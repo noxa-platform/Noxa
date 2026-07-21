@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getAdminDb, verifyRequest, AuthError } from '../../../lib/firebase-admin';
-import { resolveAccessContext } from '../../../lib/access-context';
+import { resolveAccessContext, pathAiThread } from '../../../lib/access-context';
 
 /**
  * AI チャットの履歴取得 / クリア。threadId 必須。
@@ -25,7 +25,8 @@ export async function GET(request: NextRequest) {
     const ctx = await resolveAccessContext(uid, workspaceId);
 
     const db = getAdminDb();
-    const ref = db.doc(`shop_shops/${workspaceId}/ai_threads/${threadId}`);
+    // personal/shop で保存先が異なるため context helper で解決（ai/chat の書込先と一致させる）
+    const ref = db.doc(pathAiThread(ctx, threadId));
     const snap = await ref.get();
     if (!snap.exists) {
       return NextResponse.json({ messages: [] });
@@ -65,7 +66,8 @@ export async function DELETE(request: NextRequest) {
     const ctx = await resolveAccessContext(uid, workspaceId);
 
     const db = getAdminDb();
-    const ref = db.doc(`shop_shops/${workspaceId}/ai_threads/${threadId}`);
+    // personal/shop で保存先が異なるため context helper で解決（ai/chat の書込先と一致させる）
+    const ref = db.doc(pathAiThread(ctx, threadId));
     const snap = await ref.get();
     if (!snap.exists) {
       return NextResponse.json({ ok: true });

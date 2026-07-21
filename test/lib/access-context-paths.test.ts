@@ -50,6 +50,14 @@ describe('access-context path helpers — 非自明な分岐の固定', () => {
     expect(pathSelfStyle(shop)).toBe('personal_self_styles/U1');
     expect(pathSelfStyle(personal)).toBe('personal_self_styles/U1');
   });
+  it('AI スレッド: shop は生パス shop_shops/{wid}/ai_threads と一致・personal は分岐（Day61 修正の安全性）', () => {
+    // Day61: ai/threads・[threadId]・chat/history が生 shop パスで、ai/chat(pathAiThread)と
+    // personal で食い違い会話同期不能だった。shop は helper===生パスで挙動不変、personal のみ是正。
+    expect(pathAiThreads(shop)).toBe(`shop_shops/${shop.shopId}/ai_threads`);
+    expect(pathAiThread(shop, 't1')).toBe(`shop_shops/${shop.shopId}/ai_threads/t1`);
+    expect(pathAiThreads(personal)).not.toBe(`shop_shops/${personal.uid}/ai_threads`);
+    expect(pathAiThread(personal, 't1')).toBe('personal_ai_threads/U1/items/t1');
+  });
   it('サブパスは親パスを前置する', () => {
     expect(pathCustomer(shop, 'c9')).toBe('shop_shops/S1/customers/c9');
     expect(pathCustomerLogs(personal, 'c9')).toBe('personal_customers/U1/items/c9/logs');

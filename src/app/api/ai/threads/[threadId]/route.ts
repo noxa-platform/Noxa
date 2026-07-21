@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getAdminDb, verifyRequest, AuthError } from '../../../lib/firebase-admin';
-import { resolveAccessContext } from '../../../lib/access-context';
+import { resolveAccessContext, pathAiThread, type AccessContext } from '../../../lib/access-context';
 
 /**
  * AI チャットスレッドの個別操作（リネーム / 削除）。
@@ -9,9 +9,10 @@ import { resolveAccessContext } from '../../../lib/access-context';
 
 const TITLE_MAX_LENGTH = 60;
 
-async function loadThread(workspaceId: string, threadId: string, uid: string) {
+async function loadThread(ctx: AccessContext, threadId: string, uid: string) {
   const db = getAdminDb();
-  const ref = db.doc(`shop_shops/${workspaceId}/ai_threads/${threadId}`);
+  // personal/shop で保存先が異なるため context helper で解決（ai/chat の書込先と一致させる）
+  const ref = db.doc(pathAiThread(ctx, threadId));
   const snap = await ref.get();
   if (!snap.exists) return { ref, snap, error: 'notFound' as const };
   const data = snap.data();
@@ -40,7 +41,7 @@ export async function PATCH(
     const title = titleInput.trim().slice(0, TITLE_MAX_LENGTH);
     const ctx = await resolveAccessContext(uid, workspaceId);
 
-    const loaded = await loadThread(workspaceId, threadId, uid);
+    const loaded = await loadThread(ctx, threadId, uid);
     if (loaded.error === 'notFound') {
       return NextResponse.json({ error: '対象のスレッドが見つかりません' }, { status: 404 });
     }
@@ -73,7 +74,7 @@ export async function DELETE(
     }
     const ctx = await resolveAccessContext(uid, workspaceId);
 
-    const loaded = await loadThread(workspaceId, threadId, uid);
+    const loaded = await loadThread(ctx, threadId, uid);
     if (loaded.error === 'notFound') {
       // 既に消えている = 成功扱い（idempotent）
       return NextResponse.json({ ok: true });
