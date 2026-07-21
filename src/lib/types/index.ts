@@ -343,9 +343,12 @@ export interface WorkspaceMember {
  * - 未指定は role 既定値を使う
  *
  * role 既定値:
- *   owner / sub_owner: 全 true（sub_owner は WS 削除と最終オーナー譲渡だけはチェックする想定）
+ *   owner: 全 true
+ *   sub_owner: billing のみ false（課金はオーナー専用）、他は true。
+ *             WS 削除と最終オーナー譲渡は別途チェックする想定。
  *   editor: customers/sales/members は true、billing/editWorkspace は false
  *   viewer: 全 false（= 自分が作った顧客のみ閲覧）
+ * 未知の role（旧データの生 string 等）は viewer 既定にフォールバック（安全側）。
  */
 export function resolveMemberPermissions(member: Pick<WorkspaceMember, 'role' | 'permissions'>): Required<MemberPermissions> {
   const defaults: Record<MemberRole, Required<MemberPermissions>> = {
