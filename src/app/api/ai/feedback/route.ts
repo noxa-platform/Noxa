@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getAdminDb, verifyRequest, AuthError } from '../../lib/firebase-admin';
-import { resolveAccessContext } from '../../lib/access-context';
+import { resolveAccessContext, pathAiFeedback } from '../../lib/access-context';
 import { FieldValue } from 'firebase-admin/firestore';
 import { sanitizePii, extractStructuralFeatures } from '@/lib/ai-knowledge/pii-sanitizer';
 import type { StoreType } from '@/lib/types';
@@ -56,10 +56,13 @@ export async function POST(request: NextRequest) {
       createdAt: FieldValue.serverTimestamp(),
     };
     if (customerId) {
+      // 顧客フィードバックは context helper で解決（ai/message が読む pathAiFeedback と一致・Day63PM）
       await db
-        .collection(`shop_shops/${workspaceId}/customers/${customerId}/ai_feedback`)
+        .collection(pathAiFeedback(ctx, customerId))
         .add(feedbackPayload);
     } else {
+      // customerId なしの chat feedback は WS 直下。personal 等価コレクション未定義のため
+      // 現状 shop 直下のまま（別 finding: personal 向け ai_chat_feedback は設計要）
       await db
         .collection(`shop_shops/${workspaceId}/ai_chat_feedback`)
         .add(feedbackPayload);

@@ -13,7 +13,7 @@
 // あるため、ここで受け付ける ID は ALLOWLIST に限定する。
 import { NextRequest, NextResponse } from 'next/server';
 import { verifyRequest, getAdminDb, AuthError } from '../../lib/firebase-admin';
-import { resolveAccessContext } from '../../lib/access-context';
+import { resolveAccessContext, pathCustomers, pathCustomerLogs } from '../../lib/access-context';
 import { tryClaimMission } from '../lib';
 import type { MissionId } from '@/lib/missions';
 
@@ -53,7 +53,7 @@ export async function POST(request: NextRequest) {
 
       const db = getAdminDb();
       const customersSnap = await db
-        .collection(`shop_shops/${workspaceId}/customers`)
+        .collection(pathCustomers(ctx))
         .limit(missionId === 'add_5_customers' ? 5 : 1)
         .get();
 
@@ -74,7 +74,7 @@ export async function POST(request: NextRequest) {
         let hasLog = false;
         for (const cid of customerIds) {
           const logsSnap = await db
-            .collection(`shop_shops/${workspaceId}/customers/${cid}/logs`)
+            .collection(pathCustomerLogs(ctx, cid))
             .limit(1)
             .get();
           if (!logsSnap.empty) {
