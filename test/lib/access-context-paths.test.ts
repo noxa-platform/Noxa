@@ -58,6 +58,13 @@ describe('access-context path helpers — 非自明な分岐の固定', () => {
     expect(pathAiThreads(personal)).not.toBe(`shop_shops/${personal.uid}/ai_threads`);
     expect(pathAiThread(personal, 't1')).toBe('personal_ai_threads/U1/items/t1');
   });
+  it('AI プロフィール: shop は生パス shop_shops/{wid}/ai_profile/self と一致・personal は分岐（Day62 修正の安全性）', () => {
+    // Day62: beta-profile-reward の GET が生 shop パス固定で、POST(ctx.kind 分岐)と食い違い
+    // personal ユーザーの診断が常に空＝報酬 UI を出せなかった。shop は helper===生パスで挙動不変。
+    expect(pathAiProfile(shop)).toBe(`shop_shops/${shop.shopId}/ai_profile/self`);
+    expect(pathAiProfile(personal)).not.toBe(`shop_shops/${personal.uid}/ai_profile/self`);
+    expect(pathAiProfile(personal)).toBe('personal_self_styles/U1');
+  });
   it('サブパスは親パスを前置する', () => {
     expect(pathCustomer(shop, 'c9')).toBe('shop_shops/S1/customers/c9');
     expect(pathCustomerLogs(personal, 'c9')).toBe('personal_customers/U1/items/c9/logs');

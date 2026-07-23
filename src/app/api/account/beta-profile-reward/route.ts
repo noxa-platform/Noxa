@@ -10,7 +10,7 @@
 //     最初の 1 つの完成 WS で報酬付与）
 import { NextRequest, NextResponse } from 'next/server';
 import { verifyRequest, getAdminDb, AuthError } from '../../lib/firebase-admin';
-import { resolveAccessContext } from '../../lib/access-context';
+import { resolveAccessContext, pathAiProfile } from '../../lib/access-context';
 import { tryClaimMission } from '../../missions/lib';
 import { getMission } from '@/lib/missions';
 import { FieldValue } from 'firebase-admin/firestore';
@@ -32,8 +32,10 @@ export async function GET(request: NextRequest) {
     const ctx = await resolveAccessContext(uid, wid);
 
     const db = getAdminDb();
+    // personal は personal_self_styles、shop は ai_profile/self（POST と同じ context helper で解決）。
+    // 旧実装は GET だけ生 shop パス固定で、personal ユーザーの診断が常に空＝報酬 UI が出せなかった。
     const [selfSnap, missionSnap] = await Promise.all([
-      db.doc(`shop_shops/${wid}/ai_profile/self`).get(),
+      db.doc(pathAiProfile(ctx)).get(),
       db.doc(`reward_missions/${uid}`).get(),
     ]);
     const self = selfSnap.exists ? selfSnap.data() ?? {} : {};
@@ -80,10 +82,8 @@ export async function POST(request: NextRequest) {
     const ctx = await resolveAccessContext(uid, body.workspaceId);
 
     const db = getAdminDb();
-    // 個人ユーザーは personal_self_styles、shop は ai_profile/self
-    const selfRef = db.doc(ctx.kind === 'shop'
-      ? `shop_shops/${ctx.shopId}/ai_profile/self`
-      : `personal_self_styles/${ctx.uid}`);
+    // 個人ユーザーは personal_self_styles、shop は ai_profile/self（GET と同一 helper で一致させる）
+    const selfRef = db.doc(pathAiProfile(ctx));
 
     // 全項埋めを確認
     const selfSnap = await selfRef.get();
