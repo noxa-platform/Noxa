@@ -7,7 +7,7 @@ import {
   verifyWorkspaceAccess,
   AuthError,
 } from '../../lib/firebase-admin';
-import { resolveAccessContext } from '../../lib/access-context';
+import { resolveAccessContext, pathCustomer, pathCustomerLogs } from '../../lib/access-context';
 import { estimateAiCost } from '@/lib/ai-cost';
 
 // 顧客 1 件の過去ログ + 既存プロフィールを AI に渡し、
@@ -76,7 +76,7 @@ export async function POST(request: NextRequest) {
 
     const db = getAdminDb();
     const customerSnap = await db
-      .doc(`shop_shops/${workspaceId}/customers/${customerId}`)
+      .doc(pathCustomer(ctx, customerId))
       .get();
     if (!customerSnap.exists) {
       return NextResponse.json({ error: '顧客が見つかりません' }, { status: 404 });
@@ -85,7 +85,7 @@ export async function POST(request: NextRequest) {
 
     // 最新 60 件まで（古すぎるログは AI 推定にノイズが乗る）
     const logsSnap = await db
-      .collection(`shop_shops/${workspaceId}/customers/${customerId}/logs`)
+      .collection(pathCustomerLogs(ctx, customerId))
       .orderBy('datetime', 'desc')
       .limit(60)
       .get();

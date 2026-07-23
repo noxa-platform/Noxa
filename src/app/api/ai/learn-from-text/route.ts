@@ -16,7 +16,7 @@ import { generateText } from '../ai-provider';
 import { reserveAiCredit, refundAiCredit, logAiLedger } from '../../lib/credits';
 import { estimateAiCost } from '@/lib/ai-cost';
 import { getAdminDb, verifyRequest, AuthError } from '../../lib/firebase-admin';
-import { resolveAccessContext } from '../../lib/access-context';
+import { resolveAccessContext, pathCustomer } from '../../lib/access-context';
 import { jstCalendarDate } from '@/lib/datetime';
 import { FieldValue } from 'firebase-admin/firestore';
 
@@ -170,7 +170,7 @@ export async function POST(request: NextRequest) {
 
     // 既存 customer ドキュメントとマージして書き戻す
     const db = getAdminDb();
-    const ref = db.doc(`shop_shops/${workspaceId}/customers/${customerId}`);
+    const ref = db.doc(pathCustomer(ctx, customerId));
     const snap = await ref.get();
     if (!snap.exists) {
       await refundAiCredit(uid, cost, reserved);

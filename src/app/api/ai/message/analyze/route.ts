@@ -3,7 +3,7 @@ import { analyzeImages } from '../../ai-provider';
 import { estimateAiCost } from '@/lib/ai-cost';
 import { withReservedCredits } from '../../with-credits';
 import { getAdminDb, verifyRequest, AuthError } from '../../../lib/firebase-admin';
-import { resolveAccessContext } from '../../../lib/access-context';
+import { resolveAccessContext, pathCustomer } from '../../../lib/access-context';
 import { FieldValue } from 'firebase-admin/firestore';
 
 // スクリーンショットから会話を解析してFirestoreに保存
@@ -120,7 +120,7 @@ export async function POST(request: NextRequest) {
 
       // Firestoreに保存
       const db = getAdminDb();
-      const customerRef = db.doc(`shop_shops/${workspaceId}/customers/${customerId}`);
+      const customerRef = db.doc(pathCustomer(ctx, customerId));
 
       // 既存のchatHistoryを取得して件数制限
       const customerSnap = await customerRef.get();

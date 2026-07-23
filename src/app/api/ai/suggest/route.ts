@@ -3,15 +3,15 @@ import { generateText } from '../ai-provider';
 import { reserveAiCredit, refundAiCredit, logAiLedger } from '../../lib/credits';
 import { estimateAiCost } from '@/lib/ai-cost';
 import { getAdminDb, verifyRequest, AuthError } from '../../lib/firebase-admin';
-import { resolveAccessContext } from '../../lib/access-context';
+import { resolveAccessContext, pathCustomer, pathCustomerLogs, type AccessContext } from '../../lib/access-context';
 import { pickForAi, AI_CUSTOMER_FIELDS, AI_LOG_FIELDS } from '@/lib/ai-privacy';
 
-async function getCustomerWithLogs(workspaceId: string, customerId: string): Promise<string> {
+async function getCustomerWithLogs(ctx: AccessContext, customerId: string): Promise<string> {
   try {
     const db = getAdminDb();
     const [customerSnap, logsSnap] = await Promise.all([
-      db.doc(`shop_shops/${workspaceId}/customers/${customerId}`).get(),
-      db.collection(`shop_shops/${workspaceId}/customers/${customerId}/logs`)
+      db.doc(pathCustomer(ctx, customerId)).get(),
+      db.collection(pathCustomerLogs(ctx, customerId))
         .orderBy('date', 'desc')
         .limit(10)
         .get(),
@@ -40,7 +40,7 @@ export async function POST(request: NextRequest) {
 
     const ctx = await resolveAccessContext(uid, workspaceId);
 
-    const context = await getCustomerWithLogs(workspaceId, customerId);
+    const context = await getCustomerWithLogs(ctx, customerId);
 
     // 顧客コンテキスト量に応じてクレジット計算
     const suggestCost = estimateAiCost({

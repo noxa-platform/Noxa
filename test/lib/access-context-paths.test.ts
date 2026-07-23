@@ -58,6 +58,18 @@ describe('access-context path helpers — 非自明な分岐の固定', () => {
     expect(pathAiThreads(personal)).not.toBe(`shop_shops/${personal.uid}/ai_threads`);
     expect(pathAiThread(personal, 't1')).toBe('personal_ai_threads/U1/items/t1');
   });
+  it('顧客系: shop は生パス shop_shops/{wid}/customers... と一致・personal は分岐（Day63 バッチ修正の安全性）', () => {
+    // Day63: ai/suggest・message(+analyze)・customer-infer-profile・learn-from-text・insights が
+    // 生 shop 顧客パスで personal CRM の AI が全滅し得た。shop は helper===生パスで挙動不変。
+    const wid = shop.shopId;
+    expect(pathCustomers(shop)).toBe(`shop_shops/${wid}/customers`);
+    expect(pathCustomer(shop, 'c1')).toBe(`shop_shops/${wid}/customers/c1`);
+    expect(pathCustomerLogs(shop, 'c1')).toBe(`shop_shops/${wid}/customers/c1/logs`);
+    expect(pathAiFeedback(shop, 'c1')).toBe(`shop_shops/${wid}/customers/c1/ai_feedback`);
+    // personal は別テナントへ分岐（生 shop パスにならない）
+    expect(pathCustomers(personal)).toBe('personal_customers/U1/items');
+    expect(pathCustomerLogs(personal, 'c1')).toBe('personal_customers/U1/items/c1/logs');
+  });
   it('AI プロフィール: shop は生パス shop_shops/{wid}/ai_profile/self と一致・personal は分岐（Day62 修正の安全性）', () => {
     // Day62: beta-profile-reward の GET が生 shop パス固定で、POST(ctx.kind 分岐)と食い違い
     // personal ユーザーの診断が常に空＝報酬 UI を出せなかった。shop は helper===生パスで挙動不変。

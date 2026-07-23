@@ -3,12 +3,12 @@ import { generateText } from '../ai-provider';
 import { reserveAiCredit, refundAiCredit, logAiLedger } from '../../lib/credits';
 import { estimateAiCost } from '@/lib/ai-cost';
 import { getAdminDb, verifyRequest, AuthError } from '../../lib/firebase-admin';
-import { resolveAccessContext } from '../../lib/access-context';
+import { resolveAccessContext, pathCustomers, type AccessContext } from '../../lib/access-context';
 
-async function getWorkspaceData(workspaceId: string): Promise<string> {
+async function getWorkspaceData(ctx: AccessContext): Promise<string> {
   try {
     const db = getAdminDb();
-    const snap = await db.collection(`shop_shops/${workspaceId}/customers`).get();
+    const snap = await db.collection(pathCustomers(ctx)).get();
     if (snap.empty) return '[]';
 
     const customers = snap.docs.map((doc) => {
@@ -32,10 +32,10 @@ async function getWorkspaceData(workspaceId: string): Promise<string> {
 }
 
 // 冷え検知用: 各顧客の直近会話 mood を集計
-async function getRelationshipRiskData(workspaceId: string): Promise<string> {
+async function getRelationshipRiskData(ctx: AccessContext): Promise<string> {
   try {
     const db = getAdminDb();
-    const snap = await db.collection(`shop_shops/${workspaceId}/customers`).get();
+    const snap = await db.collection(pathCustomers(ctx)).get();
     if (snap.empty) return '[]';
 
     const now = Date.now();
@@ -87,8 +87,8 @@ export async function POST(request: NextRequest) {
     const ctx = await resolveAccessContext(uid, workspaceId);
 
     const customerData = type === 'relationship_risk'
-      ? await getRelationshipRiskData(workspaceId)
-      : await getWorkspaceData(workspaceId);
+      ? await getRelationshipRiskData(ctx)
+      : await getWorkspaceData(ctx);
 
     // 顧客データ量に応じて見積もり（多いほどコスト増、THINK 系扱いで倍率 1.5）
     // customerData は既に JSON.stringify 済みの string なので二重 stringify しない

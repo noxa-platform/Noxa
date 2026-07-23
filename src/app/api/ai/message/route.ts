@@ -3,25 +3,25 @@ import { generateText } from '../ai-provider';
 import { reserveAiCredit, refundAiCredit, logAiLedger } from '../../lib/credits';
 import { estimateAiCost } from '@/lib/ai-cost';
 import { getAdminDb, verifyRequest, AuthError } from '../../lib/firebase-admin';
-import { resolveAccessContext } from '../../lib/access-context';
+import { resolveAccessContext, pathCustomer, pathCustomerLogs, pathAiFeedback, type AccessContext } from '../../lib/access-context';
 import { resolveWorkspaceContext, composePlaybookAndSelf } from '@/lib/ai-knowledge/prompt-helpers';
 import { getGlobalSuccessPatterns, getAggregateHint } from '@/lib/ai-knowledge/global-patterns';
 import { AI_CONFIG } from '@/lib/ai-knowledge/constants';
 import { maskContactInfo } from '@/lib/ai-privacy';
 
 // 顧客データ + 最新ログを取得してコンテキスト文字列を生成
-async function getCustomerContext(workspaceId: string, customerId: string): Promise<string> {
+async function getCustomerContext(ctx: AccessContext, customerId: string): Promise<string> {
   try {
     const db = getAdminDb();
 
     // 顧客基本データ取得
-    const snap = await db.doc(`shop_shops/${workspaceId}/customers/${customerId}`).get();
+    const snap = await db.doc(pathCustomer(ctx, customerId)).get();
     if (!snap.exists) return '顧客データなし';
     const d = snap.data()!;
 
     // 最新5件のログを取得
     const logsSnap = await db
-      .collection(`shop_shops/${workspaceId}/customers/${customerId}/logs`)
+      .collection(pathCustomerLogs(ctx, customerId))
       .orderBy('datetime', 'desc')
       .limit(5)
       .get();
@@ -141,7 +141,7 @@ export async function POST(request: NextRequest) {
 
     const ctx = await resolveAccessContext(uid, wid);
 
-    const customerContext = await getCustomerContext(wid, customerId);
+    const customerContext = await getCustomerContext(ctx, customerId);
     const purposePrompt = PURPOSE_PROMPTS[purpose] || '';
 
     // 文章量に応じてクレジットを計算（最終 prompt サイズ + 想定出力 1000 tok）
@@ -187,7 +187,7 @@ export async function POST(request: NextRequest) {
 
     // 過去の 👍👎 フィードバック + 匿名化グローバルパターン + 集計ヒントを並列取得
     const [fbSnap, globalPatterns, aggregateHint] = await Promise.all([
-      db.collection(`shop_shops/${wid}/customers/${customerId}/ai_feedback`)
+      db.collection(pathAiFeedback(ctx, customerId))
         .orderBy('createdAt', 'desc')
         .limit(AI_CONFIG.recentFeedbackLimit)
         .get(),
