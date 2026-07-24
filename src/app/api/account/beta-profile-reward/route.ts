@@ -14,12 +14,11 @@ import { resolveAccessContext, pathAiProfile } from '../../lib/access-context';
 import { tryClaimMission } from '../../missions/lib';
 import { getMission } from '@/lib/missions';
 import { FieldValue } from 'firebase-admin/firestore';
+import { REQUIRED_PROFILE_FIELDS, evaluateProfileCompletion } from './completion';
 
 interface ClaimBody {
   workspaceId: string;
 }
-
-const REQUIRED_FIELDS = ['stageName', 'staffRole', 'gender', 'firstPerson', 'defaultTone', 'emojiLevel'] as const;
 
 /** プロファイルの埋まり具合を診断（report 用） */
 export async function GET(request: NextRequest) {
@@ -41,23 +40,15 @@ export async function GET(request: NextRequest) {
     const self = selfSnap.exists ? selfSnap.data() ?? {} : {};
     const missions = missionSnap.exists ? (missionSnap.data()?.claimed ?? {}) : {};
 
-    const filled: Record<string, boolean> = {};
-    let filledCount = 0;
-    for (const k of REQUIRED_FIELDS) {
-      const v = self[k];
-      const ok = v !== undefined && v !== null && (typeof v !== 'string' || v.trim().length > 0);
-      filled[k] = ok;
-      if (ok) filledCount++;
-    }
-
+    const { filled, filledCount, requiredCount, allFilled } = evaluateProfileCompletion(self);
     const rewardAmount = getMission('profile_complete')?.rewardCredits ?? 10;
 
     return NextResponse.json({
-      requiredFields: REQUIRED_FIELDS,
+      requiredFields: REQUIRED_PROFILE_FIELDS,
       filled,
       filledCount,
-      requiredCount: REQUIRED_FIELDS.length,
-      allFilled: filledCount === REQUIRED_FIELDS.length,
+      requiredCount,
+      allFilled,
       rewardAmount,
       claimed: Boolean(missions.profile_complete),
       claimedAt: missions.profile_complete ?? null,
@@ -85,18 +76,15 @@ export async function POST(request: NextRequest) {
     // 個人ユーザーは personal_self_styles、shop は ai_profile/self（GET と同一 helper で一致させる）
     const selfRef = db.doc(pathAiProfile(ctx));
 
-    // 全項埋めを確認
+    // 全項埋めを確認（GET と同一の判定ヘルパーで一致させる）
     const selfSnap = await selfRef.get();
     const self = selfSnap.exists ? selfSnap.data() ?? {} : {};
-    for (const k of REQUIRED_FIELDS) {
-      const v = self[k];
-      const ok = v !== undefined && v !== null && (typeof v !== 'string' || v.trim().length > 0);
-      if (!ok) {
-        return NextResponse.json(
-          { error: 'プロファイルが全項目埋まっていません', missing: k },
-          { status: 400 },
-        );
-      }
+    const completion = evaluateProfileCompletion(self);
+    if (!completion.allFilled) {
+      return NextResponse.json(
+        { error: 'プロファイルが全項目埋まっていません', missing: completion.firstMissing },
+        { status: 400 },
+      );
     }
 
     // ミッションシステム経由で受領（冪等）。既受領なら granted: 0 が返る
