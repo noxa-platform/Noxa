@@ -20,7 +20,7 @@ vi.mock('firebase-admin/firestore', () => ({
   FieldValue: { serverTimestamp: () => '__ST__', delete: () => '__DELETE__' },
 }));
 
-import { tryClaimMission } from '../../src/app/api/missions/lib';
+import { tryClaimMission, getClaimedMissionIds } from '../../src/app/api/missions/lib';
 
 const clone = <T>(v: T): T => JSON.parse(JSON.stringify(v));
 
@@ -42,7 +42,11 @@ function makeDb(initial: Record<string, Record<string, unknown>> = {}) {
     deepMerge(cur, data);
     store[path] = cur;
   };
-  const makeRef = (path: string) => ({ path, set: async (data: Record<string, unknown>) => applyMerge(path, data) });
+  const makeRef = (path: string) => ({
+    path,
+    get: async () => ({ exists: !!store[path], data: () => store[path] }),
+    set: async (data: Record<string, unknown>) => applyMerge(path, data),
+  });
   const db = {
     doc: (path: string) => makeRef(path),
     runTransaction: async (fn: (tx: unknown) => unknown) => fn({
@@ -100,5 +104,30 @@ describe('tryClaimMission（受領→付与の順序と巻き戻し）', () => {
     const r = await tryClaimMission('u1', 'nope');
     expect(r).toEqual({ granted: 0, alreadyClaimed: false, missionId: 'nope' });
     expect(mocks.grantBonusCredits).not.toHaveBeenCalled();
+  });
+});
+
+describe('getClaimedMissionIds（受領済み一覧）', () => {
+  beforeEach(() => {
+    mocks.grantBonusCredits.mockReset();
+    mocks.getAdminDb.mockReset();
+  });
+
+  it('doc 無し: 空 Set', async () => {
+    const { db } = makeDb();
+    mocks.getAdminDb.mockReturnValue(db);
+    const s = await getClaimedMissionIds('u1');
+    expect(s.size).toBe(0);
+  });
+
+  it('truthy な claimed キーのみ返す（rollback で falsy 化した分は除外）', async () => {
+    // first_customer は受領済み（timestamp）、first_log は巻き戻しで falsy 残骸
+    const { db } = makeDb({ [PATH]: { claimed: { first_customer: '__ST__', first_log: null, share_referral: false } } });
+    mocks.getAdminDb.mockReturnValue(db);
+    const s = await getClaimedMissionIds('u1');
+    expect(s.has('first_customer')).toBe(true);
+    expect(s.has('first_log')).toBe(false);
+    expect(s.has('share_referral')).toBe(false);
+    expect(s.size).toBe(1);
   });
 });
