@@ -52,9 +52,11 @@ export async function POST(request: NextRequest) {
       const ctx = await resolveAccessContext(uid, workspaceId);
 
       const db = getAdminDb();
+      // add_5_customers は 5 件、first_log は横断確認のため最大 5 件、それ以外は 1 件で足りる
+      const customerFetchLimit = missionId === 'add_5_customers' || missionId === 'first_log' ? 5 : 1;
       const customersSnap = await db
         .collection(pathCustomers(ctx))
-        .limit(missionId === 'add_5_customers' ? 5 : 1)
+        .limit(customerFetchLimit)
         .get();
 
       const customerCount = customersSnap.size;
@@ -66,8 +68,9 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ error: '顧客が 5 人未満です' }, { status: 400 });
       }
       if (missionId === 'first_log') {
-        // ログ 1 件以上を全顧客で横断確認（最大 5 顧客チェック、軽量化）
-        const customerIds = customersSnap.docs.map((d) => d.id).slice(0, 1);
+        // ログ 1 件以上を全顧客で横断確認（最大 5 顧客チェック、軽量化）。
+        // 先頭顧客だけを見ると、2 件目以降の顧客に付けた初ログを取りこぼす（Day68 で修正）。
+        const customerIds = customersSnap.docs.map((d) => d.id);
         if (customerIds.length === 0) {
           return NextResponse.json({ error: 'ログがありません' }, { status: 400 });
         }
