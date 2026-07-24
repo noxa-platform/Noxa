@@ -105,6 +105,26 @@ describe('missions/trigger POST（改ざん防止のサーバ検証）', () => {
     expect(mocks.claim).not.toHaveBeenCalled();
   });
 
+  it('first_log: 5 顧客窓の内側（5 件目のみログ）なら達成＝全件を横断確認している', async () => {
+    mocks.getDb.mockReturnValue(
+      makeDb(['c1', 'c2', 'c3', 'c4', 'c5'], { c5: true }),
+    );
+    const r = await POST(req({ missionId: 'first_log', workspaceId: 'u1' }));
+    expect(r.status).toBe(200);
+    expect(mocks.claim).toHaveBeenCalledWith('u1', 'first_log');
+  });
+
+  it('first_log: 6 顧客目のみログは窓外で 400（「最大 5 顧客・軽量化」の意図的トレードオフを固定）', async () => {
+    // 顧客取得は limit 5 のため 6 件目は取得されず横断確認の対象外。
+    // これは軽量化のための仕様上の境界——変更したらこのテストが気付く。
+    mocks.getDb.mockReturnValue(
+      makeDb(['c1', 'c2', 'c3', 'c4', 'c5', 'c6'], { c6: true }),
+    );
+    const r = await POST(req({ missionId: 'first_log', workspaceId: 'u1' }));
+    expect(r.status).toBe(400);
+    expect(mocks.claim).not.toHaveBeenCalled();
+  });
+
   it('share_referral: 実データ検証なし（意思表示のみ）で即 claim', async () => {
     mocks.getDb.mockReturnValue(makeDb([])); // 参照されないはず
     const r = await POST(req({ missionId: 'share_referral' }));
