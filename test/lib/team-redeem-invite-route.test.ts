@@ -172,4 +172,56 @@ describe('team/redeem-invite POST（招待受諾＋cast 名簿紐付け）', () 
     expect(colStore[CASTS]).toBeUndefined(); // cast 名簿は触らない
     expect((store['shop_shops/s1/members/u1'] as { role?: string }).role).toBe('accounting');
   });
+
+  // 表示名フォールバック: name = displayName || account_users.displayName || '新メンバー'。
+  // この name が cast の作成名・byName 紐付けキー・member.castDisplayName に一貫して使われる。
+  it('displayName 省略時は account_users の displayName を採用（cast 名・紐付けキーに反映）', async () => {
+    const { db, store, colStore } = makeDb({
+      ...SHOP,
+      'shop_shops/s1/invites/C1': { role: 'cast', createdBy: 'owner', expiresAt: FUTURE },
+      'account_users/u1': { displayName: 'あや' },
+    });
+    mocks.getDb.mockReturnValue(db);
+
+    const r = await POST(req({ shopId: 's1', code: 'C1' })); // displayName 未指定
+    expect(r.status).toBe(200);
+    expect(castList(colStore)).toEqual([{ name: 'あや', uid: 'u1' }]);
+    expect((store['shop_shops/s1/members/u1'] as { castDisplayName?: string }).castDisplayName).toBe('あや');
+  });
+
+  it('displayName も account 名も無ければ「新メンバー」で作成', async () => {
+    const { db, colStore } = makeDb({ ...SHOP, 'shop_shops/s1/invites/C1': { role: 'cast', expiresAt: FUTURE } });
+    mocks.getDb.mockReturnValue(db);
+
+    const r = await POST(req({ shopId: 's1', code: 'C1' }));
+    expect(r.status).toBe(200);
+    expect(castList(colStore)).toEqual([{ name: '新メンバー', uid: 'u1' }]);
+  });
+
+  it('フォールバック名でも同名未紐付けの cast に紐付く（account 名で既存名簿へ uid セット）', async () => {
+    const { db, colStore } = makeDb(
+      { ...SHOP, 'shop_shops/s1/invites/C1': { role: 'cast', expiresAt: FUTURE }, 'account_users/u1': { displayName: 'ゆい' } },
+      { [CASTS]: { c9: { name: 'ゆい', uid: null } } },
+    );
+    mocks.getDb.mockReturnValue(db);
+
+    const r = await POST(req({ shopId: 's1', code: 'C1' })); // displayName 省略→account 名 'ゆい' で照合
+    expect(r.status).toBe(200);
+    expect(Object.keys(colStore[CASTS])).toEqual(['c9']); // 新規作成せず既存に紐付け
+    expect(colStore[CASTS].c9).toMatchObject({ name: 'ゆい', uid: 'u1' });
+  });
+
+  it('member.invitedBy に招待の createdBy を監査記録（無ければ null）', async () => {
+    // createdBy あり
+    const withCreator = makeDb({ ...SHOP, 'shop_shops/s1/invites/C1': { role: 'cast', createdBy: 'owner', expiresAt: FUTURE } });
+    mocks.getDb.mockReturnValue(withCreator.db);
+    await POST(req({ shopId: 's1', code: 'C1', displayName: 'x' }));
+    expect((withCreator.store['shop_shops/s1/members/u1'] as { invitedBy?: string | null }).invitedBy).toBe('owner');
+
+    // createdBy 無し → null
+    const noCreator = makeDb({ ...SHOP, 'shop_shops/s1/invites/C1': { role: 'cast', expiresAt: FUTURE } });
+    mocks.getDb.mockReturnValue(noCreator.db);
+    await POST(req({ shopId: 's1', code: 'C1', displayName: 'x' }));
+    expect((noCreator.store['shop_shops/s1/members/u1'] as { invitedBy?: string | null }).invitedBy).toBeNull();
+  });
 });
