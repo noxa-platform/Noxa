@@ -27,6 +27,8 @@ vi.mock('firebase-admin/firestore', () => {
 });
 
 import { Timestamp } from 'firebase-admin/firestore';
+// AuthError はモック済み firebase-admin から取得（route と同一クラス参照＝instanceof が成立する）。
+import { AuthError } from '../../src/app/api/lib/firebase-admin';
 import { POST } from '../../src/app/api/community/redeem-invite/route';
 
 /** Timestamp 実体を保持する非 clone フェイク Firestore（doc / tx get-update-set / collection.add）。 */
@@ -149,5 +151,44 @@ describe('community/redeem-invite POST（招待引き換えの会員化境界）
     expect(r.status).toBe(200);
     expect(store[USER]).toBeDefined();
     expect(notifCount(added)).toBe(0);
+  });
+
+  it('認証失敗（AuthError）は 401（会員化しない）', async () => {
+    mocks.verify.mockRejectedValue(new AuthError('unauthenticated'));
+    const { db, store } = makeDb({ [INVITE]: { status: 'active', issuedBy: 'owner', expiresAt: future() } });
+    mocks.getDb.mockReturnValue(db);
+    const r = await POST(req({ code: 'INV' }));
+    expect(r.status).toBe(401);
+    expect(store[USER]).toBeUndefined();
+  });
+
+  it('コード前後の空白は trim して解決する（空白のみは 400）', async () => {
+    const { db, store } = makeDb({ [INVITE]: { status: 'active', issuedBy: 'owner', expiresAt: future() } });
+    mocks.getDb.mockReturnValue(db);
+    const r = await POST(req({ code: '  INV  ' }));
+    expect(r.status).toBe(200);
+    expect(store[USER]).toBeDefined();
+
+    mocks.getDb.mockReturnValue(makeDb().db);
+    expect((await POST(req({ code: '   ' }))).status).toBe(400); // trim で空＝未入力扱い
+  });
+
+  it('x-forwarded-for が多値なら先頭 IP のみ・ヘッダ無しは signupIp=null', async () => {
+    const a = makeDb({ [INVITE]: { status: 'active', issuedBy: 'owner', expiresAt: future() } });
+    mocks.getDb.mockReturnValue(a.db);
+    await POST(req({ code: 'INV' }, '1.2.3.4, 5.6.7.8'));
+    expect((a.store[USER] as { signupIp?: string }).signupIp).toBe('1.2.3.4');
+
+    const b = makeDb({ [INVITE]: { status: 'active', issuedBy: 'owner', expiresAt: future() } });
+    mocks.getDb.mockReturnValue(b.db);
+    await POST(req({ code: 'INV' }, null)); // x-forwarded-for 無し
+    expect((b.store[USER] as { signupIp?: string | null }).signupIp).toBeNull();
+  });
+
+  it('status=active でも usedBy があれば 400（不整合データの防御分岐）', async () => {
+    const { db, store } = makeDb({ [INVITE]: { status: 'active', usedBy: 'someone', expiresAt: future() } });
+    mocks.getDb.mockReturnValue(db);
+    expect((await POST(req({ code: 'INV' }))).status).toBe(400);
+    expect(store[USER]).toBeUndefined();
   });
 });
