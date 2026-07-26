@@ -16,14 +16,23 @@ vi.mock('../../src/app/api/lib/firebase-admin', () => ({
 }));
 
 import { GET } from '../../src/app/api/referral/code/route';
+// AuthError はモック済み firebase-admin から取得（route の catch と同一クラス参照）。
+import { AuthError } from '../../src/app/api/lib/firebase-admin';
 
 /** full-path キーの最小フェイク Firestore。tx.get/create/set 対応。 */
-function makeDb(seed: Record<string, Record<string, unknown>> = {}, opts: { ownerRaceCode?: string; uid?: string } = {}) {
+function makeDb(
+  seed: Record<string, Record<string, unknown>> = {},
+  opts: { ownerRaceCode?: string; uid?: string; allCodesExist?: boolean } = {},
+) {
   const store: Record<string, Record<string, unknown> | undefined> = { ...seed };
   const merge = (path: string, data: Record<string, unknown>) => {
     store[path] = { ...(store[path] ?? {}), ...data };
   };
-  const snap = (path: string) => ({ exists: store[path] !== undefined, data: () => store[path] });
+  // allCodesExist: reward_referral_codes/* を常に「存在」扱い＝コード衝突を再現する。
+  const snap = (path: string) =>
+    opts.allCodesExist && path.startsWith('reward_referral_codes/')
+      ? { exists: true, data: () => ({ ownerUid: 'other', usedCount: 0 }) }
+      : { exists: store[path] !== undefined, data: () => store[path] };
   const makeRef = (path: string) => ({
     path,
     get: async () => snap(path),
@@ -52,7 +61,9 @@ function makeDb(seed: Record<string, Record<string, unknown>> = {}, opts: { owne
 const codeKeys = (store: Record<string, unknown>) => Object.keys(store).filter((k) => k.startsWith('reward_referral_codes/'));
 const req = () => ({}) as unknown as Parameters<typeof GET>[0];
 
-describe('referral/code GET 発行の冪等性', () => {
+const CODE_RE = /^[ABCDEFGHJKLMNPQRSTUVWXYZ23456789]{8}$/; // 0/O/1/I/l 等を除外した文字集合
+
+describe('referral/code GET 発行の冪等性と未到達分岐', () => {
   beforeEach(() => {
     mocks.getAdminDb.mockReset();
     mocks.verifyRequest.mockReset();
@@ -97,5 +108,44 @@ describe('referral/code GET 発行の冪等性', () => {
     const json = await (await GET(req())).json();
     expect(json.code).toBe('RACE1');       // 既発行を採用
     expect(codeKeys(store)).toHaveLength(1); // 新しいコードを作っていない（二重発行なし）
+  });
+
+  it('初回発行コードは紛らわしい文字を除いた8桁英数字', async () => {
+    const { db } = makeDb();
+    mocks.getAdminDb.mockReturnValue(db);
+    const json = await (await GET(req())).json();
+    expect(json.code).toMatch(CODE_RE); // 0/O/1/I/l を含まない
+  });
+
+  it('legacy 救済: v2 未発行でも旧 crm_ のコードを読み取り返す（新規発行も移行もしない）', async () => {
+    const { db, store } = makeDb({
+      'crm_referral_owners/u1': { code: 'LEG7ABCD' },
+      'crm_referral_codes/LEG7ABCD': { ownerUid: 'u1', usedCount: 2 },
+    });
+    mocks.getAdminDb.mockReturnValue(db);
+    const json = await (await GET(req())).json();
+    expect(json).toMatchObject({ code: 'LEG7ABCD', usedCount: 2 }); // crm_ の usedCount を読む
+    expect(codeKeys(store)).toHaveLength(0);                        // reward_ を作らない（移行しない）
+    expect(store['reward_referral_owners/u1']).toBeUndefined();
+  });
+
+  it('legacy 救済: 旧コード doc が欠落でも code は返し usedCount=0', async () => {
+    const { db } = makeDb({ 'crm_referral_owners/u1': { code: 'LEGXXXXX' } });
+    mocks.getAdminDb.mockReturnValue(db);
+    const json = await (await GET(req())).json();
+    expect(json).toMatchObject({ code: 'LEGXXXXX', usedCount: 0 });
+  });
+
+  it('認証失敗（AuthError）は 401', async () => {
+    mocks.verifyRequest.mockRejectedValue(new AuthError('unauth'));
+    mocks.getAdminDb.mockReturnValue(makeDb().db);
+    expect((await GET(req())).status).toBe(401);
+  });
+
+  it('コード衝突が解消しなければ 500（tx で CODE_COLLISION を投げる）', async () => {
+    // reward_referral_codes/* が常に存在＝5回の候補生成も tx も衝突し続ける
+    const { db } = makeDb({}, { allCodesExist: true });
+    mocks.getAdminDb.mockReturnValue(db);
+    expect((await GET(req())).status).toBe(500);
   });
 });
