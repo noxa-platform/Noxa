@@ -138,4 +138,38 @@ describe('account/delete POST（退会の破壊的後始末の境界）', () => 
     await POST(req());
     expect(store['shop_shops/wsX']).toBeDefined(); // 非メンバーの WS は不変
   });
+
+  it('ai_usage の月次サブコレクションは複数 doc でも全削除する（batch forEach）', async () => {
+    const { db, store } = makeDb({
+      'account_users/u1': { handle: 'h' },
+      'account_ai_usage/u1': { total: 9 },
+      'account_ai_usage/u1/monthly/2026-05': { used: 1 },
+      'account_ai_usage/u1/monthly/2026-06': { used: 2 },
+      'account_ai_usage/u1/monthly/2026-07': { used: 3 },
+    });
+    mocks.getDb.mockReturnValue(db);
+    await POST(req());
+    for (const p of [
+      'account_ai_usage/u1', 'account_ai_usage/u1/monthly/2026-05',
+      'account_ai_usage/u1/monthly/2026-06', 'account_ai_usage/u1/monthly/2026-07',
+    ]) expect(store[p]).toBeUndefined();
+  });
+
+  it('owner/member/非member が混在する全走査を1回で正しく処理する', async () => {
+    const { db, store } = makeDb({
+      'account_users/u1': { handle: 'h' },
+      'shop_shops/wsOwn': { ownerUid: 'u1' },       // owner → WS も削除
+      'shop_shops/wsOwn/members/u1': { role: 'owner' },
+      'shop_shops/wsMem': { ownerUid: 'boss' },     // member → WS は残す
+      'shop_shops/wsMem/members/u1': { role: 'cast' },
+      'shop_shops/wsNon': { ownerUid: 'x' },        // 非member → 不変
+    });
+    mocks.getDb.mockReturnValue(db);
+    await POST(req());
+    expect(store['shop_shops/wsOwn']).toBeUndefined();            // owner WS 削除
+    expect(store['shop_shops/wsOwn/members/u1']).toBeUndefined();
+    expect(store['shop_shops/wsMem']).toBeDefined();              // member WS は残す
+    expect(store['shop_shops/wsMem/members/u1']).toBeUndefined(); // member doc は削除
+    expect(store['shop_shops/wsNon']).toBeDefined();              // 非member WS 不変
+  });
 });
