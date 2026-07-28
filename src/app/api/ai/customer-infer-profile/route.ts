@@ -4,7 +4,6 @@ import { withReservedCredits } from '../with-credits';
 import {
   getAdminDb,
   verifyRequest,
-  verifyWorkspaceAccess,
   AuthError,
 } from '../../lib/firebase-admin';
 import { resolveAccessContext, pathCustomer, pathCustomerLogs } from '../../lib/access-context';
