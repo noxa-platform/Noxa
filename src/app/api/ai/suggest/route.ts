@@ -12,7 +12,10 @@ async function getCustomerWithLogs(ctx: AccessContext, customerId: string): Prom
     const [customerSnap, logsSnap] = await Promise.all([
       db.doc(pathCustomer(ctx, customerId)).get(),
       db.collection(pathCustomerLogs(ctx, customerId))
-        .orderBy('date', 'desc')
+        // 顧客ログ(ContactLog)の正準タイムスタンプは `datetime`（`date` フィールドは存在しない）。
+        // 旧実装は orderBy('date') で全ログが黙って除外され、AI が直近ログ無しで提案していた。
+        // sibling(message/customer-infer-profile/briefing/chat)と揃え datetime に是正。
+        .orderBy('datetime', 'desc')
         .limit(10)
         .get(),
     ]);
