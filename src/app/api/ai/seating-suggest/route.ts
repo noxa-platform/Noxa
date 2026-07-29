@@ -112,12 +112,18 @@ export async function POST(request: NextRequest) {
         responseMimeType: 'application/json',
       });
 
-      let parsed: SuggestResponse = { proposals: [] };
+      let parsed: SuggestResponse | null = null;
       try {
         parsed = JSON.parse(raw);
       } catch {
         const m = raw.match(/\{[\s\S]*\}/);
         if (m) { try { parsed = JSON.parse(m[0]); } catch { /* noop */ } }
+      }
+      if (!parsed || typeof parsed !== 'object') {
+        // 生成物が不正 JSON で提案が取り出せない＝生成失敗。ack せず return し
+        // withReservedCredits に予約分を返金させる（insights/briefing/message と同じ Day67 refund 契約）。
+        // 旧実装はこの経路でも ack して 200＋空 proposals を返し、失敗を成功に見せかけつつ課金していた。
+        return NextResponse.json({ error: 'AI提案の生成に失敗しました' }, { status: 500 });
       }
       if (!Array.isArray(parsed.proposals)) parsed = { proposals: [], note: parsed.note };
 
