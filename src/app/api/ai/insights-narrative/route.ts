@@ -51,6 +51,11 @@ export async function POST(request: NextRequest) {
     if (!body.workspaceId) {
       return NextResponse.json({ error: 'workspaceId が必要です' }, { status: 400 });
     }
+    // segmentCounts 未指定だと後段の body.segmentCounts.vip 参照で TypeError→500 になるため
+    // 予約前に 400 で弾く（object であることまで確認する）。
+    if (!body.segmentCounts || typeof body.segmentCounts !== 'object') {
+      return NextResponse.json({ error: 'segmentCounts が必要です' }, { status: 400 });
+    }
     const ctx = await resolveAccessContext(uid, body.workspaceId);
 
     // 店舗 / 自分プロファイルを system に乗せて文脈を効かせる
@@ -106,7 +111,7 @@ ${(['vip', 'needs_follow', 'growing', 'new_or_dormant'] as const)
         responseMimeType: 'application/json',
       });
 
-      let parsed: NarrativeResponse = { summary: '', actions: [] };
+      let parsed: NarrativeResponse | null = null;
       try {
         parsed = JSON.parse(raw);
       } catch {
@@ -118,6 +123,12 @@ ${(['vip', 'needs_follow', 'growing', 'new_or_dormant'] as const)
             /* noop */
           }
         }
+      }
+      if (!parsed || typeof parsed !== 'object') {
+        // 生成物が不正 JSON で summary/actions を取り出せない＝生成失敗。ack せず return し
+        // withReservedCredits に予約分を返金させる（seating-suggest/insights/briefing と同じ Day67 refund 契約）。
+        // 旧実装はこの経路でも ack して 200＋空 summary/actions を返し、失敗を成功に見せかけつつ課金していた。
+        return NextResponse.json({ error: '解説生成に失敗しました' }, { status: 500 });
       }
 
       ack(); // 生成成功＝消費確定
