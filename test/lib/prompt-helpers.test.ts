@@ -32,6 +32,19 @@ describe('buildSelfBaseBlock', () => {
   it('avgLength=0 は情報として出さない（falsy スキップ）', () => {
     expect(buildSelfBaseBlock({ avgLength: 0 })).toBe('');
   });
+
+  it('gender は既知キーを和訳、未知キーは原文（female→女性 / vtuber→vtuber）', () => {
+    expect(buildSelfBaseBlock({ gender: 'female' })).toContain('性別: 女性');
+    expect(buildSelfBaseBlock({ gender: 'vtuber' })).toContain('性別: vtuber');
+  });
+
+  // Day95-PM: GENDER_LABELS[data.gender] はプロトタイプ経由でも解決するため、
+  // gender='constructor' だと Object 関数が prompt に混入していた（insights と同型）。
+  it('gender がプロトタイプ由来のキー（constructor）でも関数が混入しない', () => {
+    const out = buildSelfBaseBlock({ gender: 'constructor' });
+    expect(out).not.toContain('native code');
+    expect(out).toContain('性別: constructor');
+  });
 });
 
 describe('buildStoreProfileBlock', () => {

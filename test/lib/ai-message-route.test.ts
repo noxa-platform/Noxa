@@ -139,6 +139,42 @@ describe('ai/message POST（LINE メッセージ3案生成）', () => {
     expect(mocks.refund).not.toHaveBeenCalled();
   });
 
+  it('purpose は既知キーのみ指示文になり scene も対応付く（thank_you→first_contact）', async () => {
+    await POST(req(okBody));
+    expect(String(mocks.gen.mock.calls[0][0])).toContain('来店のお礼メッセージ');
+    expect(mocks.compose).toHaveBeenCalledWith(expect.objectContaining({ scene: 'first_contact' }));
+  });
+
+  // ▼ Day95-PM: insights と同型のプロトタイプチェーン索引バグ（PURPOSE_PROMPTS / purposeToScene）。
+  // 修正前は purpose='constructor' で Object 関数が「メッセージの目的」として AI に送られ課金だけ発生した。
+  it('purpose がプロトタイプ由来のキー（constructor）でも関数が混入せず scene も null', async () => {
+    const res = await POST(req({ wid: 'w1', customerId: 'c1', purpose: 'constructor' }));
+    expect(res.status).toBe(200);
+    expect(String(mocks.gen.mock.calls[0][0])).not.toContain('native code');
+    expect(mocks.compose).toHaveBeenCalledWith(expect.objectContaining({ scene: null }));
+    expect(mocks.globalPat).toHaveBeenCalledWith(expect.objectContaining({ scene: null }));
+  });
+
+  it('顧客の MBTI ヒントは既知キーのみ本文に載る（INTJ）', async () => {
+    await POST(req(okBody));
+    expect(String(mocks.gen.mock.calls[0][0])).toContain('MBTI接客ヒント: INTJ');
+  });
+
+  it('顧客の mbti がプロトタイプ由来のキー（constructor）でも関数が混入しない', async () => {
+    mocks.getDb.mockReturnValue(makeDb({ name: '太郎', mbti: 'constructor' }, [], []));
+    const res = await POST(req(okBody));
+    expect(res.status).toBe(200);
+    const body = String(mocks.gen.mock.calls[0][0]);
+    expect(body).not.toContain('native code');
+    expect(body).not.toContain('MBTI接客ヒント');
+  });
+
+  it('未知の purpose は目的なしで生成（既存挙動・scene も null）', async () => {
+    const res = await POST(req({ wid: 'w1', customerId: 'c1', purpose: 'unknown_purpose' }));
+    expect(res.status).toBe(200);
+    expect(mocks.compose).toHaveBeenCalledWith(expect.objectContaining({ scene: null }));
+  });
+
   it('👍👎フィードバックを rating 符号で good/bad に振り分けても正常生成', async () => {
     mocks.getDb.mockReturnValue(makeDb(
       { name: '太郎' },

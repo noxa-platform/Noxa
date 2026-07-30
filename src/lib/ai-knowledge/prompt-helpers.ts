@@ -65,7 +65,9 @@ export function buildSelfBaseBlock(
   const parts = [
     data.stageName ? `名乗り（源氏名・他人から呼ばれる名前）: ${data.stageName}` : '',
     data.staffRole ? `自分の立場・職業: ${data.staffRole}` : '',
-    data.gender ? `性別: ${GENDER_LABELS[data.gender] || data.gender}` : '',
+    // GENDER_LABELS はプロトタイプ経由でも索引が解決するため、自前キーのみ採用する
+    // （gender='constructor' で Object 関数が prompt に混入するのを防ぐ・Day95 insights と同型）
+    data.gender ? `性別: ${Object.prototype.hasOwnProperty.call(GENDER_LABELS, data.gender) ? GENDER_LABELS[data.gender] : data.gender}` : '',
     data.firstPerson ? `一人称（必ずこれを使う。源氏名と置換禁止）: ${data.firstPerson}` : '',
     data.defaultTone ? `基本トーン: ${data.defaultTone}` : '',
     data.emojiLevel ? `絵文字頻度: ${data.emojiLevel}` : '',

@@ -96,7 +96,8 @@ function mbtiHint(mbti: string): string {
     ESTP: 'ノリ・即レス重視。堅苦しさを避けカジュアルに',
     ESFP: 'テンション・場の楽しさに反応。絵文字・誘いに前向き',
   };
-  return table[mbti] || '';
+  // mbti は顧客 doc（クライアント書込）由来。プロトタイプ経由の索引を避け自前キーのみ採用。
+  return Object.prototype.hasOwnProperty.call(table, mbti) ? table[mbti] : '';
 }
 
 // スクリーンショットから返信案を3パターン生成
@@ -238,7 +239,9 @@ export async function POST(request: NextRequest) {
 JSON配列で3つの返信案:
 ["返信案1", "返信案2", "返信案3"]`;
 
-    if (scene && SCENE_PROMPTS[scene]) {
+    // scene はクライアント任意入力。`SCENE_PROMPTS[scene]` はプロトタイプ経由でも
+    // 解決するため scene='constructor' 等で Object 関数が指示文に混入する（Day95 insights と同型）。
+    if (scene && Object.prototype.hasOwnProperty.call(SCENE_PROMPTS, scene)) {
       prompt += `\n\n## シーン指定\n${SCENE_PROMPTS[scene]}`;
     }
 

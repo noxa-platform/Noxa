@@ -146,6 +146,39 @@ describe('ai/message/reply POST（スクショ→返信案3生成）', () => {
     expect(mocks.ledger).not.toHaveBeenCalled();
   });
 
+  it('既知の scene は専用プロンプトが本文に載る（after_angry）', async () => {
+    await POST(makeReq({ ...base(), scene: 'after_angry' }));
+    const body = String(mocks.analyze.mock.calls[0][1]);
+    expect(body).toContain('## シーン指定');
+    expect(body).toContain('相手が怒っている');
+  });
+
+  // ▼ Day95-PM: insights と同型のプロトタイプチェーン索引バグ（SCENE_PROMPTS[scene]）。
+  // 修正前は scene='constructor' が truthy になり Object 関数がシーン指定として送られた。
+  it('scene がプロトタイプ由来のキー（constructor）でもシーン指定を足さない', async () => {
+    const res = await POST(makeReq({ ...base(), scene: 'constructor' }));
+    expect(res.status).toBe(200);
+    const body = String(mocks.analyze.mock.calls[0][1]);
+    expect(body).not.toContain('native code');
+    expect(body).not.toContain('## シーン指定');
+  });
+
+  it('顧客の MBTI ヒントは既知キーのみ systemInstruction に載る（INTJ）', async () => {
+    mocks.getDb.mockReturnValue(makeDb({ name: '太郎', chatHistory: [], mbti: 'INTJ' }, []));
+    await POST(makeReq(base()));
+    expect(String(mocks.analyze.mock.calls[0][2].systemInstruction)).toContain('INTJ — 論理的');
+  });
+
+  // mbtiHint の table[mbti] もプロトタイプ経由で解決していた（Day95-PM 同型5件目）。
+  it('顧客の mbti がプロトタイプ由来のキー（constructor）でも関数が混入しない', async () => {
+    mocks.getDb.mockReturnValue(makeDb({ name: '太郎', chatHistory: [], mbti: 'constructor' }, []));
+    const res = await POST(makeReq(base()));
+    expect(res.status).toBe(200);
+    const sys = String(mocks.analyze.mock.calls[0][2].systemInstruction);
+    expect(sys).not.toContain('native code');
+    expect(sys).toContain('## MBTI\nconstructor'); // 値そのものは出るがヒントは付かない
+  });
+
   it('生成結果が空なら refund してから 500', async () => {
     mocks.analyze.mockResolvedValue('');
     const res = await POST(makeReq(base()));

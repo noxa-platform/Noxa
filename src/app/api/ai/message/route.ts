@@ -89,7 +89,8 @@ async function getCustomerContext(ctx: AccessContext, customerId: string): Promi
       ESTP: 'ノリ・即レス。カジュアル',
       ESFP: 'テンション・場の楽しさ。絵文字多め',
     };
-    if (context.mbti && mbtiHintTable[context.mbti]) {
+    // mbti は顧客 doc（クライアント書込）由来。プロトタイプ経由の索引を避け自前キーのみ採用。
+    if (context.mbti && Object.prototype.hasOwnProperty.call(mbtiHintTable, context.mbti)) {
       contextStr += `\nMBTI接客ヒント: ${context.mbti} — ${mbtiHintTable[context.mbti]}`;
     }
 
@@ -142,7 +143,12 @@ export async function POST(request: NextRequest) {
     const ctx = await resolveAccessContext(uid, wid);
 
     const customerContext = await getCustomerContext(ctx, customerId);
-    const purposePrompt = PURPOSE_PROMPTS[purpose] || '';
+    // purpose はクライアント任意入力。索引はプロトタイプ経由でも解決するため
+    // purpose='constructor' 等だと Object 関数が prompt に混入して課金だけ発生する
+    // （Day95 insights と同型）。自前キーのみ採用する。
+    const purposePrompt = (typeof purpose === 'string' && Object.prototype.hasOwnProperty.call(PURPOSE_PROMPTS, purpose))
+      ? PURPOSE_PROMPTS[purpose]
+      : '';
 
     // 文章量に応じてクレジットを計算（最終 prompt サイズ + 想定出力 1000 tok）
     const estimatedInput = customerContext + (customPrompt ?? '') + purposePrompt;
@@ -172,7 +178,9 @@ export async function POST(request: NextRequest) {
       after_gift: 'check_in',
       seasonal: 'check_in',
     };
-    const scene = purposeToScene[purpose] || null;
+    const scene = (typeof purpose === 'string' && Object.prototype.hasOwnProperty.call(purposeToScene, purpose))
+      ? purposeToScene[purpose]
+      : null;
 
     // ワークスペースのコンテキスト（storeType + selfData + 店舗プロファイル）を一括解決
     const db = getAdminDb();
