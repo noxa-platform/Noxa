@@ -49,7 +49,11 @@ async function getRelationshipRiskData(ctx: AccessContext): Promise<string> {
       const moodCounts = { positive: 0, neutral: 0, negative: 0 };
       for (const m of customerMsgs) {
         const mood = m.mood || 'neutral';
-        if (mood in moodCounts) moodCounts[mood as keyof typeof moodCounts]++;
+        // `in` はプロトタイプチェーンも見るため、mood='constructor' 等で
+        // moodCounts に NaN の余計なキーが生えて AI へ渡る。自前キーのみ数える。
+        if (Object.prototype.hasOwnProperty.call(moodCounts, mood)) {
+          moodCounts[mood as keyof typeof moodCounts]++;
+        }
       }
 
       const lastContactAt = d.lastContactAt?.toDate?.();
@@ -145,7 +149,12 @@ export async function POST(request: NextRequest) {
 - severity 高 は urgentContact にも入れる`,
     };
 
-    const prompt = prompts[type] || prompts.trends;
+    // type はクライアント任意入力。`prompts[type]` はプロトタイプ経由でも解決するため
+    // type='constructor'/'toString' 等だと関数が prompt に混入し、意味不明な指示で
+    // AI を叩いて課金だけ発生する。自前キーのみ採用し、それ以外は trends にフォールバック。
+    const prompt = (typeof type === 'string' && Object.prototype.hasOwnProperty.call(prompts, type))
+      ? prompts[type]
+      : prompts.trends;
 
     let content: string;
     try {
