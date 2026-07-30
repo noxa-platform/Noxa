@@ -144,6 +144,35 @@ describe('ai/message/analyze POST（スクショ→会話抽出して保存）',
     expect(mocks.update.mock.calls[0][0].customerPersonality).toBe('同じ性格');
   });
 
+  // myMessageStyle は customerPersonality と対称の別分岐（コピペドリフト検知）。
+  it('myMessageStyle も既存と異なれば \\n 追記・空なら patch に載せない', async () => {
+    // 既存 myMessageStyle と異なる新規 myStyle → 追記
+    mocks.getDb.mockReturnValue(makeDb({ name: '太郎', chatHistory: [], myMessageStyle: '前の文体' }));
+    mocks.analyze.mockResolvedValue('{"messages":[{"sender":"me","text":"a"}],"customerPersonality":"","myStyle":"新しい文体"}');
+    await POST(makeReq(base()));
+    expect(mocks.update.mock.calls[0][0].myMessageStyle).toBe('前の文体\n新しい文体');
+    // myStyle 空 → patch に myMessageStyle を含めない（既存を上書きしない）
+    mocks.update.mockReset();
+    mocks.getDb.mockReturnValue(makeDb({ name: '太郎', chatHistory: [], myMessageStyle: '既存文体' }));
+    mocks.analyze.mockResolvedValue('{"messages":[{"sender":"me","text":"a"}],"customerPersonality":"","myStyle":"   "}');
+    await POST(makeReq(base()));
+    expect(mocks.update.mock.calls[0][0]).not.toHaveProperty('myMessageStyle');
+  });
+
+  it('images に File 以外のエントリが混じっても File のみ数える（instanceof File フィルタ）', async () => {
+    // FormData に文字列 'notafile' と実 File を 1 枚混ぜる → File 1枚として成功する
+    const fd = new FormData();
+    fd.set('workspaceId', 'w1');
+    fd.set('customerId', 'c1');
+    fd.append('images', 'notafile'); // 非 File → スキップ
+    fd.append('images', img());
+    const res = await POST({ formData: async () => fd } as never);
+    expect(res.status).toBe(200);
+    expect(mocks.analyze).toHaveBeenCalledTimes(1);
+    // 非 File を除いた 1 枚だけが渡る
+    expect(mocks.analyze.mock.calls[0][0]).toHaveLength(1);
+  });
+
   // ▼ refund 契約（Day67）: 生成失敗は ack せず 500 return→refund・update 未実行。
   //   エラーメッセージまで固定し、専用ガードが（後段クラッシュではなく）応答していることを裏取りする。
   it('parse 失敗（非 JSON）は専用 500・ack しない・update しない（refund 契約）', async () => {
