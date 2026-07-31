@@ -389,11 +389,14 @@ export function buildPlaybookInstruction(params: {
     parts.push(NIGHT_WORK_BASE_PLAYBOOK);
   }
 
-  if (params.storeType && STORE_TYPE_HINTS[params.storeType]) {
+  // storeType（workspace doc）も scene（クライアント入力）も外から来る文字列。
+  // 素の索引はプロトタイプチェーンまで解決するため、'constructor' 等だと Object 関数が
+  // truthy になりプレイブックに関数本体が混入する（Day95 insights と同型）。自前キーのみ採用。
+  if (params.storeType && Object.prototype.hasOwnProperty.call(STORE_TYPE_HINTS, params.storeType)) {
     parts.push(STORE_TYPE_HINTS[params.storeType]!);
   }
 
-  if (params.scene && SCENE_ADDITIONAL_HINTS[params.scene]) {
+  if (params.scene && Object.prototype.hasOwnProperty.call(SCENE_ADDITIONAL_HINTS, params.scene)) {
     parts.push(SCENE_ADDITIONAL_HINTS[params.scene]);
   }
 

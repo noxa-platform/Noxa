@@ -82,4 +82,19 @@ describe('buildPlaybookInstruction — プレイブック合成', () => {
     const unknownScene = buildPlaybookInstruction({ scene: 'no_such_scene' });
     expect(unknownScene).toBe(buildPlaybookInstruction({}));
   });
+
+  // Day95-夜: scene / storeType はクライアント入力・workspace doc 由来の生文字列で、
+  // ここが全 AI route（message / reply / chat）の合流点。素の索引はプロトタイプまで
+  // 解決するため 'constructor' 等で Object 関数がプレイブックに混入していた。
+  it('scene / storeType がプロトタイプ由来のキー（constructor 等）でも関数が混入しない', () => {
+    const base = buildPlaybookInstruction({});
+    for (const evil of ['constructor', 'toString', 'valueOf', 'hasOwnProperty']) {
+      const byScene = buildPlaybookInstruction({ scene: evil });
+      expect(byScene).not.toContain('native code');
+      expect(byScene).toBe(base);
+      const byStore = buildPlaybookInstruction({ storeType: evil as never });
+      expect(byStore).not.toContain('native code');
+      expect(byStore).toBe(base);
+    }
+  });
 });
