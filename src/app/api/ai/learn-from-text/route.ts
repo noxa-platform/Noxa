@@ -89,6 +89,10 @@ function mergeUnique(existing: string[] | undefined, additions: string[]): strin
 export async function POST(request: NextRequest) {
   let cost = MIN_COST;
   let uid: string | null = null;
+  // 「予約済みでまだ払い戻していない」内訳。reserve 成功でセットし、払い戻し済み／課金確定で
+  // null に戻す。catch の保険 refund はこれが残っている時だけ走る。
+  // （旧実装は catch が無条件に払い戻していたため、try 内で払い戻した経路で**二重に**返していた）
+  let pendingRefund: { consumedMonthly: number; consumedPurchased: number } | null = null;
   try {
     uid = await verifyRequest(request);
     const body = (await request.json().catch(() => ({}))) as LearnFromTextBody;
@@ -120,6 +124,7 @@ export async function POST(request: NextRequest) {
         { status: 429 },
       );
     }
+    pendingRefund = reserved;
 
     let raw: string;
     try {
@@ -134,6 +139,7 @@ export async function POST(request: NextRequest) {
       );
     } catch (e) {
       await refundAiCredit(uid, cost, reserved);
+      pendingRefund = null; // 払い戻し済み。catch の保険で二重に返さない
       throw e;
     }
     void logAiLedger(uid, 'learn-from-text', cost);
@@ -174,6 +180,7 @@ export async function POST(request: NextRequest) {
     const snap = await ref.get();
     if (!snap.exists) {
       await refundAiCredit(uid, cost, reserved);
+      pendingRefund = null;
       return NextResponse.json({ error: '顧客が見つかりません' }, { status: 404 });
     }
     const cur = snap.data() ?? {};
@@ -212,6 +219,7 @@ export async function POST(request: NextRequest) {
     }
 
     await ref.update(patch);
+    pendingRefund = null; // 書き戻しまで完了＝課金確定
 
     return NextResponse.json({
       ok: true,
@@ -223,11 +231,12 @@ export async function POST(request: NextRequest) {
     if (error instanceof AuthError) {
       return NextResponse.json({ error: '認証が必要です' }, { status: 401 });
     }
-    if (uid) {
-      // ネットワーク失敗時など、try 内 refund に乗らないケースの保険。
-      // ここは reserved がスコープ外（try 内 const・reserve 未確定もあり得る）ため内訳なしで払い戻す
+    if (uid && pendingRefund) {
+      // Firestore 失敗時など、try 内 refund に乗らないケースの保険。
+      // 「予約済みかつ未払い戻し」の時だけ、予約と同じ内訳で戻す
+      // （内訳を渡さないと購入クレジットが月次枠に化ける）。
       try {
-        await refundAiCredit(uid, cost);
+        await refundAiCredit(uid, cost, pendingRefund);
       } catch {
         /* noop */
       }
