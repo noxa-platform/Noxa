@@ -67,12 +67,16 @@ export async function GET(request: NextRequest) {
       })
       .sort((a, b) => b.updatedAt - a.updatedAt);
 
-    // マイグレーション: threads が空かつ旧 ai_sessions にメッセージがあれば、最初のトークとして取り込む
+    // マイグレーション: threads が空かつ旧 ai_sessions にメッセージがあれば、最初のトークとして取り込む。
+    // 取込済みかどうかは旧 doc の migratedToThreadsAt で判定する。旧 doc は rollback 用に
+    // 残す方針なので、「threads が空」だけを条件にすると**ユーザーが消したスレッドが
+    // 次回の一覧取得で別 ID として復活**し、削除が永久に確定しない。
     if (threads.length === 0) {
       const legacyRef = db.doc(`shop_shops/${workspaceId}/ai_sessions/${uid}`);
       const legacySnap = await legacyRef.get();
-      const legacyMessages = legacySnap.exists ? (legacySnap.data()?.messages || []) : [];
-      if (legacyMessages.length > 0) {
+      const legacyData = legacySnap.exists ? legacySnap.data() : undefined;
+      const legacyMessages = legacyData?.messages || [];
+      if (legacyMessages.length > 0 && !legacyData?.migratedToThreadsAt) {
         const now = Date.now();
         const firstUserMsg = legacyMessages.find((m: { role: string; content: string }) => m.role === 'user');
         const title = firstUserMsg
@@ -81,15 +85,18 @@ export async function GET(request: NextRequest) {
         const newThread = await threadsRef.add({
           ownerUid: uid,
           title,
-          createdAt: legacySnap.data()?.updatedAt || now,
+          createdAt: legacyData?.updatedAt || now,
           updatedAt: now,
           messageCount: legacyMessages.length,
           messages: legacyMessages,
         });
+        // 取込成功後にだけ印を付ける（先に付けると add 失敗で履歴が永久に取り込めなくなる）。
+        // 旧 doc 自体は消さずフィールド追加のみ＝rollback 可能性を維持。
+        await legacyRef.set({ migratedToThreadsAt: now }, { merge: true });
         threads.push({
           id: newThread.id,
           title,
-          createdAt: legacySnap.data()?.updatedAt || now,
+          createdAt: legacyData?.updatedAt || now,
           updatedAt: now,
           messageCount: legacyMessages.length,
         });
