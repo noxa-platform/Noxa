@@ -62,7 +62,10 @@ async function getStandaloneSalesContext(ctx: AccessContext): Promise<string> {
     context += `直近 60 日のエントリ数: ${items.length} 件\n`;
     context += `今月 (${monthKey}) の合計: ${thisMonthTotal.toLocaleString()}円 / 組数 ${thisMonthGroups} 組\n\n`;
     context += '個別エントリ（新しい順、最大 50 件）:\n';
-    context += JSON.stringify(items.slice(0, 50), null, 2);
+    // memo / place はユーザーのフリーテキスト（「090-…の常連」等が普通に入る）。
+    // 顧客コンテキストと同じく maskDeep を通す（同一プロンプトに載る以上、
+    // ここだけ素通しだと Day12 の PII ガードが日売経由で回避される）。
+    context += JSON.stringify(maskDeep(items.slice(0, 50)), null, 2);
     return context;
   } catch (e) {
     console.error('getStandaloneSalesContext error:', e);
@@ -160,7 +163,10 @@ async function getCustomerContext(
       context += `## 言及された顧客の詳細:\n${JSON.stringify(maskDeep(detailedCustomers), null, 2)}\n\n`;
     }
 
-    context += `## 全顧客サマリー（名前・タグ・ランク・売上のみ）:\n${JSON.stringify(summaries, null, 2)}`;
+    // サマリーも必ず maskDeep を通す。tags は UI 自由入力のフリーテキストで、
+    // 50 人以下の全件送信パス（上）では maskDeep 済み。ここを素通しにすると
+    // **顧客が 50 人を超えたワークスペースだけ PII ガードが外れる**（Day12 の穴）。
+    context += `## 全顧客サマリー（名前・タグ・ランク・売上のみ）:\n${JSON.stringify(maskDeep(summaries), null, 2)}`;
 
     return context;
   } catch (e) {
@@ -380,7 +386,9 @@ export async function POST(request: NextRequest) {
       try { history = historyStr ? JSON.parse(historyStr) : undefined; } catch { history = undefined; }
 
       // 画像をbase64に変換
-      const imageFiles = formData.getAll('images') as File[];
+      // File 以外のエントリ（文字列など）が混じっても落ちないよう絞る。
+      // message/analyze と同じガード（こちらだけ欠けており .arrayBuffer で 500 になっていた）。
+      const imageFiles = formData.getAll('images').filter((f): f is File => f instanceof File);
       for (const file of imageFiles) {
         if (file.size > 5 * 1024 * 1024) continue; // 5MB超はスキップ
         const buffer = await file.arrayBuffer();
