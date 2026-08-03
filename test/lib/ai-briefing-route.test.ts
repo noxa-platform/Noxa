@@ -94,4 +94,19 @@ describe('ai/briefing POST（会話前ブリーフィング）', () => {
     expect(mocks.gen).toHaveBeenCalledTimes(1);
     expect(mocks.ack).toHaveBeenCalledTimes(1);
   });
+
+  it('【回帰・Day99】顧客とログのフリーテキストは maskDeep されて AI に渡る', async () => {
+    mocks.getDb.mockReturnValue(makeDb(
+      { name: '太郎', likesNote: 'TEL 090-1234-5678', importantMemo: 'a@b.com' },
+      [{ type: 'visit', memo: '同伴 080-9999-8888', place: '店' }],
+    ));
+    await POST(req(okBody));
+    const sent = String(mocks.gen.mock.calls[0][0]);
+    expect(sent).not.toContain('090-1234-5678');
+    expect(sent).not.toContain('a@b.com');
+    expect(sent).not.toContain('080-9999-8888');
+    expect(sent).toContain('[電話番号非表示]');
+    expect(sent).toContain('[メール非表示]');
+  });
+
 });

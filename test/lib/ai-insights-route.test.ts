@@ -194,4 +194,23 @@ describe('ai/insights POST（顧客台帳の AI 分析）', () => {
     expect(body).toContain('"moodCounts":{"positive":1,"neutral":0,"negative":0}');
     expect(body).not.toContain('"constructor"');
   });
+
+  it('【回帰・Day99】顧客のフリーテキストは maskDeep されて AI に渡る', async () => {
+    // likes（likesNote）/ importantMemo / tags はユーザー自由入力で、電話・メールが普通に入る。
+    // 修正前は本 route だけ maskDeep を通さず生のまま AI プロバイダへ送っていた。
+    mocks.get.mockResolvedValue(snap([{
+      name: 'みく',
+      likesNote: '連絡先 090-1234-5678',
+      importantMemo: 'mail: a@b.com',
+      tags: ['080-9999-8888'],
+    }]));
+    await POST(req({ workspaceId: 'w1', type: 'sales' }));
+    const body = sentPrompt();
+    expect(body).not.toContain('090-1234-5678');
+    expect(body).not.toContain('a@b.com');
+    expect(body).not.toContain('080-9999-8888');
+    expect(body).toContain('[電話番号非表示]');
+    expect(body).toContain('[メール非表示]');
+  });
+
 });

@@ -8,6 +8,7 @@ import {
 } from '../../lib/firebase-admin';
 import { resolveAccessContext, pathCustomer, pathCustomerLogs } from '../../lib/access-context';
 import { estimateAiCost } from '@/lib/ai-cost';
+import { maskDeep, maskContactInfo } from '@/lib/ai-privacy';
 
 // 顧客 1 件の過去ログ + 既存プロフィールを AI に渡し、
 // AI 学習フィールド（MBTI / トリガー / トーン / 文体 等）を推定して返す。
@@ -116,9 +117,14 @@ export async function POST(request: NextRequest) {
         return parts.join(' / ');
       })
       .join('\n');
+    // ログ memo と既存プロフィールのフリーテキスト（likesNote / ngNote / importantMemo 等）には
+    // 電話番号・メールが普通に書かれる。AI へ送る前にマスクする（Day12 の PII ガード。
+    // chat/message には効いていたが本 route は素通しだった）。コスト計算もマスク後の
+    // 文字列で行い、実際に送る内容と課金根拠を一致させる。
+    const maskedLogsForAi = maskContactInfo(logsForAi);
 
     const profileForAi = JSON.stringify(
-      {
+      maskDeep({
         name: customer.name,
         rank: customer.rank,
         tags: customer.tags,
@@ -135,13 +141,13 @@ export async function POST(request: NextRequest) {
         importantMemo_current: customer.importantMemo,
         customerPersonality_current: customer.customerPersonality,
         myMessageStyle_current: customer.myMessageStyle,
-      },
+      }),
       null,
       2,
     );
 
     // クレジットコスト（接触ログ件数に応じてスケール）
-    const inputText = profileForAi + logsForAi;
+    const inputText = profileForAi + maskedLogsForAi;
     const cost = estimateAiCost({
       inputText,
       expectedOutputTokens: 1200,
@@ -151,7 +157,7 @@ export async function POST(request: NextRequest) {
 
     return await withReservedCredits(uid, cost, async ({ ack, remaining }) => {
       const raw = await generateText(
-        `## 既存プロフィール\n${profileForAi}\n\n## 接触ログ（古い → 新しい）\n${logsForAi}\n\n上記から、この顧客の AI 学習フィールドを推定してください。判断材料が薄い項目は null / 空配列で返してください。`,
+        `## 既存プロフィール\n${profileForAi}\n\n## 接触ログ（古い → 新しい）\n${maskedLogsForAi}\n\n上記から、この顧客の AI 学習フィールドを推定してください。判断材料が薄い項目は null / 空配列で返してください。`,
         {
           systemInstruction: `あなたはホスト・キャバ嬢の顧客台帳ナレッジ抽出 AI です。
 過去の接触ログと既存プロフィールから、顧客の人物像と返信文体の方針を推定して JSON で返します。

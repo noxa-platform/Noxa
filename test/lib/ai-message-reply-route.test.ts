@@ -186,4 +186,24 @@ describe('ai/message/reply POST（スクショ→返信案3生成）', () => {
     expect(mocks.refund).toHaveBeenCalledTimes(1);
     expect(mocks.ledger).not.toHaveBeenCalled();
   });
+
+  it('【回帰・Day99】顧客情報と会話履歴のフリーテキストは maskDeep されて AI に渡る', async () => {
+    // chatHistory は LINE 会話本文そのもので、最も PII が濃い。sibling の ai/message は
+    // maskContactInfo 済みだったが本 route だけ素通しだった。
+    mocks.getDb.mockReturnValue(makeDb({
+      name: '太郎',
+      likesNote: '連絡先 090-1234-5678',
+      ngNote: 'a@b.com には触れない',
+      chatHistory: [{ sender: 'customer', text: '番号 080-9999-8888 やで' }],
+    }, []));
+    const res = await POST(makeReq(base()));
+    expect(res.status).toBe(200);
+    const sys = String(mocks.analyze.mock.calls[0][2].systemInstruction);
+    expect(sys).not.toContain('090-1234-5678');
+    expect(sys).not.toContain('a@b.com');
+    expect(sys).not.toContain('080-9999-8888');
+    expect(sys).toContain('[電話番号非表示]');
+    expect(sys).toContain('[メール非表示]');
+  });
+
 });

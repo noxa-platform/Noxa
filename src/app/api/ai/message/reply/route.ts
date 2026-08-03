@@ -8,6 +8,7 @@ import { resolveWorkspaceContext, composePlaybookAndSelf, buildSelfBaseBlock } f
 import { getGlobalSuccessPatterns, getAggregateHint } from '@/lib/ai-knowledge/global-patterns';
 import { AI_CONFIG } from '@/lib/ai-knowledge/constants';
 import { safeParseStringArray } from '@/lib/ai-knowledge/safe-json';
+import { maskDeep } from '@/lib/ai-privacy';
 
 // この顧客の過去フィードバック（直近）を取得し good/bad に分ける
 async function getRecentFeedback(ctx: import('../../../lib/access-context').AccessContext, customerId: string, limit = 10) {
@@ -36,7 +37,10 @@ async function getCustomerContextForReply(ctx: import('../../../lib/access-conte
   if (!snap.exists) return null;
   const d = snap.data()!;
 
-  return {
+  // 好み・NG・タグに加え chatHistory（LINE 会話本文）まで AI プロンプトへ載るため、
+  // 返す時点でフリーテキストの電話/メールをマスクする（Day12 の PII ガード）。
+  // sibling の ai/message は maskContactInfo 済みで、ここだけ素通しだった。
+  return maskDeep({
     name: d.name || '不明',
     tags: d.tags || [],
     likes: d.likesNote || '',
@@ -53,7 +57,7 @@ async function getCustomerContextForReply(ctx: import('../../../lib/access-conte
     triggerNegative: (d.triggerNegative as string[]) || [],
     communicationStyle: d.communicationStyle || '',
     myStyleForCustomer: d.myStyleForCustomer || null,
-  };
+  });
 }
 
 // シーン別の専用プロンプト（空文字=通常モード）

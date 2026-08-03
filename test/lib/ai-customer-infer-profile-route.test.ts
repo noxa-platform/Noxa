@@ -110,4 +110,19 @@ describe('ai/customer-infer-profile POST（顧客プロフィール推定）', (
     expect(body.inferred).toEqual({ summary: '推定不能なテキスト', confidence: 'low' });
     expect(body.basedOnLogs).toBe(2);
   });
+
+  it('【回帰・Day99】既存プロフィールとログ memo のフリーテキストはマスクされて AI に渡る', async () => {
+    mocks.getDb.mockReturnValue(makeDb(
+      { name: '太郎', likesNote: 'TEL 090-1234-5678', ngNote: 'a@b.com' },
+      [{ type: 'visit', memo: '連絡先 080-9999-8888' }, { type: 'call' }],
+    ));
+    await POST(req(okBody));
+    const sent = String(mocks.gen.mock.calls[0][0]);
+    expect(sent).not.toContain('090-1234-5678');
+    expect(sent).not.toContain('a@b.com');
+    expect(sent).not.toContain('080-9999-8888');
+    expect(sent).toContain('[電話番号非表示]');
+    expect(sent).toContain('[メール非表示]');
+  });
+
 });

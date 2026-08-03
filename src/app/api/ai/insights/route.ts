@@ -4,6 +4,7 @@ import { reserveAiCredit, refundAiCredit, logAiLedger } from '../../lib/credits'
 import { estimateAiCost } from '@/lib/ai-cost';
 import { getAdminDb, verifyRequest, AuthError } from '../../lib/firebase-admin';
 import { resolveAccessContext, pathCustomers, type AccessContext } from '../../lib/access-context';
+import { maskDeep } from '@/lib/ai-privacy';
 
 async function getWorkspaceData(ctx: AccessContext): Promise<string> {
   try {
@@ -24,7 +25,10 @@ async function getWorkspaceData(ctx: AccessContext): Promise<string> {
       };
     });
 
-    return JSON.stringify(customers);
+    // likes（likesNote）/ importantMemo / tags はユーザーのフリーテキストで、
+    // 電話番号・メールが普通に書かれる。AI プロバイダへ送る前にマスクする
+    // （Day12 の PII ガード。chat/message には効いていたが本 route は素通しだった）。
+    return JSON.stringify(maskDeep(customers));
   } catch (e) {
     console.error('getWorkspaceData error:', e);
     return '[]';

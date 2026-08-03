@@ -11,6 +11,7 @@ import { estimateAiCost } from '@/lib/ai-cost';
 import { withReservedCredits } from '../with-credits';
 import { getAdminDb, verifyRequest, AuthError } from '../../lib/firebase-admin';
 import { resolveAccessContext, pathCustomer, pathCustomerLogs, type AccessContext } from '../../lib/access-context';
+import { maskDeep } from '@/lib/ai-privacy';
 
 async function getCustomerContext(ctx: AccessContext, customerId: string): Promise<string> {
   try {
@@ -36,7 +37,10 @@ async function getCustomerContext(ctx: AccessContext, customerId: string): Promi
         nextAction: data.nextAction,
       };
     });
-    return JSON.stringify({
+    // 顧客のフリーテキスト（likesNote / importantMemo / tags 等）とログの memo/place には
+    // 電話番号・メールが普通に書かれる。AI プロバイダへ送る前にマスクする
+    // （Day12 の PII ガード。chat/message には効いていたが本 route は素通しだった）。
+    return JSON.stringify(maskDeep({
       customer: {
         name: customer.name,
         nameKana: customer.nameKana,
@@ -59,7 +63,7 @@ async function getCustomerContext(ctx: AccessContext, customerId: string): Promi
         nextAction: customer.nextAction,
       },
       recentLogs: logs,
-    });
+    }));
   } catch (e) {
     console.error('getCustomerContext error:', e);
     return '{}';
