@@ -222,6 +222,19 @@ service cloud.firestore {
         allow write: if isShopOwnerLike(shopId);
       }
 
+      // Daily Close の明細行（店舗が記録した確定数字。iOS: DailyCloseView / DailyCloseAdminView）。
+      // 型は src/lib/types/index.ts の DailyCloseRow。設計方針どおり
+      // 「キャストは自分の行のみ閲覧可・編集は不可（異議は daily_close_disputes へ）」。
+      // ※ 一覧は list でもルールが効くため、キャストのクエリは
+      //   where('castUid','==',uid) で絞る必要がある（iOS 実装は絞り済み）。
+      match /daily_close_rows/{rowId} {
+        allow read: if isShopMemberWithSalesEdit(shopId)
+          || (isShopMember(shopId) && resource.data.castUid == request.auth.uid);
+        // 金額・バックの記録は売上編集権限（owner/manager/accounting）＝ unpaid/payments と同基準。
+        allow create, update: if isShopMemberWithSalesEdit(shopId);
+        allow delete: if isShopOwnerLike(shopId);
+      }
+
       match /daily_close_disputes/{disputeId} {
         allow read: if isShopMember(shopId);
         allow create: if isShopMember(shopId)
@@ -858,6 +871,17 @@ service cloud.firestore {
       allow read: if isAuth() && resource.data.uid == request.auth.uid;
       allow create: if isAuth() && request.resource.data.uid == request.auth.uid;
       allow delete: if isAuth() && resource.data.uid == request.auth.uid;
+      allow update: if false;
+    }
+
+    // ブロック: 本人の存在ドキュメントのみ（doc ID は `{自分のuid}_{相手anonId}`）。
+    // 保存するのは自分の uid と相手の anonId だけで、他人の内部 uid は扱わない（匿名性維持）。
+    // ※ 未定義（既定 deny）のため iOS のブロック/解除が全失敗していた。
+    //   一覧は blockerUid で絞るクエリ前提（iOS 実装は絞り済み）。
+    match /noxa_blocks/{blockId} {
+      allow read: if isAuth() && resource.data.blockerUid == request.auth.uid;
+      allow create: if isAuth() && request.resource.data.blockerUid == request.auth.uid;
+      allow delete: if isAuth() && resource.data.blockerUid == request.auth.uid;
       allow update: if false;
     }
 
