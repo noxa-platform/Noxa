@@ -21,8 +21,28 @@
 | `ai/insights-narrative` | セグメント集計＋サンプル名（ニックネーム前提の注記済み） | ✅ 現状で方針適合 |
 | `ai/seating-suggest` | 盤面（キャスト名・卓状態）のみ。顧客連絡先なし | ✅ 対象データなし |
 | `ai/customer-extract` / `customer-context-extract` / `learn-from-text` / `parse` / `profile-extract` / `tags` | ユーザーが明示的に貼り付けたテキストから抽出する機能（入力がユーザー提供） | 方針5で対象外 |
-| `ai/sales-message` / `briefing` / `insights` / `feedback` | 集計値・自分のデータ中心 | 送信内容に連絡先なし |
+| `ai/sales-message` | 集計値・自分のデータ中心 | 送信内容に連絡先なし |
+| `ai/briefing` / `insights` / `message/reply` / `customer-infer-profile` | 顧客プロファイル・ログ memo・LINE 会話本文を送信（Day12 では素通しだった） | ✅ マスク適用（Day99）＋網羅ガード `test/lib/ai-pii-mask-coverage.test.ts` |
+| `ai/feedback` | ワークスペース内の記録は自分のデータ。**加えて opt-in 時は横断コレクション `ai_knowledge/*` へ書き出す**（下記） | ✅ 寄与 source を allowlist 化（Day101） |
 | `ai/benchmark` / `ai/models` | admin 限定の運営ツール（顧客データなし） | 対象外 |
+
+## ワークスペース横断の匿名化集合学習（`ai_knowledge/*`・Day101 追記）
+
+Day12 の棚卸しは「外部 AI へ何を送るか」だけを見ており、**自社 Firestore 内での横断共有**が抜けていた。
+`api/ai/feedback` は 👍/👎 のうち opt-in ワークスペースのものを、`ai_knowledge/patterns/entries`（伏字化テキスト）と
+`ai_knowledge/aggregates/buckets/*`（カウンター）へ書き出す。ここは **workspaceId を保存しない共有コレクション**で、
+書いた内容は `ai/message` / `ai/message/reply` のプロンプトに「他ワークスペースの成功パターン」として載る。
+
+方針:
+
+1. **寄与できる source は allowlist**（`reply` / `message` の返信案のみ）。読み出し側がこの2つしか引かないため、
+   それ以外（`chat` = 経営アシスタントの回答。売上・顧客名・メモを含む長文）を書いても**誰も読まないまま横断コレクションに残るだけ**だった（Day101 で是正）。
+2. 原文は保存せず `sanitizePii()` 済みテキストのみ・**2000字上限**（他社プロンプトに載るため）。
+3. 集計キー（`{source}_{scene}_{storeType}_{up|down}`）はクライアント入力を含むため、`/` を含む値では集計をスキップする（別 doc の書き換え防止）。
+4. opt-in は `shop_shops/{wid}.aiContribution`。**新規店舗作成時の既定が true**（`src/app/store/new/page.tsx`）＝実質全店が寄与対象なので、寄与範囲は狭く保つ。
+5. 未解決（要ユーザー判断）: `output` はクライアントが自由に送れる文字列で、サーバは「本当に AI が生成したか」を検証していない。
+   悪意ある利用者が 👍 付きで任意テキストを送れば、他ワークスペースのプロンプトへ混入させ得る（cross-tenant prompt injection）。
+   現状の緩和はプロンプト側の注記と上記の長さ上限のみ。恒久対策（生成物との照合や公開前モデレーション）は設計判断。
 
 ## orphan API の処分判定（Day12・削除はしない）
 

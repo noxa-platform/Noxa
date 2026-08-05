@@ -6,6 +6,12 @@ import coreWebVitals from 'eslint-config-next/core-web-vitals';
 export default [
   ...coreWebVitals,
   {
-    ignores: ['.next/**', 'node_modules/**', 'out/**', 'dist/**', 'next-env.d.ts'],
+    // `_design-source/**` はビルド対象外の設計資料（Claude Design が出力した JSX モック）。
+    // アプリからは import されないため lint 対象に含めない（Day101。含めると
+    // react-hooks/static-components で 13 error になり、リポ全体の lint ゲートが赤になる）。
+    ignores: [
+      '.next/**', 'node_modules/**', 'out/**', 'dist/**', 'next-env.d.ts',
+      '_design-source/**',
+    ],
   },
 ];
