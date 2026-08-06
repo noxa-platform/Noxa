@@ -12,8 +12,31 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { Timestamp, FieldValue } from 'firebase-admin/firestore';
 import { verifyRequest, getAdminDb, AuthError } from '../../lib/firebase-admin';
+import { isSafeDocId } from '../../lib/doc-id';
 
 export const maxDuration = 60;
+
+/**
+ * 対象月の受け取り（Day102）。
+ *
+ * 旧実装は `Number.isFinite(body?.year)` で**型まで厳格に見たうえで、外れたら黙って
+ * サーバの当月にフォールバック**していた。つまり不正入力が 400 にならず、
+ * 「頼んだ月とは違う月の給与が確定される」形で通ってしまう:
+ *   - `{ year: '2026', month: '3' }`（文字列。型ゆるいクライアント）→ isFinite が false ＝
+ *     3月ではなく**サーバの当月**が確定される。給与は再確定＝上書きなので、
+ *     過去月を締めたつもりで当月を書き潰す事故になる。
+ *   - UI で月入力を空にすると `year:NaN`(JSON 上 null) が飛び、同じく当月が確定される。
+ *   - `month:13` / `month:1.5` のような範囲外もそのまま period 文字列になる
+ *     （実データが引っかからないので書き込みまでは至らないが、契約として弾くべき）。
+ * 値が来ていれば数値化して範囲を検証し、不正なら 400。
+ * 未指定（undefined）時のサーバ既定月フォールバックだけは既存互換のため温存する。
+ */
+function pickPeriodPart(v: unknown, min: number, max: number, fallback: number): number | null {
+  if (v === undefined) return fallback;
+  const n = Number(v);
+  if (!Number.isInteger(n) || n < min || n > max) return null;
+  return n;
+}
 
 function toMs(v: unknown): number {
   if (v instanceof Timestamp) return v.toMillis();
@@ -29,6 +52,9 @@ export async function POST(request: NextRequest) {
     const body = await request.json().catch(() => ({}));
     const shopId: string | undefined = body?.shopId;
     if (!shopId || typeof shopId !== 'string') return NextResponse.json({ error: 'shopId は必須です' }, { status: 400 });
+    // shopId は以降すべてのパスの土台になる（Admin SDK＝rules を通らない）。`/` 入りだと
+    // 権限確認と書き込みの向き先がまとめてズレる or db.doc() が throw して 500 になる。
+    if (!isSafeDocId(shopId)) return NextResponse.json({ error: 'shopId が不正です' }, { status: 400 });
 
     const db = getAdminDb();
 
@@ -45,8 +71,9 @@ export async function POST(request: NextRequest) {
     if (!allowed) return NextResponse.json({ error: '給与を確定する権限がありません（owner/manager のみ）' }, { status: 403 });
 
     const now = new Date();
-    const year = Number.isFinite(body?.year) ? Number(body.year) : now.getFullYear();
-    const month = Number.isFinite(body?.month) ? Number(body.month) : now.getMonth() + 1;
+    const year = pickPeriodPart(body?.year, 2000, 2100, now.getFullYear());
+    const month = pickPeriodPart(body?.month, 1, 12, now.getMonth() + 1);
+    if (year === null || month === null) return NextResponse.json({ error: '対象年月が不正です（year: 2000〜2100 / month: 1〜12）' }, { status: 400 });
     const period = `${year}-${String(month).padStart(2, '0')}`;
     const dryRun = body?.dryRun === true;
     const adjustments: Record<string, { back?: number; bonus?: number; penalty?: number }> = body?.adjustments && typeof body.adjustments === 'object' ? body.adjustments : {};
@@ -72,7 +99,9 @@ export async function POST(request: NextRequest) {
     const staleOpensByUid = new Map<string, number>(); // 退勤忘れ（未計上時間）の件数
     for (const s of shiftsSnap.docs) {
       const x = s.data() as { castUid?: string; date?: string; startAt?: unknown; endAt?: unknown };
-      if (!x.castUid || !(x.date ?? '').startsWith(period)) continue;
+      // castUid は payrolls/{castUid}/items/{period} の doc パスに入る。`/` 入りの壊れた値が
+      // 1件でも混じると db.doc() が throw して**給与確定が丸ごと 500**になるため、行ごと除外する。
+      if (!x.castUid || !isSafeDocId(x.castUid) || !(x.date ?? '').startsWith(period)) continue;
       const st = toMs(x.startAt), en = toMs(x.endAt);
       if (st && en && en > st) minutesByUid.set(x.castUid, (minutesByUid.get(x.castUid) ?? 0) + (en - st) / 60000);
       // 退勤打刻が無い(未退勤) or end<=start(日跨ぎを同暦日で締めた旧データ等)の勤務は
@@ -102,18 +131,22 @@ export async function POST(request: NextRequest) {
       // 時給: UI からの直接指定（>0）が名簿より優先（未紐付け=時給0 のフォールバック）
       const override = numOr0(wageOverrides[castUid]);
       const wage = override > 0 ? override : info.wage;
-      const hours = mins / 60;
+      // 勤務時間は「明細に載る値」と「基本給の計算に使う値」を同一の丸め済み時間に揃える（Day102）。
+      // 旧実装は base をフル精度の時間で計算しつつ、明細ラベルは 0.1h 丸め・レスポンスの hours は
+      // 0.01h 丸めで返していたため、①明細の「◯h × 時給」を検算すると合わない ②UI が
+      // 時給直接入力時に base を hours(0.01h丸め)から再計算する＝**プレビュー表示額と確定額が数円ズレる**。
+      const hours = Number((mins / 60).toFixed(2));
       const base = Math.round(hours * wage);
       const adj = adjustments[castUid] ?? {};
       const back = numOr0(adj.back), bonus = numOr0(adj.bonus), penalty = numOr0(adj.penalty);
       const breakdown: { label: string; amount: number }[] = [
-        { label: `基本給（勤務 ${hours.toFixed(1)}h × 時給 ¥${wage.toLocaleString('ja-JP')}）`, amount: base },
+        { label: `基本給（勤務 ${hours}h × 時給 ¥${wage.toLocaleString('ja-JP')}）`, amount: base },
       ];
       if (back) breakdown.push({ label: 'バック', amount: back });
       if (bonus) breakdown.push({ label: 'ボーナス', amount: bonus });
       if (penalty) breakdown.push({ label: '控除', amount: -Math.abs(penalty) });
       const total = base + back + bonus - Math.abs(penalty);
-      rows.push({ castUid, name, hours: Number(hours.toFixed(2)), wage, base, total, staleOpens });
+      rows.push({ castUid, name, hours, wage, base, total, staleOpens });
 
       if (!dryRun) {
         batch.set(db.doc(`shop_shops/${shopId}/payrolls/${castUid}/items/${period}`), {
@@ -121,7 +154,7 @@ export async function POST(request: NextRequest) {
           label: `${year}年${month}月`,
           total,
           breakdown,
-          hours: Number(hours.toFixed(2)),
+          hours,
           wage,
           status: '確定',
           finalizedAt: FieldValue.serverTimestamp(),

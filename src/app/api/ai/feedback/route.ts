@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getAdminDb, verifyRequest, AuthError } from '../../lib/firebase-admin';
 import { resolveAccessContext, pathAiFeedback } from '../../lib/access-context';
+import { isSafeDocId } from '../../lib/doc-id';
 import { FieldValue } from 'firebase-admin/firestore';
 import { sanitizePii, extractStructuralFeatures } from '@/lib/ai-knowledge/pii-sanitizer';
 import type { StoreType } from '@/lib/types';
@@ -31,17 +32,6 @@ const SANITIZED_MAX_LEN = 2000;
 
 /** 本文系フィールドの合計バイト上限（1MB の doc 上限に当たって 500 になる前に弾く） */
 const TEXT_MAX_BYTES = 1_000_000;
-
-/**
- * Firestore の doc ID として安全かを判定する。
- * 集計キーは `source`/`scene`（クライアント入力）と `storeType`（WS doc 由来）を素で連結するため、
- * `/` を含む値だとパス階層が変わって**別ドキュメントを書き換え得る**。
- */
-function isSafeDocId(id: string): boolean {
-  if (!id || id.length > 200) return false;
-  if (id.includes('/') || id === '.' || id === '..') return false;
-  return !/^__.*__$/.test(id);
-}
 
 export async function POST(request: NextRequest) {
   try {

@@ -84,7 +84,8 @@ export function AttendanceClient({ user }: { user: User }) {
     return () => { alive = false; };
   }, [user.uid, device.loading, device.isDevice, device.shopId]);
 
-  const today = new Date().toISOString().slice(0, 10);
+  // 日付キーは規約ヘルパー経由に統一（打刻・チーム集計とズレると退勤忘れ判定が壊れる）
+  const today = shiftDateKey();
   // 「今日の未退勤」と「過去日の退勤忘れ」を区別する。
   // 旧実装は日付を見ずに最初の未退勤を対象にしていたため、前日の退勤忘れが
   // 今日の出勤をブロックし、退勤すると前日の記録に今日の時刻が入る事故があった。

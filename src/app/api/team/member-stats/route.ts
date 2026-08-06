@@ -10,6 +10,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { Timestamp } from 'firebase-admin/firestore';
 import { verifyRequest, getAdminDb, AuthError } from '../../lib/firebase-admin';
+import { isSafeDocId } from '../../lib/doc-id';
 import { countsAsGroup } from '@/lib/log-metrics';
 
 // キャスト×顧客の集計は読み取り回数が多いので関数タイムアウトを延長。
@@ -29,6 +30,10 @@ export async function POST(request: NextRequest) {
     const shopId: string | undefined = body?.shopId;
     if (!shopId || typeof shopId !== 'string') {
       return NextResponse.json({ error: 'shopId は必須です' }, { status: 400 });
+    }
+    // Admin SDK は rules を通らないため、パスの土台になる shopId は `/` 入りを弾く（Day102）
+    if (!isSafeDocId(shopId)) {
+      return NextResponse.json({ error: 'shopId が不正です' }, { status: 400 });
     }
 
     const db = getAdminDb();

@@ -112,7 +112,10 @@ describe('ai/insights POST（顧客台帳の AI 分析）', () => {
       mood: i === 10 ? 'negative' : 'positive',
       text: `m${i}`,
     }));
-    const lastContactAt = { toDate: () => new Date(Date.now() - 25 * 24 * 60 * 60 * 1000) };
+    // toDate() は route が呼ぶ＝route の now 捕捉より後。ちょうど 25 日前だと
+    // 経過が 25 日をわずかに下回って floor が 24 になりフレークするため、1 分の余白を持たせる。
+    const contactAt = new Date(Date.now() - (25 * 24 * 60 * 60 * 1000 + 60_000));
+    const lastContactAt = { toDate: () => contactAt };
     mocks.get.mockResolvedValue(snap([{ name: 'みく', chatHistory: history, lastContactAt }]));
 
     await POST(req({ workspaceId: 'w1', type: 'relationship_risk' }));
