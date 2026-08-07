@@ -136,6 +136,41 @@ describe('team/member-stats POST（キャスト別 当月成績）', () => {
     });
   });
 
+  // Day103: 「不正な year/month を黙って当月に落とす」を廃止（Day102 の給与確定と同型）。
+  // 読み取り専用ルートなので事故は書き潰しではなく「違う月の数字を頼んだ月として表示する」だが、
+  // 気づけない分だけ質が悪い（キャストの成績＝評価・給与の根拠になる数字）。
+  describe('対象月の受け取り（Day103・finalize-payroll と同契約）', () => {
+    it('数値文字列の year/month は「頼んだ月」として解釈する（当月へ落とさない）', async () => {
+      mocks.getDb.mockReturnValue(makeDb(BASE).db);
+      const res = await POST(req({ shopId: 's1', year: '2026', month: '3' }));
+      expect(res.status).toBe(200);
+      expect((await res.json()).period).toEqual({ year: 2026, month: 3 }); // 旧実装は当月が返っていた
+    });
+
+    it('数値にならない/範囲外/小数/null は 400（黙って当月に落とさない）', async () => {
+      mocks.getDb.mockReturnValue(makeDb(BASE).db);
+      expect((await POST(req({ shopId: 's1', year: 2026, month: 13 }))).status).toBe(400);
+      expect((await POST(req({ shopId: 's1', year: 2026, month: 0 }))).status).toBe(400);
+      expect((await POST(req({ shopId: 's1', year: 2026, month: 1.5 }))).status).toBe(400);
+      expect((await POST(req({ shopId: 's1', year: 2026, month: 'さん' }))).status).toBe(400);
+      expect((await POST(req({ shopId: 's1', year: null, month: 3 }))).status).toBe(400);
+    });
+
+    it('未指定（undefined）だけはサーバ当月へフォールバック＝既存互換', async () => {
+      mocks.getDb.mockReturnValue(makeDb(BASE).db);
+      const res = await POST(req({ shopId: 's1' }));
+      expect(res.status).toBe(200);
+      const now = new Date();
+      expect((await res.json()).period).toEqual({ year: now.getFullYear(), month: now.getMonth() + 1 });
+    });
+
+    it('集計した対象月を period として返す（頼んだ月と突き合わせられる）', async () => {
+      mocks.getDb.mockReturnValue(makeDb(BASE).db);
+      const res = await POST(req(body));
+      expect((await res.json()).period).toEqual({ year: 2026, month: 8 });
+    });
+  });
+
   describe('集計対象の絞り込み', () => {
     it('cast/host/staff のみ集計し、owner/accounting は含めない（個人副業データの混入防止）', async () => {
       mocks.getDb.mockReturnValue(makeDb({ ...BASE, 'shop_shops/s1/members/st1': { role: 'staff' } }).db);

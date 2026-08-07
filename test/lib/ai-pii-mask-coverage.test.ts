@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { readFileSync, readdirSync } from 'node:fs';
+import { readFileSync, readdirSync, existsSync } from 'node:fs';
 import { join, relative } from 'node:path';
 
 // AI route 全体の PII マスク網羅ガード（Day99）。
@@ -28,6 +28,11 @@ const MASKED = [
   'ai/insights/route.ts',
   'ai/message/reply/route.ts',
   'ai/message/route.ts',
+  // Day103 追加: サーバは顧客 doc を読まないが、クライアント（iOS AIService.salesMessage）が
+  // `customer.importantMemo` を context に詰めて送る＝保存済みフリーテキストが AI へ出る経路。
+  'ai/sales-message/route.ts',
+  // pickForAi（内部で maskDeep）で allowlist 抽出しているルート
+  'ai/suggest/route.ts',
 ];
 
 /**
@@ -37,8 +42,21 @@ const MASKED = [
  */
 const WRITE_ONLY = [
   'ai/customer-context-extract/route.ts',
+  'ai/customer-extract/route.ts',
   'ai/learn-from-text/route.ts',
   'ai/message/analyze/route.ts',
+  'ai/parse/route.ts',
+  'ai/profile-extract/route.ts',
+  'ai/tags/route.ts',
+];
+
+/**
+ * 顧客のフリーテキストをそもそもプロンプトに載せない route。
+ * （盤面データ・集計値・氏名のみ＝ポリシー方針4 で送信可としているもの）
+ */
+const NO_CUSTOMER_TEXT = [
+  'ai/insights-narrative/route.ts',
+  'ai/seating-suggest/route.ts',
 ];
 
 function listRouteFiles(dir: string): string[] {
@@ -63,13 +81,44 @@ describe('AI route の PII マスク網羅（Day12 ポリシー）', () => {
     expect(unclassified).toEqual([]);
   });
 
-  it('分類表に実在しない route が残っていない（削除・改名の取りこぼし検知）', () => {
-    const stale = [...MASKED, ...WRITE_ONLY].filter((f) => !touching.includes(f));
-    expect(stale).toEqual([]);
+  it('分類表に実在しないファイルが残っていない（削除・改名の取りこぼし検知）', () => {
+    // Day103: 分類対象を「フィールド名が出てくる route」から「AI を呼ぶ全 route」へ広げたため、
+    // ここはファイルの実在で判定する（route 単位の網羅は下の Day103 ブロックが担保）。
+    const all = [...MASKED, ...WRITE_ONLY, ...NO_CUSTOMER_TEXT];
+    expect(all.filter((f) => !existsSync(join(API_ROOT, f)))).toEqual([]);
   });
 
   it.each(MASKED)('%s はマスクヘルパーを import している', (rel) => {
     const src = readFileSync(join(API_ROOT, rel), 'utf-8');
-    expect(src).toMatch(/import\s*\{[^}]*mask(Deep|ContactInfo)[^}]*\}\s*from\s*'@\/lib\/ai-privacy'/);
+    expect(src).toMatch(/import\s*\{[^}]*(mask(Deep|ContactInfo)|pickForAi)[^}]*\}\s*from\s*'@\/lib\/ai-privacy'/);
+  });
+
+  // --- Day103 追加: フィールド名ベースの検出では拾えない穴を塞ぐ ---
+  //
+  // 旧ガードは「route のソースに likesNote 等の**フィールド名が出てくるか**」で対象を選んでいた。
+  // そのため `ai/sales-message` のように **クライアントが顧客メモを詰めて送ってくる**（サーバは
+  // 顧客 doc を読まない）route は検出できず、Day99 の横断修正から漏れていた。
+  // ここでは対象を「AI プロバイダを呼ぶ全 route」へ広げ、3 分類のいずれかへの割り当てを強制する。
+  describe('AI プロバイダを呼ぶ route の全数分類（Day103）', () => {
+    const aiRoutes = listRouteFiles(API_ROOT)
+      .filter((f) => /from '\.{1,2}(\/\.\.)*\/ai-provider'/.test(readFileSync(f, 'utf-8')))
+      .map((f) => relative(API_ROOT, f).split(/[\\/]/).join('/'))
+      .sort();
+
+    it('AI へ投げる route が 1 本以上検出できている（検出ロジック自体の番人）', () => {
+      expect(aiRoutes.length).toBeGreaterThanOrEqual(10);
+      expect(aiRoutes).toContain('ai/sales-message/route.ts');
+    });
+
+    it('すべて MASKED / WRITE_ONLY / NO_CUSTOMER_TEXT のどれかに分類されている', () => {
+      const classified = new Set([...MASKED, ...WRITE_ONLY, ...NO_CUSTOMER_TEXT]);
+      expect(aiRoutes.filter((f) => !classified.has(f))).toEqual([]);
+    });
+
+    it('分類表に実在しない route が残っていない（削除・改名の取りこぼし検知）', () => {
+      const all = [...MASKED, ...WRITE_ONLY, ...NO_CUSTOMER_TEXT];
+      expect(all.filter((f) => !aiRoutes.includes(f))).toEqual([]);
+      expect(new Set(all).size).toBe(all.length); // 二重分類なし
+    });
   });
 });

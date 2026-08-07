@@ -6,11 +6,18 @@
 // 営業文面のバリエーション 3 件を生成する（軽量・短時間応答を優先）。
 //
 // クレジットは `estimateAiCost` でメッセージ生成相当（featureMultiplier 1.0）を引当。
-
+//
+// PII（Day103）: `context` は**クライアントが保存済み顧客データから組み立てて送る**フィールドで、
+// iOS の `AIService.salesMessage` は context 未指定時に `customer.importantMemo`（Day12 が
+// マスク対象と定めた顧客フリーテキストそのもの）を既定で詰める。サーバ側で顧客 doc を読まない
+// ため Day99 の静的網羅ガードにも引っかからず、**電話番号・メールが生のまま AI プロバイダへ
+// 出る経路が残っていた**（ポリシー表も「送信内容に連絡先なし」と誤記していた）。
+// クライアントの実装に依存せずサーバで伏字化する。
 import { NextRequest, NextResponse } from 'next/server';
 import { generateText } from '../ai-provider';
 import { reserveAiCredit, refundAiCredit, logAiLedger } from '../../lib/credits';
 import { estimateAiCost } from '@/lib/ai-cost';
+import { maskContactInfo } from '@/lib/ai-privacy';
 import { verifyRequest, AuthError } from '../../lib/firebase-admin';
 
 interface SalesMessageBody {
@@ -50,11 +57,16 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'customerName が必要です' }, { status: 400 });
     }
 
-    const context = body.context?.trim() ?? '';
-    const hint = body.hint?.trim() ?? '';
+    // context は保存済み顧客メモ由来（上記コメント）＝Day12 ポリシーのマスク対象。
+    // hint はユーザーがその場で打つ指示（方針5 の「ユーザー明示入力」）なので素通しでよいが、
+    // 顧客名と同じプロンプトに載る以上、連絡先だけは同じ基準で伏せておく。
+    const context = maskContactInfo(body.context?.trim() ?? '');
+    const hint = maskContactInfo(body.hint?.trim() ?? '');
 
     const promptParts = [
-      `顧客名: ${customerName}`,
+      // 氏名自体は送る方針（ポリシー方針4・源氏名運用を推奨）だが、名前欄に連絡先を
+      // 書き込む運用者がいるため sibling（ai/message）と同じくマスクを通す。
+      `顧客名: ${maskContactInfo(customerName)}`,
       context ? `背景: ${context}` : '',
       hint ? `追加の指示: ${hint}` : '',
       '上記をもとに営業 LINE メッセージを 3 パターン生成してください。',

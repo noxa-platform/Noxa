@@ -5,12 +5,15 @@
 // personal データを読んで集計する（Firestore rules を迂回するので、呼び出し元が
 // 当該 shop の owner/manager であることをサーバ側で必ず検証する）。
 //
-// POST { shopId, year?, month? }  -> { members: [{ uid, name, role, customerCount, monthSales, monthGroupCount }] }
+// POST { shopId, year?, month? }
+//   -> { members: [{ uid, name, role, customerCount, monthSales, monthGroupCount }], dailyTotals, period }
+//   period は実際に集計した年月（クライアントが「頼んだ月」と突き合わせられるように返す・Day103）
 
 import { NextRequest, NextResponse } from 'next/server';
 import { Timestamp } from 'firebase-admin/firestore';
 import { verifyRequest, getAdminDb, AuthError } from '../../lib/firebase-admin';
 import { isSafeDocId } from '../../lib/doc-id';
+import { pickPeriodPart } from '../../lib/period';
 import { countsAsGroup } from '@/lib/log-metrics';
 
 // キャスト×顧客の集計は読み取り回数が多いので関数タイムアウトを延長。
@@ -54,10 +57,18 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'キャスト成績の閲覧権限がありません（owner/manager のみ）' }, { status: 403 });
     }
 
-    // 対象月
+    // 対象月（Day103: finalize-payroll と同じ契約に揃える）。
+    // 旧実装は `Number.isFinite(body?.year)` ＝**型まで厳格に見て、外れたら黙って当月へ**
+    // フォールバックしていた。`{year:'2026',month:'3'}`（数値文字列を送るクライアント）だと
+    // 3 月を頼んだのに当月の成績が返り、レスポンスにも対象月が入っていないため
+    // **画面は「3 月の成績」として当月の数字を表示する**（誰も気づけない）。
+    // 給与確定（Day102 の実バグ）と同型なので、同じヘルパーで弾き、対象月も返す。
     const now = new Date();
-    const year = Number.isFinite(body?.year) ? Number(body.year) : now.getFullYear();
-    const month = Number.isFinite(body?.month) ? Number(body.month) : now.getMonth() + 1; // 1-12
+    const year = pickPeriodPart(body?.year, 2000, 2999, now.getFullYear());
+    const month = pickPeriodPart(body?.month, 1, 12, now.getMonth() + 1); // 1-12
+    if (year === null || month === null) {
+      return NextResponse.json({ error: 'year / month が不正です' }, { status: 400 });
+    }
     const monthStart = Timestamp.fromDate(new Date(year, month - 1, 1));
     const monthEnd = Timestamp.fromDate(new Date(year, month, 1));
 
@@ -165,7 +176,7 @@ export async function POST(request: NextRequest) {
       .map(([dateKey, v]) => ({ dateKey, amount: v.amount, count: v.count }))
       .sort((a, b) => a.dateKey.localeCompare(b.dateKey));
 
-    return NextResponse.json({ members, dailyTotals });
+    return NextResponse.json({ members, dailyTotals, period: { year, month } });
   } catch (e) {
     if (e instanceof AuthError) {
       return NextResponse.json({ error: e.message }, { status: 401 });

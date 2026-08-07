@@ -13,6 +13,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { Timestamp, FieldValue } from 'firebase-admin/firestore';
 import { verifyRequest, getAdminDb, AuthError } from '../../lib/firebase-admin';
 import { isSafeDocId } from '../../lib/doc-id';
+import { pickPeriodPart } from '../../lib/period';
 
 export const maxDuration = 60;
 
@@ -30,13 +31,8 @@ export const maxDuration = 60;
  *     （実データが引っかからないので書き込みまでは至らないが、契約として弾くべき）。
  * 値が来ていれば数値化して範囲を検証し、不正なら 400。
  * 未指定（undefined）時のサーバ既定月フォールバックだけは既存互換のため温存する。
+ * 実体は Day103 で `../../lib/period` へ共通化（team/member-stats が同じ形だったため）。
  */
-function pickPeriodPart(v: unknown, min: number, max: number, fallback: number): number | null {
-  if (v === undefined) return fallback;
-  const n = Number(v);
-  if (!Number.isInteger(n) || n < min || n > max) return null;
-  return n;
-}
 
 function toMs(v: unknown): number {
   if (v instanceof Timestamp) return v.toMillis();

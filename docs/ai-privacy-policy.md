@@ -21,7 +21,7 @@
 | `ai/insights-narrative` | セグメント集計＋サンプル名（ニックネーム前提の注記済み） | ✅ 現状で方針適合 |
 | `ai/seating-suggest` | 盤面（キャスト名・卓状態）のみ。顧客連絡先なし | ✅ 対象データなし |
 | `ai/customer-extract` / `customer-context-extract` / `learn-from-text` / `parse` / `profile-extract` / `tags` | ユーザーが明示的に貼り付けたテキストから抽出する機能（入力がユーザー提供） | 方針5で対象外 |
-| `ai/sales-message` | 集計値・自分のデータ中心 | 送信内容に連絡先なし |
+| `ai/sales-message` | 旧記載は「集計値・自分のデータ中心／連絡先なし」だったが**誤り**。`context` はクライアントが組み立てて送るフィールドで、iOS `AIService.salesMessage` は未指定時に **`customer.importantMemo` を既定で詰める**（＝Day12 のマスク対象そのもの）。サーバが顧客 doc を読まないため Day99 の網羅ガードにも掛からなかった | ✅ `customerName` / `context` / `hint` に `maskContactInfo` 適用（Day103）＋網羅ガードを「AI プロバイダを呼ぶ全 route の分類必須」へ拡張 |
 | `ai/briefing` / `insights` / `message/reply` / `customer-infer-profile` | 顧客プロファイル・ログ memo・LINE 会話本文を送信（Day12 では素通しだった） | ✅ マスク適用（Day99）＋網羅ガード `test/lib/ai-pii-mask-coverage.test.ts` |
 | `ai/feedback` | ワークスペース内の記録は自分のデータ。**加えて opt-in 時は横断コレクション `ai_knowledge/*` へ書き出す**（下記） | ✅ 寄与 source を allowlist 化（Day101） |
 | `ai/benchmark` / `ai/models` | admin 限定の運営ツール（顧客データなし） | 対象外 |
