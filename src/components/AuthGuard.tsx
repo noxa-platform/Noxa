@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
 import { onAuthStateChanged, type User } from 'firebase/auth';
 import { auth } from '@/lib/firebase/config';
+import { buildLoginRedirectUrl } from '@/lib/auth';
 
 export function AuthGuard({ children }: { children: (user: User) => React.ReactNode }) {
   const router = useRouter();
@@ -13,7 +14,11 @@ export function AuthGuard({ children }: { children: (user: User) => React.ReactN
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, (u) => {
       if (!u) {
-        const redirect = encodeURIComponent(window.location.origin + pathname);
+        // クエリごと戻り先にする（招待リンク /store/join?shop=&code= やコミュニティの
+        // ?invite=CODE は、クエリが落ちるとログイン後に行き止まりになる）
+        const redirect = encodeURIComponent(
+          buildLoginRedirectUrl({ origin: window.location.origin, pathname, search: window.location.search }),
+        );
         router.replace(`/account/login?redirect=${redirect}`);
         return;
       }

@@ -35,17 +35,72 @@ export const ALLOWED_REDIRECT_HOSTS = [
   // 'nomishugy.noxa.app',
 ];
 
-export function isAllowedRedirect(redirectUrl: string | null | undefined): boolean {
+/** 実行中のページの origin（SSR/テストでは null）。 */
+function currentOrigin(): string | null {
+  return typeof window === 'undefined' ? null : window.location.origin;
+}
+
+export function isAllowedRedirect(
+  redirectUrl: string | null | undefined,
+  origin: string | null = currentOrigin(),
+): boolean {
   if (!redirectUrl) return false;
   try {
     const u = new URL(redirectUrl);
     // スキームを http(s) に限定。ftp:/ws: 等の非 http スキームは、ホストが許可リストに
     // 一致しても custom token を載せた遷移を許さない（オープン redirect ハードニング）。
     if (u.protocol !== 'https:' && u.protocol !== 'http:') return false;
+    // 自分自身（同一 origin）への復帰は常に許可。AuthGuard が作る戻り先は必ず自分の
+    // origin なので、許可リストに載っていないホスト（カスタムドメイン・Vercel の
+    // preview URL 等）で配信した瞬間に全ての深リンクが /account へ落ちるのを防ぐ。
+    // 自分自身への遷移はオープン redirect にならない。
+    if (origin && u.origin === origin) return true;
     return ALLOWED_REDIRECT_HOSTS.some((h) => u.hostname === h || u.hostname.endsWith(`.${h}`));
   } catch {
     return false;
   }
+}
+
+/**
+ * 未ログイン時に `/account/login?redirect=` へ渡す「戻り先 URL」を組み立てる。
+ *
+ * pathname だけで組むと招待リンク（`/store/join?shop=&code=`）のクエリが落ち、
+ * ログイン後に「招待リンクが正しくありません」で行き止まりになる（＝新メンバーが
+ * 参加できない）。クエリを保持する。
+ * `noxaAuth`（SSO の custom token）は資格情報なので戻り先には持ち回らない。
+ */
+export function buildLoginRedirectUrl(loc: { origin: string; pathname: string; search?: string }): string {
+  const params = new URLSearchParams(loc.search ?? '');
+  params.delete('noxaAuth');
+  const query = params.toString();
+  return `${loc.origin}${loc.pathname}${query ? `?${query}` : ''}`;
+}
+
+export type PostLoginNavigation =
+  /** 同一 origin へ戻る（custom token 交換は不要） */
+  | { kind: 'same-origin'; path: string }
+  /** 別アプリ（yorulog 等）へ custom token を載せて遷移する */
+  | { kind: 'cross-origin'; url: string }
+  /** redirect が無い・許可外 → Noxa Account のハブへ */
+  | { kind: 'fallback' };
+
+/**
+ * ログイン後の遷移先を決める純関数。
+ * 同一 origin を cross-origin と区別するのは、`noxaAuth`（custom token）を
+ * 自分自身の URL に載せても消費者が居らず、①資格情報がアドレスバー/履歴に残る
+ * ②交換 API が落ちると fallback で /account へ飛び、招待リンクの戻り先を失う——
+ * という 2 つの実害があるため。
+ */
+export function planPostLoginNavigation(
+  redirect: string | null | undefined,
+  origin: string | null = currentOrigin(),
+): PostLoginNavigation {
+  if (!redirect || !isAllowedRedirect(redirect, origin)) return { kind: 'fallback' };
+  const u = new URL(redirect);
+  if (origin && u.origin === origin) {
+    return { kind: 'same-origin', path: `${u.pathname}${u.search}${u.hash}` };
+  }
+  return { kind: 'cross-origin', url: redirect };
 }
 
 /** Email/Password サインアップ */
@@ -264,10 +319,17 @@ export async function fetchCustomToken(): Promise<string> {
  * 無ければ Noxa Account のハブ (/account) に飛ばす。
  */
 export async function handlePostLoginRedirect(redirect: string | null, router: { push: (url: string) => void }): Promise<void> {
-  if (redirect && isAllowedRedirect(redirect)) {
+  const plan = planPostLoginNavigation(redirect);
+  // 自分自身へ戻るだけなら custom token は不要（消費者が居ないうえ、交換失敗で
+  // 戻り先を失う）。招待リンク → ログイン → 参加画面 の導線はここを通る。
+  if (plan.kind === 'same-origin') {
+    router.push(plan.path);
+    return;
+  }
+  if (plan.kind === 'cross-origin') {
     try {
       const token = await fetchCustomToken();
-      const url = new URL(redirect);
+      const url = new URL(plan.url);
       url.searchParams.set('noxaAuth', token);
       window.location.href = url.toString();
       return;

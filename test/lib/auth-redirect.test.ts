@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import type { User } from 'firebase/auth';
-import { isAllowedRedirect, needsEmailVerification, linkedProviderIds } from '../../src/lib/auth';
+import {
+  isAllowedRedirect, needsEmailVerification, linkedProviderIds,
+  buildLoginRedirectUrl, planPostLoginNavigation,
+} from '../../src/lib/auth';
 
 // クロスドメイン redirect のオープン redirect 防止ガード（Day55）。
 // custom auth token を載せて window.location.href で遷移させる境界のため、
@@ -62,6 +67,100 @@ describe('isAllowedRedirect', () => {
   it('URL としてパースできない文字列は不許可', () => {
     expect(isAllowedRedirect('not a url')).toBe(false);
     expect(isAllowedRedirect('/relative/path')).toBe(false);
+  });
+
+  // Day104: 自分自身（同一 origin）への復帰は許可リストに載っていなくても許可する。
+  // 許可リストは「custom token を載せて他アプリへ渡してよいか」の一覧であり、
+  // 自分のページへ戻るだけの AuthGuard の戻り先まで縛ると、カスタムドメインや
+  // Vercel の preview URL で配信した瞬間に全ての深リンクが /account へ落ちる。
+  it('同一 origin は許可リスト外ホストでも許可', () => {
+    expect(isAllowedRedirect('https://noxa.example.com/store/join?shop=s1', 'https://noxa.example.com')).toBe(true);
+    expect(isAllowedRedirect('https://noxa-git-x.vercel.app/pos', 'https://noxa-git-x.vercel.app')).toBe(true);
+  });
+
+  it('origin が違えば同一ホスト名でも許可しない（port/scheme 差を含む）', () => {
+    expect(isAllowedRedirect('https://evil.example/x', 'https://noxa.example.com')).toBe(false);
+    expect(isAllowedRedirect('http://noxa.example.com/x', 'https://noxa.example.com')).toBe(false);
+    expect(isAllowedRedirect('https://noxa.example.com:8443/x', 'https://noxa.example.com')).toBe(false);
+  });
+
+  it('同一 origin 判定でも非 http スキームは弾く', () => {
+    expect(isAllowedRedirect('javascript:alert(1)', 'null')).toBe(false);
+  });
+});
+
+// Day104 実バグ: AuthGuard が `origin + pathname` だけで戻り先を組んでいたため、
+// 招待リンク（/store/join?shop=&code=）を未ログインで開くと、ログイン後に
+// クエリの落ちた /store/join へ戻され「招待リンクが正しくありません」で行き止まりになっていた。
+describe('buildLoginRedirectUrl', () => {
+  const loc = (pathname: string, search = '') => ({ origin: 'https://noxa-delta.vercel.app', pathname, search });
+
+  it('クエリを保持する（招待リンクの shop / code が落ちない）', () => {
+    expect(buildLoginRedirectUrl(loc('/store/join', '?shop=s1&code=ABCDE23456')))
+      .toBe('https://noxa-delta.vercel.app/store/join?shop=s1&code=ABCDE23456');
+  });
+
+  it('クエリが無ければ ? を付けない', () => {
+    expect(buildLoginRedirectUrl(loc('/pos'))).toBe('https://noxa-delta.vercel.app/pos');
+    expect(buildLoginRedirectUrl({ origin: 'https://x.test', pathname: '/a' })).toBe('https://x.test/a');
+  });
+
+  it('コミュニティの ?invite=CODE も保持する', () => {
+    expect(buildLoginRedirectUrl(loc('/community', '?invite=Ab-_9')))
+      .toBe('https://noxa-delta.vercel.app/community?invite=Ab-_9');
+  });
+
+  it('noxaAuth（custom token）は戻り先に持ち回らない', () => {
+    expect(buildLoginRedirectUrl(loc('/store/join', '?shop=s1&noxaAuth=secret-token&code=X')))
+      .toBe('https://noxa-delta.vercel.app/store/join?shop=s1&code=X');
+    expect(buildLoginRedirectUrl(loc('/account', '?noxaAuth=secret-token')))
+      .toBe('https://noxa-delta.vercel.app/account');
+  });
+
+  it('値のエンコードを保つ（日本語・記号）', () => {
+    expect(buildLoginRedirectUrl(loc('/store/join', '?shop=a%20b%26c')))
+      .toBe('https://noxa-delta.vercel.app/store/join?shop=a+b%26c');
+  });
+});
+
+// 再発防止の静的ガード: 戻り先 URL の組み立てを AuthGuard 内でベタ書きに戻すと落ちる。
+describe('AuthGuard の戻り先組み立て（静的ガード）', () => {
+  const src = readFileSync(join(process.cwd(), 'src/components/AuthGuard.tsx'), 'utf8');
+
+  it('buildLoginRedirectUrl を経由している', () => {
+    expect(src).toContain('buildLoginRedirectUrl');
+  });
+
+  it('origin + pathname のベタ書き（クエリ落ち）が復活していない', () => {
+    expect(src).not.toMatch(/window\.location\.origin\s*\+\s*pathname/);
+  });
+});
+
+// ログイン後の遷移先の決定（同一 origin は custom token 交換を経由しない）
+describe('planPostLoginNavigation', () => {
+  const ORIGIN = 'https://noxa-delta.vercel.app';
+
+  it('redirect 無し・許可外は fallback（/account へ）', () => {
+    expect(planPostLoginNavigation(null, ORIGIN)).toEqual({ kind: 'fallback' });
+    expect(planPostLoginNavigation('', ORIGIN)).toEqual({ kind: 'fallback' });
+    expect(planPostLoginNavigation('https://evil.com/x', ORIGIN)).toEqual({ kind: 'fallback' });
+  });
+
+  it('同一 origin は相対パス遷移（token 交換に失敗して招待の戻り先を失わない）', () => {
+    expect(planPostLoginNavigation(`${ORIGIN}/store/join?shop=s1&code=C`, ORIGIN))
+      .toEqual({ kind: 'same-origin', path: '/store/join?shop=s1&code=C' });
+    expect(planPostLoginNavigation(`${ORIGIN}/account#tab`, ORIGIN))
+      .toEqual({ kind: 'same-origin', path: '/account#tab' });
+  });
+
+  it('別アプリ（yorulog 等）は cross-origin として custom token 経路に回す', () => {
+    expect(planPostLoginNavigation('https://yorulog.vercel.app/home', ORIGIN))
+      .toEqual({ kind: 'cross-origin', url: 'https://yorulog.vercel.app/home' });
+  });
+
+  it('origin 不明（SSR）でも許可ホストなら cross-origin 扱い', () => {
+    expect(planPostLoginNavigation('https://yorulog.vercel.app/home', null))
+      .toEqual({ kind: 'cross-origin', url: 'https://yorulog.vercel.app/home' });
   });
 });
 

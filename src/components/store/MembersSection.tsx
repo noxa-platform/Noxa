@@ -11,6 +11,7 @@ import {
   collection, doc, onSnapshot, setDoc, deleteDoc, serverTimestamp, Timestamp,
 } from 'firebase/firestore';
 import { auth, db } from '@/lib/firebase/config';
+import { isInviteExpired } from '@/lib/invite-expiry';
 
 type Member = { uid: string; role: string; castDisplayName?: string; kind?: string; status?: string };
 type Invite = { code: string; role: string; createdBy?: string; expiresAt?: Timestamp; usedBy?: string };
@@ -143,14 +144,21 @@ export function MembersSection({ shopId, myUid }: { shopId: string; myUid: strin
       {invites.length > 0 && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
           <span style={{ fontSize: 12, color: 'var(--noxa-text-muted)' }}>未使用の招待（7日で失効）</span>
-          {invites.map((i) => (
-            <div key={i.code} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12 }}>
-              <code style={{ color: 'var(--noxa-text-muted)' }}>{i.code}</code>
-              <span style={{ color: 'var(--noxa-text-faint)' }}>{ROLE_LABELS[i.role] ?? i.role}</span>
-              <button type="button" onClick={() => copy(inviteUrl(i.code))} style={miniBtn}>リンク</button>
-              <button type="button" onClick={() => cancelInvite(i.code)} style={{ ...miniBtn, color: 'var(--noxa-status-error)' }}>取消</button>
-            </div>
-          ))}
+          {invites.map((i) => {
+            // 失効済みのコードを「使える招待」として並べると、送った側は原因不明の
+            // 参加失敗として跳ね返ってくる。期限を明示し、リンクのコピーも出さない。
+            const expired = isInviteExpired(i.expiresAt);
+            return (
+              <div key={i.code} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, opacity: expired ? 0.55 : 1 }}>
+                <code style={{ color: 'var(--noxa-text-muted)' }}>{i.code}</code>
+                <span style={{ color: 'var(--noxa-text-faint)' }}>{ROLE_LABELS[i.role] ?? i.role}</span>
+                {expired
+                  ? <span style={{ color: 'var(--noxa-status-error)' }}>期限切れ</span>
+                  : <button type="button" onClick={() => copy(inviteUrl(i.code))} style={miniBtn}>リンク</button>}
+                <button type="button" onClick={() => cancelInvite(i.code)} style={{ ...miniBtn, color: 'var(--noxa-status-error)' }}>取消</button>
+              </div>
+            );
+          })}
         </div>
       )}
     </div>

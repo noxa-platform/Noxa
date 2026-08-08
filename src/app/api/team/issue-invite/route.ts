@@ -9,6 +9,7 @@ import { randomBytes } from 'node:crypto';
 import { FieldValue, Timestamp } from 'firebase-admin/firestore';
 import { verifyRequest, getAdminDb, AuthError } from '../../lib/firebase-admin';
 import { requireShopRole } from '../../lib/team-auth';
+import { isSafeDocId } from '../../lib/doc-id';
 
 const INVITE_ROLES = ['cast', 'manager', 'accounting'] as const;
 type InviteRole = (typeof INVITE_ROLES)[number];
@@ -29,7 +30,10 @@ export async function POST(request: NextRequest) {
     const body = await request.json().catch(() => ({}));
     const shopId: string | undefined = body?.shopId;
     const role: string | undefined = body?.role;
-    if (!shopId || typeof shopId !== 'string') {
+    // Admin SDK は rules をバイパスするため、パスに埋める id はここで検証する
+    // （`/` 入りだと権限確認と書込の向き先がまとめてズレ、奇数セグメントでは
+    //   db.doc() が throw して 500 になる。Day102 の横展開）
+    if (!isSafeDocId(shopId)) {
       return NextResponse.json({ error: 'shopId は必須です' }, { status: 400 });
     }
     if (!role || !INVITE_ROLES.includes(role as InviteRole)) {
