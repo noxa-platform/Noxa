@@ -15,9 +15,20 @@ import { tryClaimMission } from '../../missions/lib';
 import { getMission } from '@/lib/missions';
 import { FieldValue } from 'firebase-admin/firestore';
 import { REQUIRED_PROFILE_FIELDS, evaluateProfileCompletion } from './completion';
+import { isSafeDocId } from '../../lib/doc-id';
 
 interface ClaimBody {
   workspaceId: string;
+}
+
+/**
+ * 旧実装（2026-05-12 のミッション統合より前）の受領記録。
+ * 受領管理は reward_missions/{uid}.claimed.profile_complete へ移したが、
+ * **旧受領者を reward_missions へバックフィルしていない**ため、この記録を見ないと
+ * 旧実装で受け取り済みのユーザーが 2 度目の報酬を受け取れてしまう（二重受領）。
+ */
+function hasLegacyClaim(sub: Record<string, unknown> | undefined): boolean {
+  return Boolean(sub?.betaProfileRewardClaimedAt);
 }
 
 /** プロファイルの埋まり具合を診断（report 用） */
@@ -28,17 +39,23 @@ export async function GET(request: NextRequest) {
     if (!wid) {
       return NextResponse.json({ error: 'workspaceId が必要です' }, { status: 400 });
     }
+    // Admin SDK は rules を通らないため、パスに埋める前に doc ID として検証する
+    if (!isSafeDocId(wid)) {
+      return NextResponse.json({ error: 'workspaceId が不正です' }, { status: 400 });
+    }
     const ctx = await resolveAccessContext(uid, wid);
 
     const db = getAdminDb();
     // personal は personal_self_styles、shop は ai_profile/self（POST と同じ context helper で解決）。
     // 旧実装は GET だけ生 shop パス固定で、personal ユーザーの診断が常に空＝報酬 UI が出せなかった。
-    const [selfSnap, missionSnap] = await Promise.all([
+    const [selfSnap, missionSnap, subSnap] = await Promise.all([
       db.doc(pathAiProfile(ctx)).get(),
       db.doc(`reward_missions/${uid}`).get(),
+      db.doc(`account_subscriptions/${uid}`).get(),
     ]);
     const self = selfSnap.exists ? selfSnap.data() ?? {} : {};
     const missions = missionSnap.exists ? (missionSnap.data()?.claimed ?? {}) : {};
+    const legacy = hasLegacyClaim(subSnap.exists ? subSnap.data() : undefined);
 
     const { filled, filledCount, requiredCount, allFilled } = evaluateProfileCompletion(self);
     const rewardAmount = getMission('profile_complete')?.rewardCredits ?? 10;
@@ -50,7 +67,8 @@ export async function GET(request: NextRequest) {
       requiredCount,
       allFilled,
       rewardAmount,
-      claimed: Boolean(missions.profile_complete),
+      // 旧実装で受領済みのユーザーにも「受け取る」ボタンを出さない（POST は 409 で弾かれる）
+      claimed: Boolean(missions.profile_complete) || legacy,
       claimedAt: missions.profile_complete ?? null,
     });
   } catch (error) {
@@ -70,14 +88,19 @@ export async function POST(request: NextRequest) {
     if (!body.workspaceId) {
       return NextResponse.json({ error: 'workspaceId が必要です' }, { status: 400 });
     }
+    // Admin SDK は rules を通らないため、パスに埋める前に doc ID として検証する
+    if (!isSafeDocId(body.workspaceId)) {
+      return NextResponse.json({ error: 'workspaceId が不正です' }, { status: 400 });
+    }
     const ctx = await resolveAccessContext(uid, body.workspaceId);
 
     const db = getAdminDb();
     // 個人ユーザーは personal_self_styles、shop は ai_profile/self（GET と同一 helper で一致させる）
     const selfRef = db.doc(pathAiProfile(ctx));
+    const subRef = db.doc(`account_subscriptions/${uid}`);
 
     // 全項埋めを確認（GET と同一の判定ヘルパーで一致させる）
-    const selfSnap = await selfRef.get();
+    const [selfSnap, subSnap] = await Promise.all([selfRef.get(), subRef.get()]);
     const self = selfSnap.exists ? selfSnap.data() ?? {} : {};
     const completion = evaluateProfileCompletion(self);
     if (!completion.allFilled) {
@@ -87,17 +110,29 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // 旧実装の受領記録があれば受領済み扱い（reward_missions にバックフィルが無いため、
+    // ここを見ないと旧受領者が 2 度目の報酬を受け取れてしまう）
+    if (hasLegacyClaim(subSnap.exists ? subSnap.data() : undefined)) {
+      return NextResponse.json({ error: '既に受け取り済みです' }, { status: 409 });
+    }
+
     // ミッションシステム経由で受領（冪等）。既受領なら granted: 0 が返る
     const claim = await tryClaimMission(uid, 'profile_complete');
     if (claim.alreadyClaimed) {
       return NextResponse.json({ error: '既に受け取り済みです' }, { status: 409 });
     }
 
-    // 互換: 旧フィールドにも書き込む
-    await db.doc(`account_subscriptions/${uid}`).set(
-      { betaProfileRewardClaimedAt: FieldValue.serverTimestamp() },
-      { merge: true },
-    );
+    // 互換: 旧フィールドにも書き込む。ここは付与済みクレジットの控えなので、
+    // 失敗しても 500 にしない（報酬は既に確定しており、エラーを返すと利用者は
+    // 「もらえなかった」と誤解して再試行 →「既に受け取り済み」で行き止まりになる）。
+    try {
+      await subRef.set(
+        { betaProfileRewardClaimedAt: FieldValue.serverTimestamp() },
+        { merge: true },
+      );
+    } catch (e) {
+      console.error('beta-profile-reward: 互換フィールドの書込に失敗（報酬は付与済み）:', e);
+    }
 
     return NextResponse.json({ ok: true, granted: claim.granted });
   } catch (error) {
