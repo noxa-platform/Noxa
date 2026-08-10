@@ -34,31 +34,57 @@ export function pickShopId(ownedIds: string[], memberIds: string[], active: stri
 export type Workspace = { id: string; name: string; role: 'owner' | 'member' };
 export type UseWorkspaces = { loading: boolean; items: Workspace[]; activeId: string | 'personal' };
 
-/** 切替UI用: 所有/所属する店舗一覧＋現在のアクティブを返す */
+/** 所有店舗＋所属インデックスを切替リストに畳む（純関数）。所有が先・重複は所有を優先。 */
+export function mergeWorkspaces(
+  owned: readonly { id: string; name?: string | null }[],
+  memberships: readonly { id: string; name?: string | null }[],
+): Workspace[] {
+  const items: Workspace[] = owned.map((o) => ({ id: o.id, name: o.name || o.id, role: 'owner' }));
+  for (const m of memberships) {
+    if (items.some((x) => x.id === m.id)) continue;
+    items.push({ id: m.id, name: m.name || m.id, role: 'member' });
+  }
+  return items;
+}
+
+/** localStorage の選択値と実在する一覧から、現在のアクティブを決める（純関数）。 */
+export function pickActiveId(ids: readonly string[], stored: string | null): string | 'personal' {
+  if (stored === 'personal') return 'personal';
+  if (stored && ids.includes(stored)) return stored;
+  return ids[0] ?? 'personal';
+}
+
+/**
+ * 切替UI用: 所有/所属する店舗一覧＋現在のアクティブを返す。
+ *
+ * 読み取りは**1件でも失敗したら全部消える**構造にしないこと。旧実装は所有クエリ・
+ * 所属クエリ・所属ごとの店舗 doc 取得を1つの try で束ねていたため、たとえば
+ * 「退店したのに memberships インデックスが残っている」1件（CF の削除同期は
+ * `.catch(() => undefined)` で握り潰されるので実際に起こり得る）で
+ * `shop_shops/{id}` が permission-denied になると **items が丸ごと空**になった。
+ * items が空だと WorkspaceSwitcher 自体が消えるので、個人ワークスペースを選択中の
+ * ユーザーは自分の店に戻る手段を失う（サイドバーの店舗ナビは shopId 未選択で出ない）＝行き止まり。
+ * そこで所有・所属・各店舗名の取得をそれぞれ独立させ、失敗はその要素だけを劣化させる。
+ */
 export function useWorkspaces(user: User): UseWorkspaces {
   const [state, setState] = useState<UseWorkspaces>({ loading: true, items: [], activeId: 'personal' });
   useEffect(() => {
     let alive = true;
     (async () => {
-      try {
-        const owned = await getDocs(query(collection(db, 'shop_shops'), where('ownerUid', '==', user.uid)));
-        const items: Workspace[] = owned.docs.map((d) => ({ id: d.id, name: (d.data() as { name?: string }).name ?? d.id, role: 'owner' }));
-        const ms = await getDocs(collection(db, `account_users/${user.uid}/memberships`));
-        for (const m of ms.docs) {
-          if (items.some((x) => x.id === m.id)) continue;
-          const s = await getDoc(doc(db, `shop_shops/${m.id}`));
-          items.push({ id: m.id, name: (s.data() as { name?: string } | undefined)?.name ?? m.id, role: 'member' });
-        }
-        if (!alive) return;
-        const ids = items.map((i) => i.id);
-        const active = getActiveShop();
-        const activeId: string | 'personal' = active === 'personal' ? 'personal'
-          : (active && ids.includes(active)) ? active
-          : (items[0]?.id ?? 'personal');
-        setState({ loading: false, items, activeId });
-      } catch {
-        if (alive) setState({ loading: false, items: [], activeId: 'personal' });
-      }
+      const ownedSnap = await getDocs(query(collection(db, 'shop_shops'), where('ownerUid', '==', user.uid))).catch(() => null);
+      const msSnap = await getDocs(collection(db, `account_users/${user.uid}/memberships`)).catch(() => null);
+      const owned = (ownedSnap?.docs ?? []).map((d) => ({ id: d.id, name: (d.data() as { name?: string }).name }));
+      // 店舗名は CF が memberships に denormalize 済み（shopName）。未設定の古い doc だけ
+      // 店舗 doc へフォールバックし、その取得失敗は**その1件の表示名**に閉じ込める。
+      const memberships = await Promise.all((msSnap?.docs ?? []).map(async (m) => {
+        const name = (m.data() as { shopName?: string | null }).shopName;
+        if (name) return { id: m.id, name };
+        const s = await getDoc(doc(db, `shop_shops/${m.id}`)).catch(() => null);
+        return { id: m.id, name: (s?.data() as { name?: string } | undefined)?.name };
+      }));
+      if (!alive) return;
+      const items = mergeWorkspaces(owned, memberships);
+      setState({ loading: false, items, activeId: pickActiveId(items.map((i) => i.id), getActiveShop()) });
     })();
     return () => { alive = false; };
   }, [user.uid]);

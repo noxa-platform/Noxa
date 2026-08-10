@@ -73,17 +73,15 @@ export function useShopContext(uid: string | undefined): ShopContext {
     if (!uid) return; // 未ログインは返値側で導出
     let alive = true;
     (async () => {
-      try {
-        const owned = await getDocs(query(collection(db, 'shop_shops'), where('ownerUid', '==', uid)));
-        // 所属（招待参加）の逆引き。CF が members/{uid} から同期する読み取り専用インデックス
-        const ms = await getDocs(collection(db, `account_users/${uid}/memberships`));
-        if (!alive) return;
-        const shops = owned.docs.map((d) => ({ id: d.id, name: (d.data().name as string) ?? d.id }));
-        const { hasStore, isOwner } = resolveStoreAccess(shops.map((s) => s.id), ms.docs.map((d) => d.id));
-        setSnap({ uid, ctx: { loading: false, hasShop: hasStore, isOwner, shops } });
-      } catch {
-        if (alive) setSnap({ uid, ctx: NO_SHOP });
-      }
+      // 2つの読み取りは独立させる（片方の失敗でもう片方まで消さない＝到達性の劣化を局所化）
+      const owned = await getDocs(query(collection(db, 'shop_shops'), where('ownerUid', '==', uid))).catch(() => null);
+      // 所属（招待参加）の逆引き。CF が members/{uid} から同期する読み取り専用インデックス
+      const ms = await getDocs(collection(db, `account_users/${uid}/memberships`)).catch(() => null);
+      if (!alive) return;
+      if (!owned && !ms) { setSnap({ uid, ctx: NO_SHOP }); return; }
+      const shops = (owned?.docs ?? []).map((d) => ({ id: d.id, name: (d.data().name as string) ?? d.id }));
+      const { hasStore, isOwner } = resolveStoreAccess(shops.map((s) => s.id), (ms?.docs ?? []).map((d) => d.id));
+      setSnap({ uid, ctx: { loading: false, hasShop: hasStore, isOwner, shops } });
     })();
     return () => { alive = false; };
   }, [uid]);

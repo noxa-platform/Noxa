@@ -48,7 +48,8 @@ describe('静的ガード（オーナー限定判定への逆戻りを検出）'
     expect(readVar).toBeTruthy();
     const call = /resolveStoreAccess\(.*$/m.exec(src)?.[0];
     expect(call).toBeTruthy();
-    expect(call).toContain(`${readVar}.docs`);
+    // 読み取り変数そのものから docs を取り出して渡していること（`[]` 固定に戻すと落ちる）
+    expect(call).toMatch(new RegExp(`\\b${readVar}\\b[?.]*\\.docs`));
   });
 
   it('ダッシュボードの店舗運営セクションは hasShop（所属含む）でゲートし、isOwner でゲートしない', () => {
