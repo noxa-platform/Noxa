@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react';
 import { collection, getDocs, query, where } from 'firebase/firestore';
 import type { User } from 'firebase/auth';
 import { db } from '@/lib/firebase/config';
+import { resolveStoreAccess } from '@/lib/store-access';
 
 export type DeviceClaims = {
   loading: boolean;
@@ -46,17 +47,23 @@ export function useDeviceClaims(user: User | undefined): DeviceClaims {
 
 export type ShopContext = {
   loading: boolean;
+  /** 店舗（オーナー or 招待で参加したメンバー）に到達できるか＝店舗運営モジュールを出すか */
   hasShop: boolean;
+  /** 自分がオーナーの店舗を持つか（店舗登録 CTA の要否判定用。所属メンバーは false） */
+  isOwner: boolean;
+  /** 自分がオーナーの店舗一覧（従来どおりオーナー分のみ） */
   shops: { id: string; name: string }[];
 };
 
 /**
- * ログインユーザーが店舗オーナーか（= 店舗運営モジュールを出すべきか）を判定。
- * shop_shops で ownerUid == uid のドキュメントを引く。
+ * ログインユーザーが「店舗運営モジュールを出すべきか」を判定。
+ * オーナー（shop_shops.ownerUid == uid）に加え、**招待で参加したメンバー**
+ * （account_users/{uid}/memberships の逆引き）も店舗ありとして扱う。
+ * オーナーだけを見ると、参加直後のキャストがスマホで打刻すら開けない（store-access.ts 参照）。
  * 個人ユーザー（MyDeck のみ）は hasShop=false → 店舗 UI を出さない。
  */
-const NO_SHOP: ShopContext = { loading: false, hasShop: false, shops: [] };
-const LOADING_SHOP: ShopContext = { loading: true, hasShop: false, shops: [] };
+const NO_SHOP: ShopContext = { loading: false, hasShop: false, isOwner: false, shops: [] };
+const LOADING_SHOP: ShopContext = { loading: true, hasShop: false, isOwner: false, shops: [] };
 
 export function useShopContext(uid: string | undefined): ShopContext {
   // 出所（uid）つきスナップショットから導出（useDeviceClaims と同じ理由）
@@ -65,15 +72,19 @@ export function useShopContext(uid: string | undefined): ShopContext {
   useEffect(() => {
     if (!uid) return; // 未ログインは返値側で導出
     let alive = true;
-    getDocs(query(collection(db, 'shop_shops'), where('ownerUid', '==', uid)))
-      .then((s) => {
+    (async () => {
+      try {
+        const owned = await getDocs(query(collection(db, 'shop_shops'), where('ownerUid', '==', uid)));
+        // 所属（招待参加）の逆引き。CF が members/{uid} から同期する読み取り専用インデックス
+        const ms = await getDocs(collection(db, `account_users/${uid}/memberships`));
         if (!alive) return;
-        const shops = s.docs.map((d) => ({ id: d.id, name: (d.data().name as string) ?? d.id }));
-        setSnap({ uid, ctx: { loading: false, hasShop: shops.length > 0, shops } });
-      })
-      .catch(() => {
+        const shops = owned.docs.map((d) => ({ id: d.id, name: (d.data().name as string) ?? d.id }));
+        const { hasStore, isOwner } = resolveStoreAccess(shops.map((s) => s.id), ms.docs.map((d) => d.id));
+        setSnap({ uid, ctx: { loading: false, hasShop: hasStore, isOwner, shops } });
+      } catch {
         if (alive) setSnap({ uid, ctx: NO_SHOP });
-      });
+      }
+    })();
     return () => { alive = false; };
   }, [uid]);
 

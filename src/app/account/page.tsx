@@ -61,7 +61,9 @@ const SERVICES = [
 
 function AccountDashboard({ user }: { user: User }) {
   const [sub, setSub] = useState<Sub | null>(null);
-  const { hasShop } = useShopContext(user.uid);
+  // hasShop はオーナーだけでなく「招待で参加したメンバー」も true（店舗運営セクションの到達性）。
+  // isOwner は「自分の店を登録済みか」＝登録 CTA を出すかの判定にのみ使う。
+  const { hasShop, isOwner } = useShopContext(user.uid);
 
   useEffect(() => {
     (async () => {
@@ -242,7 +244,7 @@ function AccountDashboard({ user }: { user: User }) {
         ))}
       </div>
 
-      {/* 店舗運営（店舗オーナー時のみ） */}
+      {/* 店舗運営（オーナー＋招待で参加したメンバー。スマホはサイドバーが無いのでここが唯一の入口） */}
       {hasShop ? (
         <>
           <div className="flex items-baseline justify-between" style={{ marginBottom: 14 }}>
@@ -258,6 +260,14 @@ function AccountDashboard({ user }: { user: User }) {
               </Link>
             ))}
           </div>
+          {/* 所属メンバー（オーナーではない）にも「自分の店を登録する」導線は残す */}
+          {!isOwner && (
+            <div style={{ marginTop: -20, marginBottom: 32 }}>
+              <Link href="/store/new" className="noxa-mono" style={{ color: 'var(--noxa-accent-primary-ink)', fontSize: 12, textDecoration: 'none' }}>
+                ＋ 自分のお店を登録する →
+              </Link>
+            </div>
+          )}
         </>
       ) : (
         <Link href="/store/new" className="flex flex-col" style={{ background: 'var(--noxa-surface-card)', border: '1px dashed var(--noxa-border-strong)', borderRadius: 16, padding: 24, gap: 8, textDecoration: 'none', marginBottom: 32 }}>
