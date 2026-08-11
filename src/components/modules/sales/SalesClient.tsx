@@ -6,6 +6,7 @@ import { collection, onSnapshot, addDoc, doc, updateDoc, deleteDoc, getDocs, ser
 import { db } from '@/lib/firebase/config';
 import { useShopId } from '@/lib/useShopId';
 import { businessDayKey } from '@/lib/datetime';
+import { describeFirestoreError } from '@/lib/firestore-error';
 import type { User } from 'firebase/auth';
 
 /**
@@ -32,6 +33,7 @@ export function SalesClient({ user }: { user: User }) {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
   const [opBusy, setOpBusy] = useState(false); // 取消/修正の二重実行防止
+  const [opError, setOpError] = useState<string | null>(null); // 記録/取消/修正の失敗（旧実装は完全無音だった）
 
   const sales = useMemo(() => (salesSnap?.colPath === colPath ? salesSnap.list : []), [salesSnap, colPath]);
   const customers = useMemo(
@@ -84,20 +86,43 @@ export function SalesClient({ user }: { user: User }) {
   const place = shop.shopId ? '店舗' : '個人';
 
   const custRef = (cid: string) => shop.shopId ? doc(db, `shop_shops/${shop.shopId}/customers/${cid}`) : null;
-  const addSale = async (amount: number, customerName: string, castName: string, customerId: string | null) => {
-    // castUid=記録者（店舗ルールの create 条件を満たし、個人売上の帰属にもなる）
-    await addDoc(collection(db, colPath), { source: 'manual', entryMode: 'amount', amount, customerName: customerName.trim() || null, customerId: customerId || null, castName: castName.trim() || null, castUid: user.uid, operatorUid: user.uid, dayKey: tk, checkoutAt: serverTimestamp(), createdAt: serverTimestamp() });
-    // 顧客紐付け時は POS会計と同様に顧客実績へ反映（店舗ワークスペースのみ）
-    if (customerId) { const cr = custRef(customerId); if (cr) await updateDoc(cr, { totalSales: increment(amount), visitCount: increment(1), lastContactAt: serverTimestamp() }).catch(() => {}); }
+  /**
+   * 顧客の累計売上・来店回数への反映。台帳側は成功しているので操作全体は失敗にしないが、
+   * 旧実装の `.catch(() => {})` は**無音**だった＝売上台帳と顧客実績が黙って乖離し、
+   * 誰も気づけないまま顧客ランクや成績判断が狂う。失敗したことだけは必ず知らせる。
+   */
+  const syncCustomer = async (cid: string, patch: Record<string, unknown>) => {
+    const ref = custRef(cid);
+    if (!ref) return;
+    try { await updateDoc(ref, patch); }
+    catch (e) { setOpError(describeFirestoreError(e, '顧客の累計売上・来店回数への反映') + ' 売上そのものは記録されています。'); }
+  };
+  /**
+   * 売上を記録する。失敗時はエラー文言を返す（成功なら null）。
+   * 旧実装は catch が無く、権限エラーだと例外がダイアログの外へ抜けて**何も起きない**——
+   * 記録ボタンを押してもダイアログが開いたまま無反応で、記録できたのかも分からなかった。
+   */
+  const addSale = async (amount: number, customerName: string, castName: string, customerId: string | null): Promise<string | null> => {
+    setOpError(null);
+    try {
+      // castUid=記録者（店舗ルールの create 条件を満たし、個人売上の帰属にもなる）
+      await addDoc(collection(db, colPath), { source: 'manual', entryMode: 'amount', amount, customerName: customerName.trim() || null, customerId: customerId || null, castName: castName.trim() || null, castUid: user.uid, operatorUid: user.uid, dayKey: tk, checkoutAt: serverTimestamp(), createdAt: serverTimestamp() });
+    } catch (e) {
+      return describeFirestoreError(e, '売上の記録');
+    }
+    // 顧客紐付け時は POS会計と同様に顧客実績へ反映（店舗ワークスペースのみ）。
+    // ここの失敗は売上自体の成否と別（opError で通知）なので、記録操作は成功として閉じる
+    if (customerId) await syncCustomer(customerId, { totalSales: increment(amount), visitCount: increment(1), lastContactAt: serverTimestamp() });
+    return null;
   };
   const voidSale = async (s: Sale) => {
     if (opBusy || s.voided) return;
     const r = window.prompt('取消理由（任意）'); if (r === null) return;
-    setOpBusy(true);
+    setOpBusy(true); setOpError(null);
     try {
       await updateDoc(doc(db, `${colPath}/${s.id}`), { voided: true, voidedAt: serverTimestamp(), voidReason: r });
       // 顧客実績から減算（取消＝集計から外す）
-      if (s.customerId) { const ref = custRef(s.customerId); if (ref) await updateDoc(ref, { totalSales: increment(-s.amount), visitCount: increment(-1) }).catch(() => {}); }
+      if (s.customerId) await syncCustomer(s.customerId, { totalSales: increment(-s.amount), visitCount: increment(-1) });
       // ツケ会計の取消: 紐付く未収起票も削除（発生源が消えた台帳を残さない）。
       // unpaid の権限（owner/manager/accounting）が無いロールでは残るため、その旨を通知する
       if (shop.shopId && s.unpaidAmount > 0) {
@@ -105,19 +130,24 @@ export function SalesClient({ user }: { user: User }) {
           const linked = await getDocs(query(collection(db, `shop_shops/${shop.shopId}/unpaid`), where('saleId', '==', s.id)));
           await Promise.all(linked.docs.map((d) => deleteDoc(d.ref)));
         } catch {
-          window.alert('売上は取消しましたが、紐付く未収（ツケ）の削除権限がありません。売掛管理から削除してください。');
+          setOpError('売上は取消しましたが、紐付く未収（ツケ）の削除権限がありません。売掛管理から削除してください。');
         }
       }
+    } catch (e) {
+      // catch が無いと取消ボタンを押しても画面が何も変わらない（＝壊れているのか権限が無いのか分からない）
+      setOpError(describeFirestoreError(e, '売上の取消'));
     } finally { setOpBusy(false); }
   };
   const editSale = async (s: Sale) => {
     if (opBusy || s.voided) return;
     const v = window.prompt('金額（円）', String(s.amount)); if (v === null) return; const a = Number(v); if (!Number.isFinite(a) || a < 0) return;
-    setOpBusy(true);
+    setOpBusy(true); setOpError(null);
     try {
       await updateDoc(doc(db, `${colPath}/${s.id}`), { amount: a, correctedAt: serverTimestamp() });
       // 顧客の累計売上も差額で補正
-      if (s.customerId && a !== s.amount) { const ref = custRef(s.customerId); if (ref) await updateDoc(ref, { totalSales: increment(a - s.amount) }).catch(() => {}); }
+      if (s.customerId && a !== s.amount) await syncCustomer(s.customerId, { totalSales: increment(a - s.amount) });
+    } catch (e) {
+      setOpError(describeFirestoreError(e, '金額の修正'));
     } finally { setOpBusy(false); }
   };
 
@@ -132,6 +162,8 @@ export function SalesClient({ user }: { user: User }) {
       </div>
 
       {loadError && <p role="alert" style={{ color: 'var(--noxa-status-error)', fontSize: 13, margin: '0 0 12px', padding: '10px 12px', borderRadius: 10, background: 'rgba(229,115,115,0.08)', border: '1px solid var(--noxa-status-error)' }}>{loadError}</p>}
+      {/* 取消・修正・顧客実績反映の失敗（旧実装は無音で、押しても何も起きないように見えた） */}
+      {opError && <p role="alert" style={{ color: 'var(--noxa-status-error)', fontSize: 13, margin: '0 0 12px', padding: '10px 12px', borderRadius: 10, background: 'rgba(229,115,115,0.08)', border: '1px solid var(--noxa-status-error)' }}>{opError}</p>}
       <div className="grid grid-cols-2 lg:grid-cols-4" style={{ gap: 12, marginBottom: 18 }}>
         <Kpi label="本日" value={yen(sum.today)} accent />
         <Kpi label="今月" value={yen(sum.month)} />
@@ -170,7 +202,8 @@ export function SalesClient({ user }: { user: User }) {
         </div>
       )}
 
-      {adding && <SaleDialog customers={customers} onClose={() => setAdding(false)} onSave={async (a, c, k, cid) => { await addSale(a, c, k, cid); setAdding(false); }} />}
+      {/* 記録に失敗したらダイアログは閉じない（入力を捨てずに再試行できる） */}
+      {adding && <SaleDialog customers={customers} onClose={() => setAdding(false)} onSave={async (a, c, k, cid) => { const err = await addSale(a, c, k, cid); if (!err) setAdding(false); return err; }} />}
 
       <p style={{ margin: '16px 0 0', fontSize: 11, color: 'var(--noxa-text-faint)' }}>
         ※ {place}の売上（noxa-platform 共有）。取消は無効化＝集計から除外。
@@ -180,12 +213,14 @@ export function SalesClient({ user }: { user: User }) {
   );
 }
 
-function SaleDialog({ customers, onClose, onSave }: { customers: { id: string; name: string }[]; onClose: () => void; onSave: (amount: number, customer: string, cast: string, customerId: string | null) => Promise<void> }) {
+function SaleDialog({ customers, onClose, onSave }: { customers: { id: string; name: string }[]; onClose: () => void; onSave: (amount: number, customer: string, cast: string, customerId: string | null) => Promise<string | null> }) {
   const [amount, setAmount] = useState<number>(0);
   const [customer, setCustomer] = useState('');
   const [customerId, setCustomerId] = useState<string>('');
   const [cast, setCast] = useState('');
   const [busy, setBusy] = useState(false);
+  // 失敗はダイアログ内に出す（親のバナーはオーバーレイの裏で見えないため）
+  const [error, setError] = useState<string | null>(null);
   return (
     <div role="dialog" aria-label="売上を記録" onClick={onClose} style={{ position: 'fixed', inset: 0, zIndex: 60, background: 'rgba(0,0,0,0.55)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }}>
       <div onClick={(e) => e.stopPropagation()} style={{ width: 'min(420px, 94vw)', background: 'var(--noxa-bg-base)', border: '1px solid var(--noxa-border-strong)', borderRadius: 16, padding: 20, display: 'flex', flexDirection: 'column', gap: 14 }}>
@@ -204,8 +239,9 @@ function SaleDialog({ customers, onClose, onSave }: { customers: { id: string; n
         <label style={{ display: 'flex', flexDirection: 'column', gap: 6 }}><span className="noxa-label" style={{ margin: 0 }}>担当（任意）</span>
           <input value={cast} onChange={(e) => setCast(e.target.value)} className="noxa-input" /></label>
         {customerId && <p style={{ margin: 0, fontSize: 11, color: 'var(--noxa-text-faint)' }}>※ 選択した顧客の累計売上・来店回数に反映されます。</p>}
+        {error && <p role="alert" style={{ margin: 0, fontSize: 13, color: 'var(--noxa-status-error)', padding: '10px 12px', borderRadius: 10, background: 'rgba(229,115,115,0.08)', border: '1px solid var(--noxa-status-error)' }}>{error}</p>}
         <div style={{ display: 'flex', gap: 10 }}>
-          <button type="button" disabled={amount <= 0 || busy} onClick={async () => { setBusy(true); try { await onSave(amount, customer, cast, customerId || null); } finally { setBusy(false); } }} className="noxa-btn noxa-btn-primary" style={{ flex: 1 }}>{busy ? '保存中…' : '記録する'}</button>
+          <button type="button" disabled={amount <= 0 || busy} onClick={async () => { setBusy(true); setError(null); try { setError(await onSave(amount, customer, cast, customerId || null)); } finally { setBusy(false); } }} className="noxa-btn noxa-btn-primary" style={{ flex: 1 }}>{busy ? '保存中…' : '記録する'}</button>
           <button type="button" onClick={onClose} className="noxa-btn noxa-btn-secondary" style={{ width: 90 }}>閉じる</button>
         </div>
       </div>

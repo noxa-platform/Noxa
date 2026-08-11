@@ -9,6 +9,7 @@ import { getActiveShop, pickShopId } from '@/lib/workspace';
 import { useShopRole, hasShopRole } from '@/lib/useShopRole';
 import { summarizeTeamShifts, type TeamShift } from '@/lib/attendance/summary';
 import { resolveOvernightEndMs } from '@/lib/attendance/shift-time';
+import { describeFirestoreError } from '@/lib/firestore-error';
 import { Shell, Section, Empty, Eyebrow, chip } from '@/components/modules/schedule/ScheduleClient';
 
 /**
@@ -52,6 +53,7 @@ export function AttendanceClient({ user }: { user: User }) {
   useEffect(() => { const t = setInterval(() => setTick(Date.now()), 30000); return () => clearInterval(t); }, []);
 
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [opError, setOpError] = useState<string | null>(null); // 打刻の失敗（旧実装は catch が無く無音だった）
   const reload = async (sid: string) => {
     try {
       const snap = await getDocs(query(collection(db, `shop_shops/${sid}/shifts`), where('castUid', '==', user.uid)));
@@ -60,7 +62,7 @@ export function AttendanceClient({ user }: { user: User }) {
       setShifts(list); setLoadError(null);
     } catch (e) {
       // 権限エラー等を握りつぶすと「空画面」に見える → 可視化
-      setLoadError(`勤怠の読み込みに失敗しました（${(e as { code?: string; message?: string }).code ?? (e as Error).message}）`);
+      setLoadError(describeFirestoreError(e, '勤怠の読み込み'));
     }
   };
 
@@ -96,14 +98,18 @@ export function AttendanceClient({ user }: { user: User }) {
   const staleOpens = shifts.filter((s) => s.date !== today && (!s.endMs || isCorrupted(s)));
   const todayDone = shifts.filter((s) => s.date === today && s.endMs && !isCorrupted(s));
 
+  // 打刻は catch が無いと「押しても何も起きない」になる（権限エラーでも画面は未出勤のまま）。
+  // 給与の元データなので、打てなかったことは必ず本人に見せる。
   const clockIn = async () => {
-    if (!shopId || busy) return; setBusy(true);
+    if (!shopId || busy) return; setBusy(true); setOpError(null);
     try { await addDoc(collection(db, `shop_shops/${shopId}/shifts`), { castUid: user.uid, date: today, startAt: serverTimestamp(), createdAt: serverTimestamp() }); await reload(shopId); }
+    catch (e) { setOpError(describeFirestoreError(e, '出勤の打刻')); }
     finally { setBusy(false); }
   };
   const clockOut = async () => {
-    if (!shopId || !openToday || busy) return; setBusy(true);
+    if (!shopId || !openToday || busy) return; setBusy(true); setOpError(null);
     try { await updateDoc(doc(db, `shop_shops/${shopId}/shifts/${openToday.id}`), { endAt: serverTimestamp() }); await reload(shopId); }
+    catch (e) { setOpError(describeFirestoreError(e, '退勤の打刻')); }
     finally { setBusy(false); }
   };
 
@@ -114,6 +120,7 @@ export function AttendanceClient({ user }: { user: User }) {
       ) : (
         <>
           {loadError && <p role="alert" style={{ color: 'var(--noxa-status-error)', fontSize: 13, margin: '0 0 12px', padding: '10px 12px', borderRadius: 10, background: 'rgba(229,115,115,0.08)', border: '1px solid var(--noxa-status-error)' }}>{loadError}</p>}
+          {opError && <p role="alert" style={{ color: 'var(--noxa-status-error)', fontSize: 13, margin: '0 0 12px', padding: '10px 12px', borderRadius: 10, background: 'rgba(229,115,115,0.08)', border: '1px solid var(--noxa-status-error)' }}>{opError}</p>}
           {/* 打刻 */}
           <section style={{ background: 'var(--noxa-surface-card)', border: '1px solid var(--noxa-border)', borderRadius: 16, padding: 20, marginBottom: 16, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16, flexWrap: 'wrap' }}>
             <div>
@@ -175,23 +182,28 @@ const toHm = (ms: number | null) => { if (!ms) return ''; const d = new Date(ms)
 function StaleOpenFixer({ shopId, shift, onFixed }: { shopId: string; shift: Shift; onFixed: () => void }) {
   const [hm, setHm] = useState('23:59');
   const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
   const fix = async () => {
     const ts = timeToTs(shift.date, hm);
     if (!ts || busy) return;
+    setErr(null);
     // 出勤と同暦日で入れた退勤が start 以下なら翌日扱い（夜職の日跨ぎ＝出勤23:00→翌05:00 等）。
     // これをしないと end<start になり給与集計から丸ごと消えて無給になる。
     const endMs = shift.startMs != null ? resolveOvernightEndMs(shift.startMs, ts.toMillis()) : ts.toMillis();
     setBusy(true);
     try { await updateDoc(doc(db, `shop_shops/${shopId}/shifts/${shift.id}`), { endAt: Timestamp.fromMillis(endMs), fixedAt: serverTimestamp() }); onFixed(); }
-    catch (e) { window.alert(String((e as Error)?.message ?? e)); }
+    catch (e) { setErr(describeFirestoreError(e, '退勤時刻の記録')); }
     finally { setBusy(false); }
   };
   return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, fontFamily: mono, padding: '4px 0' }}>
-      <span style={{ minWidth: 84 }}>{shift.date}</span>
-      <span>{hhmm(shift.startMs)}〜</span>
-      <input type="time" value={hm} onChange={(e) => setHm(e.target.value)} style={{ minHeight: 32, padding: '2px 8px', borderRadius: 8, background: 'var(--noxa-bg-base)', border: '1px solid var(--noxa-border)', color: 'var(--noxa-text-primary)', fontFamily: mono, fontSize: 12 }} />
-      <button type="button" onClick={fix} disabled={busy} style={{ minHeight: 32, padding: '2px 12px', borderRadius: 8, cursor: 'pointer', background: 'var(--noxa-accent-primary)', border: 'none', color: '#fff', fontSize: 12 }}>この時刻で退勤</button>
+    <div style={{ padding: '4px 0' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, fontFamily: mono }}>
+        <span style={{ minWidth: 84 }}>{shift.date}</span>
+        <span>{hhmm(shift.startMs)}〜</span>
+        <input type="time" value={hm} onChange={(e) => setHm(e.target.value)} style={{ minHeight: 32, padding: '2px 8px', borderRadius: 8, background: 'var(--noxa-bg-base)', border: '1px solid var(--noxa-border)', color: 'var(--noxa-text-primary)', fontFamily: mono, fontSize: 12 }} />
+        <button type="button" onClick={fix} disabled={busy} style={{ minHeight: 32, padding: '2px 12px', borderRadius: 8, cursor: 'pointer', background: 'var(--noxa-accent-primary)', border: 'none', color: '#fff', fontSize: 12 }}>この時刻で退勤</button>
+      </div>
+      {err && <p role="alert" style={{ margin: '4px 0 0', fontSize: 12, color: 'var(--noxa-status-error)' }}>{err}</p>}
     </div>
   );
 }
@@ -202,12 +214,14 @@ function ShiftRow({ shopId, shift, onChanged }: { shopId: string; shift: Shift; 
   const [start, setStart] = useState(toHm(shift.startMs));
   const [end, setEnd] = useState(toHm(shift.endMs));
   const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
 
   const save = async () => {
     if (busy) return;
     const st = timeToTs(shift.date, start);
     const enBase = end ? timeToTs(shift.date, end) : null;
-    if (!st) { window.alert('出勤時刻が不正です'); return; }
+    setErr(null);
+    if (!st) { setErr('出勤時刻が不正です。HH:MM 形式で入力してください。'); return; }
     // 退勤が出勤以下なら翌日扱い（日跨ぎ勤務。同暦日固定だと overnight を記録できず、
     // end<start で給与から消える）。end 無しは未退勤のまま。
     const enMs = enBase ? resolveOvernightEndMs(st.toMillis(), enBase.toMillis()) : null;
@@ -215,14 +229,14 @@ function ShiftRow({ shopId, shift, onChanged }: { shopId: string; shift: Shift; 
     try {
       await updateDoc(doc(db, `shop_shops/${shopId}/shifts/${shift.id}`), { startAt: st, ...(enMs != null ? { endAt: Timestamp.fromMillis(enMs) } : {}), fixedAt: serverTimestamp() });
       setEditing(false); onChanged();
-    } catch (e) { window.alert(String((e as Error)?.message ?? e)); }
+    } catch (e) { setErr(describeFirestoreError(e, '打刻の修正')); }
     finally { setBusy(false); }
   };
   const remove = async () => {
     if (!window.confirm(`${shift.date} の打刻記録を削除しますか？`)) return;
-    setBusy(true);
+    setBusy(true); setErr(null);
     try { await deleteDoc(doc(db, `shop_shops/${shopId}/shifts/${shift.id}`)); onChanged(); }
-    catch (e) { window.alert(String((e as Error)?.message ?? e)); }
+    catch (e) { setErr(describeFirestoreError(e, '打刻の削除')); }
     finally { setBusy(false); }
   };
 
@@ -248,6 +262,8 @@ function ShiftRow({ shopId, shift, onChanged }: { shopId: string; shift: Shift; 
           <button type="button" onClick={() => { setStart(toHm(shift.startMs)); setEnd(toHm(shift.endMs)); setEditing(true); }} title="打刻を修正" style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--noxa-text-faint)', fontSize: 12 }}>✎</button>
         </>
       )}
+      {/* 修正・削除の失敗（旧実装は生の code/message を alert していた） */}
+      {err && <p role="alert" style={{ flexBasis: '100%', margin: 0, fontSize: 12, color: 'var(--noxa-status-error)' }}>{err}</p>}
     </div>
   );
 }

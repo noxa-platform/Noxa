@@ -9,6 +9,7 @@ import { getActiveShop, pickShopId } from '@/lib/workspace';
 import { computeGoalHistory } from '@/lib/goals/history';
 import { businessMonthKey } from '@/lib/datetime';
 import { currentBusinessYm, lastSixMonths } from '@/lib/goals/months';
+import { describeFirestoreError } from '@/lib/firestore-error';
 
 /**
  * 目標管理 — Noxa OS（実データ）
@@ -95,6 +96,7 @@ export function GoalsClient({ user }: { user: User }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState<number>(0);
   const [perf, setPerf] = useState<Perf>({ byMonth: {}, currentTypes: {} });
+  const [saveError, setSaveError] = useState<string | null>(null);
 
   useEffect(() => {
     let alive = true;
@@ -120,7 +122,12 @@ export function GoalsClient({ user }: { user: User }) {
   const typeEntries = Object.entries(perf.currentTypes).filter(([, v]) => v > 0).sort((a, b) => b[1] - a[1]);
 
   const save = async () => {
-    setGoalSales(draft); setGoalsByYm((p) => ({ ...p, [cur]: draft })); setEditing(false);
+    // 楽観更新は「失敗したら必ず元に戻す」までがセット。旧実装は巻き戻さずアラートだけ出していたため、
+    // 保存できていないのに画面は新しい目標のまま残り、達成率まで保存されていない目標で計算されていた
+    // （再読み込みすると元の目標に戻る＝どちらが本当か分からない）。
+    const prevGoal = goalSales;
+    const prevByYm = goalsByYm;
+    setGoalSales(draft); setGoalsByYm((p) => ({ ...p, [cur]: draft })); setEditing(false); setSaveError(null);
     try {
       // 月別 doc が正本（履歴化・Day13）。current は iOS/旧クライアント互換のミラー
       await Promise.all([
@@ -128,8 +135,8 @@ export function GoalsClient({ user }: { user: User }) {
         setDoc(doc(db, `personal_goals/${user.uid}/items/current`), { goalSales: draft, updatedAt: serverTimestamp() }, { merge: true }),
       ]);
     } catch (e) {
-      // 保存失敗を握りつぶすと「保存できたつもり」になる → 可視化
-      window.alert(`目標の保存に失敗しました（${(e as { code?: string; message?: string }).code ?? (e as Error).message}）`);
+      setGoalSales(prevGoal); setGoalsByYm(prevByYm); setDraft(prevGoal);
+      setSaveError(describeFirestoreError(e, '目標の保存'));
     }
   };
 
@@ -159,6 +166,11 @@ export function GoalsClient({ user }: { user: User }) {
           <div className="noxa-eyebrow" style={{ padding: '40px 0' }}>読み込み中…</div>
         ) : (
           <>
+            {/* 保存失敗の通知（握りつぶすと「保存できたつもり」になる） */}
+            {saveError && (
+              <p role="alert" style={{ color: 'var(--noxa-status-error)', fontSize: 13, margin: '0 0 12px', padding: '10px 12px', borderRadius: 10, background: 'rgba(229,115,115,0.08)', border: '1px solid var(--noxa-status-error)' }}>{saveError}</p>
+            )}
+
             {/* 今月の目標 */}
             <section aria-label="今月の目標" style={{ background: 'var(--noxa-surface-card)', border: '1px solid var(--noxa-border)', borderRadius: 16, padding: 'clamp(16px, 3vw, 24px)', marginBottom: 16 }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>

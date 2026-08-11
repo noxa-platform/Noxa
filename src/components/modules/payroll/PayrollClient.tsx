@@ -7,6 +7,7 @@ import { db, auth } from '@/lib/firebase/config';
 import { useDeviceClaims } from '@/lib/useShopContext';
 import { useShopId } from '@/lib/useShopId';
 import { getActiveShop, pickShopId } from '@/lib/workspace';
+import { describeFirestoreError } from '@/lib/firestore-error';
 import { Shell, Section, Empty, Eyebrow } from '@/components/modules/schedule/ScheduleClient';
 
 /**
@@ -85,7 +86,7 @@ export function PayrollClient({ user }: { user: User }) {
         if (alive) setPeriods(merged);
       } catch (e) {
         // 権限エラー等の握りつぶし＝「明細が無い」ように見える誤解を防ぐ
-        if (alive) setLoadError(`給与明細の読み込みに失敗しました（${(e as { code?: string; message?: string }).code ?? (e as Error).message}）`);
+        if (alive) setLoadError(describeFirestoreError(e, '給与明細の読み込み'));
       }
       if (alive) setLoading(false);
     })();

@@ -10,6 +10,7 @@ import { useShopConfig } from '@/lib/shopConfig';
 import { PosClient } from '@/components/modules/pos/PosClient';
 import { generateSmartProposals, getSourcingCandidates, sanitizeAiPlan, ASSIST_MODE_LABEL, type AiPlanItem, type AssistMode } from '@/lib/seating/ai';
 import { computeSetTimer, orderedRotationQueue, moveInOrder, firstVisitPickupSet } from '@/lib/seating/logic';
+import { describeFirestoreError } from '@/lib/firestore-error';
 import { calculateResult, type CalculatorState } from '@/lib/pos/engine';
 import { AI_CONSENT_TEXT } from '@/lib/ai-privacy';
 import { createDefaultStoreConfig } from '@/lib/pos/defaultConfig';
@@ -246,7 +247,7 @@ export function SeatingClient({ user }: { user: User }) {
       const snapshot = await store.resetTable(t.id);
       if (snapshot) setUndo({ tableId: t.id, name: t.name, snapshot, until: Date.now() + 60_000 });
     } catch (e) {
-      window.alert(String((e as Error)?.message ?? e));
+      window.alert(describeFirestoreError(e, '退店処理'));
     }
   };
   const undoReset = async () => {
@@ -255,7 +256,7 @@ export function SeatingClient({ user }: { user: User }) {
       await store.restoreTable(undo.tableId, undo.snapshot);
       setUndo(null);
     } catch (e) {
-      window.alert(String((e as Error)?.message ?? e));
+      window.alert(describeFirestoreError(e, '退店の取り消し'));
     }
   };
 
@@ -265,7 +266,7 @@ export function SeatingClient({ user }: { user: User }) {
       else for (const cid of p.castIds) await store.assignCast(p.tableId, cid);
       setAiPlan((prev) => (prev ? prev.filter((x) => x !== p) : prev));
     } catch (e) {
-      window.alert(String((e as Error)?.message ?? e));
+      window.alert(describeFirestoreError(e, 'AI 提案の適用'));
     }
   };
 
@@ -591,7 +592,7 @@ function TableDetail({ table, casts, tables, castById, store, onOpenPos, onReset
       await store.startSet(table.id, customers);
     } catch (e) {
       // 使用中卓への二重開卓ガード等を可視化（握りつぶすと「押しても無反応」に見える）
-      window.alert(String((e as Error)?.message ?? e));
+      window.alert(describeFirestoreError(e, '開卓'));
     }
   };
 
@@ -855,7 +856,7 @@ function QueuePanel({ queue, tables, store }: { queue: import('@/lib/seating/typ
               <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
                 {emptyTables.length === 0 && <span style={{ fontSize: 11, color: 'var(--noxa-status-warning)' }}>空卓なし</span>}
                 {emptyTables.map((t) => (
-                  <button key={t.id} type="button" onClick={() => { store.seatQueueGroup(t.id, q).catch((e) => window.alert(String((e as Error)?.message ?? e))); setSeatFor(null); }} style={chipStyle(false)}>{t.name}</button>
+                  <button key={t.id} type="button" onClick={() => { store.seatQueueGroup(t.id, q).catch((e) => window.alert(describeFirestoreError(e, '卓への案内'))); setSeatFor(null); }} style={chipStyle(false)}>{t.name}</button>
                 ))}
               </div>
             ) : (
@@ -981,13 +982,17 @@ function CastEditor({ cast, allCasts, store, onClose }: { cast: Cast; allCasts: 
       await store.updateCast(cast.id, { name: name.trim() || cast.name, rank, hourlyWage: Math.max(0, wage), uid: uid || null, ngCastIds: ngIds });
       onClose();
     } catch (e) {
-      window.alert(String((e as Error)?.message ?? e));
+      window.alert(describeFirestoreError(e, 'キャスト情報の保存'));
     } finally { setBusy(false); }
   };
   const remove = async () => {
     if (!window.confirm(`${cast.name} を名簿から削除しますか？`)) return;
     setBusy(true);
-    try { await store.removeCast(cast.id); onClose(); } finally { setBusy(false); }
+    // catch が無いと権限エラーで「削除ボタンを押しても名簿から消えない」だけになり、
+    // 壊れているのか権限が無いのか判断できなかった
+    try { await store.removeCast(cast.id); onClose(); }
+    catch (e) { window.alert(describeFirestoreError(e, 'キャストの削除')); }
+    finally { setBusy(false); }
   };
 
   return (
