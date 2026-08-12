@@ -17,6 +17,7 @@ import {
 import type { User } from 'firebase/auth';
 import { db } from '@/lib/firebase/config';
 import { useShopId } from '@/lib/useShopId';
+import { describeFirestoreError } from '@/lib/firestore-error';
 
 /**
  * 体験入店 — Noxa OS モジュール（実データ）
@@ -507,12 +508,15 @@ function Editor({
   onSave,
   onClose,
   busy,
+  error,
 }: {
   draftKey: DraftKey;
   initial: Draft;
   onSave: (key: DraftKey, draft: Draft) => void;
   onClose: () => void;
   busy: boolean;
+  /** 保存の失敗。エディタは fixed オーバーレイなので、ページ側のバナーは裏に隠れて見えない */
+  error?: string | null;
 }) {
   const [d, setD] = useState<Draft>(initial);
   const set = <K extends keyof Draft>(k: K, v: Draft[K]) => setD((p) => ({ ...p, [k]: v }));
@@ -645,6 +649,12 @@ function Editor({
           />
         </label>
 
+        {error && (
+          <p role="alert" style={{ margin: 0, fontSize: 12, color: 'var(--noxa-status-error)', padding: '8px 10px', borderRadius: 8, background: 'rgba(229,115,115,0.08)', border: '1px solid var(--noxa-status-error)' }}>
+            {error}
+          </p>
+        )}
+
         <div style={{ display: 'flex', gap: 8, paddingTop: 4 }}>
           <button
             type="button"
@@ -693,6 +703,8 @@ export function TrialClient({ user }: { user: User }) {
   const [candSnap, setCandSnap] = useState<{ path: string; list: Candidate[] } | null>(null);
   const [filterStatus, setFilterStatus] = useState<TrialStatus | 'all'>('all');
   const [busy, setBusy] = useState(false);
+  // 保存・ステータス遷移・削除・本入店の失敗（旧実装は catch が無く完全に無音だった）
+  const [opError, setOpError] = useState<string | null>(null);
   // null=非表示, 'new'=新規, それ以外=編集対象 id
   const [editorKey, setEditorKey] = useState<DraftKey | null>(null);
 
@@ -724,7 +736,7 @@ export function TrialClient({ user }: { user: User }) {
   // 追加／編集の保存（undefined を書き込まない）
   const saveDraft = async (key: DraftKey, d: Draft) => {
     if (!path || busy || !d.name.trim()) return;
-    setBusy(true);
+    setBusy(true); setOpError(null);
     try {
       const payload: Record<string, unknown> = {
         name: d.name.trim(),
@@ -743,6 +755,9 @@ export function TrialClient({ user }: { user: User }) {
         await updateDoc(doc(db, `${path}/${key}`), payload);
       }
       setEditorKey(null);
+    } catch (e) {
+      // catch が無いと保存できていないのにエディタが開いたまま無反応（成功と区別がつかない）
+      setOpError(describeFirestoreError(e, '体験入店記録の保存'));
     } finally {
       setBusy(false);
     }
@@ -750,9 +765,12 @@ export function TrialClient({ user }: { user: User }) {
 
   const patchStatus = async (c: Candidate, status: TrialStatus) => {
     if (!path || busy) return;
-    setBusy(true);
+    setBusy(true); setOpError(null);
     try {
       await updateDoc(doc(db, `${path}/${c.id}`), { status });
+    } catch (e) {
+      // 権限エラーでも「押してもステータスが進まないだけ」だった
+      setOpError(describeFirestoreError(e, 'ステータスの変更'));
     } finally {
       setBusy(false);
     }
@@ -769,7 +787,7 @@ export function TrialClient({ user }: { user: User }) {
   // 招待発行は owner/manager のみ API が許可。失敗しても名簿反映は成立させる。
   const hire = async (c: Candidate) => {
     if (!path || !shop.shopId || busy) return;
-    setBusy(true);
+    setBusy(true); setOpError(null);
     try {
       // ① 名簿へ（同名キャストが既にいれば作らない）
       let castCreated = false;
@@ -801,7 +819,7 @@ export function TrialClient({ user }: { user: User }) {
         if (res.ok && data.url) inviteUrl = data.url;
         else inviteError = data.error ?? `招待コードの発行に失敗（${res.status}）`;
       } catch (e) {
-        inviteError = String((e as Error)?.message ?? e);
+        inviteError = describeFirestoreError(e, '招待コードの発行');
       }
 
       await updateDoc(doc(db, `${path}/${c.id}`), {
@@ -809,7 +827,7 @@ export function TrialClient({ user }: { user: User }) {
       });
       setHiredInfo({ name: c.name, castCreated, inviteUrl, inviteError });
     } catch (e) {
-      window.alert('本入店処理に失敗しました: ' + String((e as Error)?.message ?? e));
+      setOpError(describeFirestoreError(e, '本入店処理'));
     } finally {
       setBusy(false);
     }
@@ -820,9 +838,11 @@ export function TrialClient({ user }: { user: User }) {
     if (!path || busy) return;
     // 採用記録（面接メモ・評価つき）の誤タップ消失防止
     if (!window.confirm(`「${c.name}」の体験入店記録を削除しますか？面接メモ・評価も消えます。`)) return;
-    setBusy(true);
+    setBusy(true); setOpError(null);
     try {
       await deleteDoc(doc(db, `${path}/${c.id}`));
+    } catch (e) {
+      setOpError(describeFirestoreError(e, '体験入店記録の削除'));
     } finally {
       setBusy(false);
     }
@@ -873,6 +893,8 @@ export function TrialClient({ user }: { user: User }) {
       />
 
       <div style={{ position: 'relative' }}>
+        {/* 保存・ステータス遷移・削除・本入店の失敗（旧実装は無音で「押しても何も起きない」ように見えた） */}
+        {opError && <p role="alert" style={{ color: 'var(--noxa-status-error)', fontSize: 13, margin: '0 0 12px', padding: '10px 12px', borderRadius: 10, background: 'rgba(229,115,115,0.08)', border: '1px solid var(--noxa-status-error)' }}>{opError}</p>}
         {/* breadcrumb */}
         <nav aria-label="breadcrumb" style={{ marginBottom: 10 }}>
           <ol
@@ -1174,8 +1196,10 @@ export function TrialClient({ user }: { user: User }) {
           draftKey={editorKey}
           initial={editorInitial}
           onSave={saveDraft}
-          onClose={() => setEditorKey(null)}
+          // 閉じるときに失敗表示も消す（次に開いたとき古いエラーが残らない）
+          onClose={() => { setEditorKey(null); setOpError(null); }}
           busy={busy}
+          error={opError}
         />
       )}
 

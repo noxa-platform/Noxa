@@ -237,7 +237,7 @@ export function SeatingClient({ user }: { user: User }) {
       setAiNote(typeof data.note === 'string' ? data.note : '');
       if (plan.length === 0) setAiError('適用できる提案がありませんでした（制約違反の提案は自動で除外しています）。要望を変えてもう一度どうぞ。');
     } catch (e) {
-      setAiError(String((e as Error)?.message ?? e));
+      setAiError(describeFirestoreError(e, 'AI 提案の取得'));
     } finally { setAiBusy(false); }
   };
 

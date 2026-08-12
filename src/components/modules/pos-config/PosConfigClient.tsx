@@ -8,6 +8,7 @@ import { db } from '@/lib/firebase/config';
 import { getActiveShop, pickShopId } from '@/lib/workspace';
 import type { StoreConfig, MenuItemDef, MenuCategoryDef, PinnedOrderDef } from '@/lib/pos/types';
 import { createDefaultStoreConfig } from '@/lib/pos/defaultConfig';
+import { describeFirestoreError } from '@/lib/firestore-error';
 
 /**
  * POS 設定エディタ — 店舗ごとの料金・メニュー・税/手数料・クイック・カテゴリ・半額ルールを
@@ -51,7 +52,7 @@ export function PosConfigClient({ user }: { user: User }) {
         const snap = await getDoc(doc(db, `shop_shops/${id}/pos_config/active`));
         const base = createDefaultStoreConfig('active', shopDoc?.data().name as string | undefined);
         setCfg(snap.exists() ? ({ ...base, ...(snap.data() as Partial<StoreConfig>) } as StoreConfig) : base);
-      } catch (e) { if (alive) setErr(String((e as Error)?.message ?? e)); }
+      } catch (e) { if (alive) setErr(describeFirestoreError(e, '料金設定の読み込み')); }
       finally { if (alive) setLoading(false); }
     })();
     return () => { alive = false; };
@@ -67,7 +68,7 @@ export function PosConfigClient({ user }: { user: User }) {
       const d = new Date();
       setSavedAt(`${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`);
       setDirty(false);
-    } catch (e) { setErr('保存に失敗（権限をご確認ください）: ' + String((e as Error)?.message ?? e)); }
+    } catch (e) { setErr(describeFirestoreError(e, '料金設定の保存')); }
     finally { setSaving(false); }
   };
 

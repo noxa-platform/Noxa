@@ -17,6 +17,7 @@ import { createInitialState } from '@/lib/pos/engine';
 import { createDefaultStoreConfig } from '@/lib/pos/defaultConfig';
 import type { StoreConfig } from '@/lib/pos/types';
 import { businessDayKey } from '@/lib/datetime';
+import { describeFirestoreError } from '@/lib/firestore-error';
 
 /**
  * 予約モジュール（実データ）
@@ -114,6 +115,8 @@ export function ReservationClient({ user }: { user: User }) {
   const [editId, setEditId] = useState<string | null>(null);
   const [form, setForm] = useState<FormState>(emptyForm());
   const [busy, setBusy] = useState(false);
+  // 保存・ステータス変更・削除の失敗（旧実装は catch が無く完全に無音だった）
+  const [opError, setOpError] = useState<string | null>(null);
 
   const resPath = shop.shopId ? `shop_shops/${shop.shopId}/reservations` : null;
   const custPath = shop.shopId ? `shop_shops/${shop.shopId}/customers` : null;
@@ -207,13 +210,14 @@ export function ReservationClient({ user }: { user: User }) {
     setForm({ date: r.date || todayStr(), time: r.time, customerName: r.customerName, cast: r.cast, guests: r.guests ? String(r.guests) : '', seat: r.seat, memo: r.memo ?? '' });
     setShowForm(true);
   };
-  const closeForm = () => { setShowForm(false); setEditId(null); setForm(emptyForm()); };
+  // 閉じるときに失敗表示も消す（次に開いたとき古いエラーが残らない）
+  const closeForm = () => { setShowForm(false); setEditId(null); setForm(emptyForm()); setOpError(null); };
 
   const save = async () => {
     if (!resPath || busy) return;
     const name = form.customerName.trim();
     if (!name) return;
-    setBusy(true);
+    setBusy(true); setOpError(null);
     try {
       // undefined を書かないよう、空欄は省略
       const payload: Record<string, unknown> = {
@@ -235,12 +239,19 @@ export function ReservationClient({ user }: { user: User }) {
         await addDoc(collection(db, resPath), { ...payload, createdAt: serverTimestamp(), createdBy: user.uid });
       }
       closeForm();
+    } catch (e) {
+      // catch が無いと保存できていないのにフォームが開いたまま無反応（成功と区別がつかない）。
+      // 失敗時は closeForm を通らないので入力はそのまま残る
+      setOpError(describeFirestoreError(e, '予約の保存'));
     } finally { setBusy(false); }
   };
 
   const changeStatus = async (id: string, status: ReservationStatus) => {
     if (!resPath) return;
-    await updateDoc(doc(db, `${resPath}/${id}`), { status });
+    setOpError(null);
+    // try が無いと権限エラーで「押してもステータスが変わらないだけ」になる
+    try { await updateDoc(doc(db, `${resPath}/${id}`), { status }); }
+    catch (e) { setOpError(describeFirestoreError(e, 'ステータスの変更')); }
   };
 
   // 来店済み: 予約の卓が空いていれば同一トランザクションで開卓＋POS初期伝票を作成
@@ -277,12 +288,12 @@ export function ReservationClient({ user }: { user: User }) {
         tx.update(doc(db, `${resPath}/${r.id}`), { status: '来店済', checkedInAt: serverTimestamp(), openedTableId: table.id });
       });
     } catch (e) {
-      const msg = String((e as Error)?.message ?? e);
+      const msg = e instanceof Error ? e.message : String(e);
       if (msg.startsWith('USED:')) {
         await changeStatus(r.id, '来店済');
         window.alert(`卓「${r.seat}」は使用中のため開卓せず、ステータスのみ来店済にしました。`);
       } else {
-        window.alert('来店処理に失敗しました: ' + msg);
+        setOpError(describeFirestoreError(e, '来店処理'));
       }
     } finally { setBusy(false); }
   };
@@ -290,7 +301,9 @@ export function ReservationClient({ user }: { user: User }) {
     if (!resPath) return;
     // 予約の誤タップ消失防止（キャンセルはステータス遷移で残せる旨も案内）
     if (!window.confirm(`「${r.customerName}」${r.date} ${r.time} の予約を削除しますか？記録を残す場合は「→ キャンセル」を使ってください。`)) return;
-    await deleteDoc(doc(db, `${resPath}/${r.id}`));
+    setOpError(null);
+    try { await deleteDoc(doc(db, `${resPath}/${r.id}`)); }
+    catch (e) { setOpError(describeFirestoreError(e, '予約の削除')); }
   };
 
   return (
@@ -320,6 +333,9 @@ export function ReservationClient({ user }: { user: User }) {
       />
 
       <div style={{ position: 'relative' }}>
+        {/* ステータス変更・削除・来店処理の失敗（旧実装は無音で「押しても何も起きない」ように見えた）。
+            フォームを開いているときはフォーム内に出すので、ここでは重複表示しない */}
+        {opError && !showForm && <p role="alert" style={{ color: 'var(--noxa-status-error)', fontSize: 13, margin: '0 0 12px', padding: '10px 12px', borderRadius: 10, background: 'rgba(229,115,115,0.08)', border: '1px solid var(--noxa-status-error)' }}>{opError}</p>}
         {/* breadcrumb */}
         <nav aria-label="breadcrumb" style={{ marginBottom: 10 }}>
           <ol
@@ -514,6 +530,10 @@ export function ReservationClient({ user }: { user: User }) {
                         options={seatTables.map((tb) => tb.name)} placeholder="卓未指定" />
                     </div>
                     <FormInput label="メモ" value={form.memo} onChange={(v) => setF('memo', v)} placeholder="誕生日サプライズ など" />
+                    {/* 保存の失敗はフォーム内に出す（ページ上端のバナーは、フォームまでスクロールした状態だと画面外） */}
+                    {opError && (
+                      <p role="alert" style={{ margin: 0, fontSize: 12, color: 'var(--noxa-status-error)', padding: '8px 10px', borderRadius: 8, background: 'rgba(229,115,115,0.08)', border: '1px solid var(--noxa-status-error)' }}>{opError}</p>
+                    )}
                     <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
                       <button type="button" onClick={closeForm}
                         style={{ appearance: 'none', cursor: 'pointer', minHeight: 38, padding: '0 16px', borderRadius: 8, fontFamily: mono, fontSize: 12, background: 'transparent', color: 'var(--noxa-text-muted)', border: '1px solid var(--noxa-border)' }}>

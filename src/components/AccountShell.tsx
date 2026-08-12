@@ -12,6 +12,7 @@ import { useUiMode } from '@/lib/useUiMode';
 import { useShopConfig, DEFAULT_MODULES } from '@/lib/shopConfig';
 import { WorkspaceSwitcher } from '@/components/WorkspaceSwitcher';
 import { BottomTabBar } from '@/components/BottomTabBar';
+import { describeFirestoreError } from '@/lib/firestore-error';
 
 // メニューのアイコン（href→絵文字）。非tech層に分かりやすいよう視覚記号を付与。
 const ICONS: Record<string, string> = {
@@ -324,7 +325,7 @@ function EmailVerifyBanner({ user }: { user: User }) {
         onClick={async () => {
           setBusy(true);
           try { await resendVerificationEmail(user); setSent(true); }
-          catch (e) { window.alert('確認メールの送信に失敗しました（しばらくおいて再試行してください）。\n' + String((e as Error)?.message ?? e)); }
+          catch (e) { window.alert(describeFirestoreError(e, '確認メールの送信')); }
           finally { setBusy(false); }
         }}
         style={{ minHeight: 34, padding: '4px 14px', borderRadius: 9999, cursor: 'pointer', fontSize: 12, fontWeight: 600, background: 'var(--noxa-accent-primary)', color: '#fff', border: 'none', opacity: busy || sent ? 0.6 : 1 }}>

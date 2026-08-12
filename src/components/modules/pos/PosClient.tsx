@@ -8,6 +8,7 @@ import { useShopConfig } from '@/lib/shopConfig';
 import { useShopRole, hasShopRole } from '@/lib/useShopRole';
 import type { CustomerType, OrderItem, BreakdownItem, PosSlip, Action, CalculationResult } from '@/lib/pos/engine';
 import type { FloorTable, Cast } from '@/lib/seating/types';
+import { describeFirestoreError } from '@/lib/firestore-error';
 
 /**
  * ① POS — オーダーエントリー / 伝票計算（実エンジン・実データ・席回しと卓統合）
@@ -92,7 +93,7 @@ export function PosClient({ user, focusTableId, embedded }: { user: User; focusT
       await store.addSlip(tableId, init);
     } catch (e) {
       console.error('[POS] addSlip failed', e);
-      window.alert('伝票の作成に失敗しました: ' + ((e as Error)?.message ?? String(e)));
+      window.alert(describeFirestoreError(e, '伝票の作成'));
     }
   };
 
@@ -523,7 +524,7 @@ function BillPanel({ tableName, casts, slip, result, canUnpaid, onDispatch, onRe
           )}
           <div style={{ display: 'flex', gap: 8 }}>
             <button type="button" disabled={busy || unpaidInvalid || amountInvalid} className="noxa-btn noxa-btn-primary" style={{ ...primaryBtn, flex: 1, opacity: busy || unpaidInvalid || amountInvalid ? 0.7 : 1 }}
-              onClick={async () => { setBusy(true); try { await onCheckout({ amount, castName: castName || undefined, customerName: customerName || undefined, guests, unpaidAmount: unpaidOn ? unpaidAmount : undefined }); setCheckingOut(false); } catch (e) { window.alert('会計に失敗しました（通信状態をご確認ください）。\n' + ((e as Error)?.message ?? String(e))); } finally { setBusy(false); } }}>
+              onClick={async () => { setBusy(true); try { await onCheckout({ amount, castName: castName || undefined, customerName: customerName || undefined, guests, unpaidAmount: unpaidOn ? unpaidAmount : undefined }); setCheckingOut(false); } catch (e) { window.alert(describeFirestoreError(e, '会計')); } finally { setBusy(false); } }}>
               {busy ? '計上中…' : `${yen(amount)} で確定${unpaidOn && unpaidAmount > 0 ? `（うちツケ${yen(unpaidAmount)}）` : ''}`}
             </button>
             <button type="button" onClick={() => setCheckingOut(false)} className="noxa-btn noxa-btn-ghost" style={{ ...ghostBtn, width: 80 }}>戻る</button>

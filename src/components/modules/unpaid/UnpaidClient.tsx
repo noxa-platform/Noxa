@@ -16,6 +16,7 @@ import type { User } from 'firebase/auth';
 import { db } from '@/lib/firebase/config';
 import { useShopRole, hasShopRole } from '@/lib/useShopRole';
 import { UNPAID_STATUS_OPTIONS, balanceOf, collectPatch, isOverdue as isOverdueAt, statusChangePatch, type UnpaidStatus } from '@/lib/unpaid/logic';
+import { describeFirestoreError } from '@/lib/firestore-error';
 
 /**
  * 売掛管理モジュール（機微・オーナー専用・実データ）
@@ -140,6 +141,9 @@ export function UnpaidClient({ user }: { user: User }) {
   // 出所（path）つきスナップショットから records/loading を導出（set-state-in-effect 返済・Day18）
   const [recordsSnap, setRecordsSnap] = useState<{ path: string; list: UnpaidRecord[] } | null>(null);
   const [busy, setBusy] = useState(false);
+  // 追加・削除・ステータス変更・一部回収の失敗（旧実装は catch が無く完全に無音だった）。
+  // 売掛は債権なので「記録できたのか分からない」は金銭事故に直結する
+  const [opError, setOpError] = useState<string | null>(null);
 
   // 機微: owner/manager/accounting（rules の isShopMemberWithSalesEdit と一致。店長が未収を見られない問題の解消）
   const allowed = hasShopRole(shop, ['manager', 'accounting']);
@@ -188,7 +192,7 @@ export function UnpaidClient({ user }: { user: User }) {
     const name = fName.trim();
     const amount = Number(fAmount);
     if (!name || !Number.isFinite(amount) || amount <= 0) return;
-    setBusy(true);
+    setBusy(true); setOpError(null);
     try {
       // undefined は書かない（任意フィールドは値があるときのみ含める）
       const payload: Record<string, unknown> = {
@@ -209,6 +213,9 @@ export function UnpaidClient({ user }: { user: User }) {
       setFDate(today());
       setFDue('');
       setFMemo('');
+    } catch (e) {
+      // catch が無いと、記録できていないのに入力欄がそのまま残るだけ＝成功と区別がつかない
+      setOpError(describeFirestoreError(e, '売掛の記録'));
     } finally {
       setBusy(false);
     }
@@ -218,12 +225,17 @@ export function UnpaidClient({ user }: { user: User }) {
     if (!path) return;
     // 売掛＝債権の記録。誤タップ消失は金銭事故に直結するため対象名・残高入りで確認
     if (!window.confirm(`「${r.customerName}」の売掛記録（残 ${yen(balanceOf(r))}）を削除しますか？この操作は取り消せません。`)) return;
-    await deleteDoc(doc(db, `${path}/${r.id}`));
+    setOpError(null);
+    try { await deleteDoc(doc(db, `${path}/${r.id}`)); }
+    catch (e) { setOpError(describeFirestoreError(e, '売掛記録の削除')); }
   };
 
   const changeStatus = async (r: UnpaidRecord, status: UnpaidStatus) => {
     if (!path) return;
-    await updateDoc(doc(db, `${path}/${r.id}`), statusChangePatch(r, status));
+    setOpError(null);
+    // 「回収済」に変えたのに変わらない＝回収漏れを見落とす。失敗は必ず出す
+    try { await updateDoc(doc(db, `${path}/${r.id}`), statusChangePatch(r, status)); }
+    catch (e) { setOpError(describeFirestoreError(e, 'ステータスの変更')); }
   };
 
   // 一部回収を確定（paidAmount を加算し、status を自動更新）
@@ -231,11 +243,14 @@ export function UnpaidClient({ user }: { user: User }) {
     if (!path || busy) return;
     const patch = collectPatch(r, Number(collectAmount));
     if (!patch) return;
-    setBusy(true);
+    setBusy(true); setOpError(null);
     try {
       await updateDoc(doc(db, `${path}/${r.id}`), patch);
       setCollectId(null);
       setCollectAmount('');
+    } catch (e) {
+      // 失敗時は入力欄を閉じない（金額を打ち直させない）
+      setOpError(describeFirestoreError(e, '一部回収の記録'));
     } finally {
       setBusy(false);
     }
@@ -268,6 +283,8 @@ export function UnpaidClient({ user }: { user: User }) {
       />
 
       <div style={{ position: 'relative' }}>
+        {/* 追加・削除・ステータス変更・一部回収の失敗（旧実装は無音で「押しても何も起きない」ように見えた） */}
+        {opError && <p role="alert" style={{ color: 'var(--noxa-status-error)', fontSize: 13, margin: '0 0 12px', padding: '10px 12px', borderRadius: 10, background: 'rgba(229,115,115,0.08)', border: '1px solid var(--noxa-status-error)' }}>{opError}</p>}
         {/* breadcrumb */}
         <nav aria-label="breadcrumb" style={{ marginBottom: 10 }}>
           <ol

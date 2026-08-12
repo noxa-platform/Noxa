@@ -12,6 +12,7 @@ import {
 } from 'firebase/firestore';
 import { auth, db } from '@/lib/firebase/config';
 import { isInviteExpired } from '@/lib/invite-expiry';
+import { describeFirestoreError } from '@/lib/firestore-error';
 
 type Member = { uid: string; role: string; castDisplayName?: string; kind?: string; status?: string };
 type Invite = { code: string; role: string; createdBy?: string; expiresAt?: Timestamp; usedBy?: string };
@@ -65,7 +66,7 @@ export function MembersSection({ shopId, myUid }: { shopId: string; myUid: strin
       if (!res.ok) throw new Error(json.error ?? '発行に失敗しました');
       setLastUrl(json.url);
     } catch (e) {
-      setError(String((e as Error)?.message ?? e));
+      setError(describeFirestoreError(e, '招待コードの発行'));
     } finally {
       setIssuing(false);
     }
@@ -78,18 +79,18 @@ export function MembersSection({ shopId, myUid }: { shopId: string; myUid: strin
   const changeRole = async (uid: string, role: string) => {
     try {
       await setDoc(doc(db, `shop_shops/${shopId}/members/${uid}`), { role, updatedAt: serverTimestamp() }, { merge: true });
-    } catch (e) { setError(String((e as Error)?.message ?? e)); }
+    } catch (e) { setError(describeFirestoreError(e, '権限の変更')); }
   };
 
   const removeMember = async (m: Member) => {
     if (!window.confirm(`${m.castDisplayName || m.uid} をメンバーから外しますか？`)) return;
-    try { await deleteDoc(doc(db, `shop_shops/${shopId}/members/${m.uid}`)); } catch (e) { setError(String((e as Error)?.message ?? e)); }
+    try { await deleteDoc(doc(db, `shop_shops/${shopId}/members/${m.uid}`)); } catch (e) { setError(describeFirestoreError(e, 'メンバーの削除')); }
   };
 
   const cancelInvite = async (code: string) => {
     // 共有済みコードの誤取消防止（取り消すと相手側で無効になる）
     if (!window.confirm(`招待コード ${code} を取り消しますか？送付済みの場合、相手は参加できなくなります。`)) return;
-    try { await deleteDoc(doc(db, `shop_shops/${shopId}/invites/${code}`)); } catch (e) { setError(String((e as Error)?.message ?? e)); }
+    try { await deleteDoc(doc(db, `shop_shops/${shopId}/invites/${code}`)); } catch (e) { setError(describeFirestoreError(e, '招待の取り消し')); }
   };
 
   const inviteUrl = (code: string) => `${window.location.origin}/store/join?shop=${encodeURIComponent(shopId)}&code=${encodeURIComponent(code)}`;

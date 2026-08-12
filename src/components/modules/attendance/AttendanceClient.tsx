@@ -284,6 +284,8 @@ function ShiftCalendar({ shopId, uid, shifts }: { shopId: string; uid: string; s
   const [plans, setPlans] = useState<Record<string, Plan>>({});
   const [editor, setEditor] = useState<{ date: string; start: string; end: string; off: boolean } | null>(null);
   const [busy, setBusy] = useState(false);
+  // 予定の保存/クリアの失敗（旧実装は catch が無く、エディタが開いたまま無反応だった）
+  const [opError, setOpError] = useState<string | null>(null);
 
   const reloadPlans = async () => {
     try {
@@ -324,16 +326,20 @@ function ShiftCalendar({ shopId, uid, shifts }: { shopId: string; uid: string; s
 
   const move = (dir: -1 | 1) => setCursor((c) => { const d = new Date(c.y, c.m + dir, 1); return { y: d.getFullYear(), m: d.getMonth() }; });
 
+  // 保存/クリアは catch が無いと、失敗時に setEditor(null) へ到達せず
+  // 「エディタが開いたまま無反応」＝出勤予定を出せたのか分からない状態になる。
   const save = async () => {
-    if (!editor || busy) return; setBusy(true);
+    if (!editor || busy) return; setBusy(true); setOpError(null);
     try {
       await setDoc(doc(db, `shop_shops/${shopId}/shift_plans/${uid}_${editor.date}`), { castUid: uid, date: editor.date, start: editor.start, end: editor.end, off: editor.off, updatedAt: serverTimestamp() }, { merge: true });
       await reloadPlans(); setEditor(null);
-    } finally { setBusy(false); }
+    } catch (e) { setOpError(describeFirestoreError(e, '出勤予定の保存')); }
+    finally { setBusy(false); }
   };
   const clear = async () => {
-    if (!editor || busy) return; setBusy(true);
+    if (!editor || busy) return; setBusy(true); setOpError(null);
     try { await deleteDoc(doc(db, `shop_shops/${shopId}/shift_plans/${uid}_${editor.date}`)); await reloadPlans(); setEditor(null); }
+    catch (e) { setOpError(describeFirestoreError(e, '出勤予定のクリア')); }
     finally { setBusy(false); }
   };
 
@@ -387,6 +393,8 @@ function ShiftCalendar({ shopId, uid, shifts }: { shopId: string; uid: string; s
                   <input type="time" value={editor.end} onChange={(e) => setEditor({ ...editor, end: e.target.value })} style={calField} /></label>
               </div>
             )}
+            {/* 失敗はエディタ内に出す（オーバーレイの裏のバナーは見えない） */}
+            {opError && <p role="alert" style={{ margin: '0 0 12px', fontSize: 12, color: 'var(--noxa-status-error)', padding: '8px 10px', borderRadius: 8, background: 'rgba(229,115,115,0.08)', border: '1px solid var(--noxa-status-error)' }}>{opError}</p>}
             <div style={{ display: 'flex', gap: 8 }}>
               <button type="button" onClick={save} disabled={busy} style={{ flex: 1, minHeight: 44, borderRadius: 12, cursor: 'pointer', background: 'var(--noxa-accent-primary)', color: '#fff', border: 'none', fontSize: 14, fontWeight: 600 }}>保存</button>
               <button type="button" onClick={clear} disabled={busy} style={{ minHeight: 44, padding: '0 16px', borderRadius: 12, cursor: 'pointer', background: 'transparent', color: 'var(--noxa-status-error)', border: '1px solid var(--noxa-border)', fontSize: 14 }}>クリア</button>
@@ -437,7 +445,7 @@ function TeamAttendanceSection({ shopId }: { shopId: string }) {
         snap.forEach((d) => { const v = d.data() as DocumentData; list.push({ castUid: (v.castUid as string) ?? '', date: (v.date as string) ?? '', startMs: toMs(v.startAt), endMs: toMs(v.endAt) }); });
         setTeamShifts(list); setAsOf({ nowMs: Date.now(), todayKey: shiftDateKey() }); setErr(null);
       })
-      .catch((e) => { if (alive) { setTeamShifts([]); setErr(`チーム勤怠の取得に失敗（${(e as { code?: string }).code ?? (e as Error).message}）`); } });
+      .catch((e) => { if (alive) { setTeamShifts([]); setErr(describeFirestoreError(e, 'チーム勤怠の取得')); } });
     return () => { alive = false; };
   }, [shopId, cursor.y, cursor.m]);
 

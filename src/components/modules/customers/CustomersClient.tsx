@@ -7,6 +7,7 @@ import { db } from '@/lib/firebase/config';
 import { useShopId } from '@/lib/useShopId';
 import { useShopRole, hasShopRole } from '@/lib/useShopRole';
 import { rankToStars, starsToRank } from '@/lib/customerRank';
+import { describeFirestoreError } from '@/lib/firestore-error';
 import type { User } from 'firebase/auth';
 
 /**
@@ -201,10 +202,26 @@ export function CustomersClient({ user }: { user: User }) {
           initial={editing ? { name: editing.name, stars: rankToStars(editing.rank) } : { name: '', stars: 0 }}
           title={editing ? '顧客を編集' : '顧客を追加'}
           onClose={() => { setAdding(false); setEditId(null); }}
-          onSave={async (name, stars) => { if (editing) await saveCustomer(editing.id, name, stars); else await addCustomer(name, stars); setAdding(false); setEditId(null); }}
-          onDelete={editing ? async () => { if (window.confirm(`${editing.name} を削除しますか？`)) { await removeCustomer(editing.id); setEditId(null); } } : undefined}
+          onSave={async (name, stars) => {
+            // 失敗を握りつぶすと「保存ボタンを押してもダイアログが開いたまま無反応」になる（売上と同型）。
+            // 文言を返してダイアログ内に出し、成功したときだけ閉じる（入力を捨てない）
+            try { if (editing) await saveCustomer(editing.id, name, stars); else await addCustomer(name, stars); }
+            catch (e) { return describeFirestoreError(e, '顧客の保存'); }
+            setAdding(false); setEditId(null); return null;
+          }}
+          onDelete={editing ? async () => {
+            if (!window.confirm(`${editing.name} を削除しますか？`)) return null;
+            try { await removeCustomer(editing.id); }
+            catch (e) { return describeFirestoreError(e, '顧客の削除'); }
+            setEditId(null); return null;
+          } : undefined}
           assignTargets={canTeam && editing ? members : undefined}
-          onAssign={canTeam && editing ? async (castUid) => { await assignCustomer(editing.id, castUid); setEditId(null); } : undefined}
+          onAssign={canTeam && editing ? async (castUid) => {
+            // API 側の文言（「担当の割り当てに失敗しました（403）」等）が既に案内文なので包まない
+            try { await assignCustomer(editing.id, castUid); }
+            catch (e) { return describeFirestoreError(e); }
+            setEditId(null); return null;
+          } : undefined}
         />
       )}
 
@@ -248,7 +265,7 @@ function TeamStatsPanel({ shopId, user }: { shopId: string; user: User }) {
         if (!res.ok) { setErr(data.error ?? `成績の取得に失敗しました（${res.status}）`); setRows([]); }
         else setRows(Array.isArray(data.members) ? data.members : []);
       } catch (e) {
-        if (alive) { setErr(String((e as Error)?.message ?? e)); setRows([]); }
+        if (alive) { setErr(describeFirestoreError(e, 'キャスト別成績の読み込み')); setRows([]); }
       } finally { if (alive) setBusy(false); }
     })();
     return () => { alive = false; };
@@ -323,15 +340,18 @@ function TeamStatsPanel({ shopId, user }: { shopId: string; user: User }) {
 
 function CustomerDialog({ initial, title, onClose, onSave, onDelete, assignTargets, onAssign }: {
   initial: { name: string; stars: number }; title: string;
-  onClose: () => void; onSave: (name: string, stars: number) => Promise<void>; onDelete?: () => Promise<void>;
+  /** 各ハンドラは失敗時にエラー文言を返す（成功なら null）。呼び出し側が成功時のみ閉じる */
+  onClose: () => void; onSave: (name: string, stars: number) => Promise<string | null>; onDelete?: () => Promise<string | null>;
   /** 担当キャストへの割当（owner/manager・店舗の未担当顧客のみ） */
   assignTargets?: { uid: string; label: string }[];
-  onAssign?: (castUid: string) => Promise<void>;
+  onAssign?: (castUid: string) => Promise<string | null>;
 }) {
   const [name, setName] = useState(initial.name);
   const [stars, setStars] = useState(initial.stars);
   const [assignUid, setAssignUid] = useState('');
   const [busy, setBusy] = useState(false);
+  // 失敗はダイアログ内に出す（オーバーレイの裏のバナーは見えない）
+  const [error, setError] = useState<string | null>(null);
   return (
     <div role="dialog" aria-label={title} onClick={onClose} style={{ position: 'fixed', inset: 0, zIndex: 60, background: 'rgba(0,0,0,0.55)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }}>
       <div onClick={(e) => e.stopPropagation()} style={{ width: 'min(420px, 94vw)', background: 'var(--noxa-bg-base)', border: '1px solid var(--noxa-border-strong)', borderRadius: 16, padding: 20, display: 'flex', flexDirection: 'column', gap: 16 }}>
@@ -340,7 +360,7 @@ function CustomerDialog({ initial, title, onClose, onSave, onDelete, assignTarge
           <input value={name} onChange={(e) => setName(e.target.value)} placeholder="例：田中様" className="noxa-input" autoFocus /></label>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}><span className="noxa-label" style={{ margin: 0 }}>評価（★）</span><StarPicker value={stars} onChange={setStars} /></div>
         <div style={{ display: 'flex', gap: 10, marginTop: 4 }}>
-          <button type="button" disabled={!name.trim() || busy} onClick={async () => { setBusy(true); try { await onSave(name, stars); } finally { setBusy(false); } }} className="noxa-btn noxa-btn-primary" style={{ flex: 1 }}>{busy ? '保存中…' : '保存'}</button>
+          <button type="button" disabled={!name.trim() || busy} onClick={async () => { setBusy(true); setError(null); try { setError(await onSave(name, stars)); } finally { setBusy(false); } }} className="noxa-btn noxa-btn-primary" style={{ flex: 1 }}>{busy ? '保存中…' : '保存'}</button>
           <button type="button" onClick={onClose} className="noxa-btn noxa-btn-secondary" style={{ width: 90 }}>閉じる</button>
         </div>
         {/* 担当キャストへ割当（顧客台帳ごとキャストの個人台帳へ移動＝不可逆） */}
@@ -357,13 +377,15 @@ function CustomerDialog({ initial, title, onClose, onSave, onDelete, assignTarge
                   if (!assignUid) return;
                   if (!window.confirm(`${name || 'この顧客'} を担当キャストの台帳へ移動します（この一覧からは消えます）。よろしいですか？`)) return;
                   setBusy(true);
-                  try { await onAssign(assignUid); } catch (e) { window.alert(String((e as Error)?.message ?? e)); } finally { setBusy(false); }
+                  setError(null);
+                  try { setError(await onAssign(assignUid)); } finally { setBusy(false); }
                 }}>割り当てる</button>
             </div>
             <span style={{ fontSize: 10, color: 'var(--noxa-text-faint)', lineHeight: 1.6 }}>来店履歴・ギフトごとキャストの個人台帳へ移動し、以後の成績は「キャスト別成績」タブに反映されます。</span>
           </div>
         )}
-        {onDelete && <button type="button" onClick={onDelete} style={{ background: 'none', border: 'none', color: 'var(--noxa-status-error)', cursor: 'pointer', fontSize: 13 }}>この顧客を削除</button>}
+        {error && <p role="alert" style={{ margin: 0, fontSize: 13, color: 'var(--noxa-status-error)', padding: '10px 12px', borderRadius: 10, background: 'rgba(229,115,115,0.08)', border: '1px solid var(--noxa-status-error)' }}>{error}</p>}
+        {onDelete && <button type="button" disabled={busy} onClick={async () => { setBusy(true); setError(null); try { setError(await onDelete()); } finally { setBusy(false); } }} style={{ background: 'none', border: 'none', color: 'var(--noxa-status-error)', cursor: busy ? 'default' : 'pointer', fontSize: 13, opacity: busy ? 0.6 : 1 }}>この顧客を削除</button>}
       </div>
     </div>
   );
