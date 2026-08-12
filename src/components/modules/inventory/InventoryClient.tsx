@@ -19,6 +19,7 @@ import { useShopId } from '@/lib/useShopId';
 import { useShopConfig, type ChoiceItem } from '@/lib/shopConfig';
 import { stockStatus, keepExpiryStatus, type StockStatus, type ExpiryStatus } from '@/lib/inventory/status';
 import { nextStockQty, nextRemainingPct, parseRemainingPct } from '@/lib/inventory/adjust';
+import { describeFirestoreError } from '@/lib/firestore-error';
 
 /**
  * ⑧ 在庫管理 — Noxa OS（実データ）
@@ -135,6 +136,12 @@ export function InventoryClient({ user }: { user: User }) {
   const [items, setItems] = useState<StockItem[]>([]);
   const [keeps, setKeeps] = useState<BottleKeep[]>([]);
   const [busy, setBusy] = useState(false);
+  // 在庫の増減・品目/キープの保存・削除の失敗（旧実装は catch が無く完全に無音だった）。
+  // 在庫は「数が合っているか」が価値なので、増減が黙って失敗すると台帳が現実とズレる
+  const [opError, setOpError] = useState<string | null>(null);
+  // 購読（読み取り）の失敗。旧実装は console.warn だけで、権限エラーでも
+  // 「在庫が1件も無い」と同じ空表示になり、登録済みの在庫が消えたように見えた
+  const [readError, setReadError] = useState<string | null>(null);
 
   // 在庫品目フォーム（追加 / 編集）
   const [editor, setEditor] = useState<{ id: string | null; name: string; category: ItemCategory; qty: string; par: string; unit: string } | null>(null);
@@ -152,7 +159,11 @@ export function InventoryClient({ user }: { user: User }) {
       snap.forEach((d) => list.push(mapItem(d.id, d.data())));
       list.sort((a, b) => a.name.localeCompare(b.name, 'ja'));
       setItems(list);
-    }, (e) => console.warn('[noxa:inventory] 在庫購読エラー', e?.message ?? e));
+      setReadError(null);
+    }, (e) => {
+      console.warn('[noxa:inventory] 在庫購読エラー', e?.message ?? e);
+      setReadError(describeFirestoreError(e, '在庫の読み込み'));
+    });
     return () => unsub();
   }, [invPath]);
 
@@ -164,7 +175,10 @@ export function InventoryClient({ user }: { user: User }) {
       snap.forEach((d) => list.push(mapKeep(d.id, d.data())));
       list.sort((a, b) => (b.openedAt || '').localeCompare(a.openedAt || ''));
       setKeeps(list);
-    }, (e) => console.warn('[noxa:inventory] ボトルキープ購読エラー', e?.message ?? e));
+    }, (e) => {
+      console.warn('[noxa:inventory] ボトルキープ購読エラー', e?.message ?? e);
+      setReadError(describeFirestoreError(e, 'ボトルキープの読み込み'));
+    });
     return () => unsub();
   }, [keepPath]);
 
@@ -181,15 +195,21 @@ export function InventoryClient({ user }: { user: User }) {
 
   const adjustQty = async (item: StockItem, delta: number) => {
     if (!invPath || busy) return;
-    setBusy(true);
+    setBusy(true); setOpError(null);
     // 同時操作の lost update を防ぐため、tx でサーバ最新値に delta を適用（規約: 会計/席回しと同じ）
     try {
       const ref = doc(db, `${invPath}/${item.id}`);
+      let missing = false;
       await runTransaction(db, async (tx) => {
         const snap = await tx.get(ref);
-        if (!snap.exists()) return;
+        if (!snap.exists()) { missing = true; return; }
         tx.update(ref, { qty: nextStockQty(num(snap.data().qty), delta) });
       });
+      // doc が消えている場合も「押しても数が動かない」だけになるため理由を出す
+      if (missing) setOpError(`「${item.name}」は削除されています。画面を再読み込みしてください。`);
+    } catch (e) {
+      // catch が無いと、在庫が増減できていないのに画面は元の数のまま無反応（棚卸しが狂う）
+      setOpError(describeFirestoreError(e, '在庫数の更新'));
     } finally { setBusy(false); }
   };
 
@@ -197,8 +217,9 @@ export function InventoryClient({ user }: { user: User }) {
     if (!invPath || busy) return;
     // 品目削除は在庫数・発注点設定ごと消える（誤タップ防止）
     if (!window.confirm(`品目「${item.name}」を削除しますか？在庫数・発注点の設定も消えます。`)) return;
-    setBusy(true);
+    setBusy(true); setOpError(null);
     try { await deleteDoc(doc(db, `${invPath}/${item.id}`)); }
+    catch (e) { setOpError(describeFirestoreError(e, '品目の削除')); }
     finally { setBusy(false); }
   };
 
@@ -206,7 +227,7 @@ export function InventoryClient({ user }: { user: User }) {
     if (!invPath || !editor || busy) return;
     const name = editor.name.trim();
     if (!name) return;
-    setBusy(true);
+    setBusy(true); setOpError(null);
     try {
       const payload: Record<string, unknown> = {
         name,
@@ -222,6 +243,9 @@ export function InventoryClient({ user }: { user: User }) {
         await addDoc(collection(db, invPath), { ...payload, createdAt: serverTimestamp() });
       }
       setEditor(null);
+    } catch (e) {
+      // 失敗時は setEditor(null) に到達しないので入力は残る。理由をモーダル内に出す
+      setOpError(describeFirestoreError(e, '品目の保存'));
     } finally { setBusy(false); }
   };
 
@@ -230,7 +254,7 @@ export function InventoryClient({ user }: { user: User }) {
     const customerName = keepForm.customerName.trim();
     const item = keepForm.item.trim();
     if (!customerName || !item) return;
-    setBusy(true);
+    setBusy(true); setOpError(null);
     try {
       const payload: Record<string, unknown> = {
         customerName,
@@ -244,6 +268,8 @@ export function InventoryClient({ user }: { user: User }) {
       if (remaining) payload.remaining = remaining;
       await addDoc(collection(db, keepPath), payload);
       setKeepForm(null);
+    } catch (e) {
+      setOpError(describeFirestoreError(e, 'ボトルキープの保存'));
     } finally { setBusy(false); }
   };
 
@@ -251,8 +277,9 @@ export function InventoryClient({ user }: { user: User }) {
     if (!keepPath || busy) return;
     // 顧客の預かり資産の記録＝誤タップ削除は事故（Day12: 確認ダイアログ追加）
     if (!window.confirm(`${k.customerName} 様の「${k.item}」のキープ記録を削除しますか？（飲み切り・期限切れの整理用）`)) return;
-    setBusy(true);
+    setBusy(true); setOpError(null);
     try { await deleteDoc(doc(db, `${keepPath}/${k.id}`)); }
+    catch (e) { setOpError(describeFirestoreError(e, 'キープ記録の削除')); }
     finally { setBusy(false); }
   };
 
@@ -261,16 +288,20 @@ export function InventoryClient({ user }: { user: User }) {
     if (!keepPath || busy) return;
     // 端の連打での無駄書き防止（未記録は初期化のため通す）
     if (delta !== 0 && k.remainingPct !== null && nextRemainingPct(k.remainingPct, delta) === k.remainingPct) return;
-    setBusy(true);
+    setBusy(true); setOpError(null);
     // 同時操作の lost update を防ぐため、tx でサーバ最新値に delta を適用
     try {
       const ref = doc(db, `${keepPath}/${k.id}`);
+      let missing = false;
       await runTransaction(db, async (tx) => {
         const snap = await tx.get(ref);
-        if (!snap.exists()) return;
+        if (!snap.exists()) { missing = true; return; }
         const cur = parseRemainingPct(snap.data().remaining);
         tx.update(ref, { remaining: `${nextRemainingPct(cur, delta)}%`, remainingUpdatedAt: serverTimestamp() });
       });
+      if (missing) setOpError(`${k.customerName} 様の「${k.item}」の記録は削除されています。画面を再読み込みしてください。`);
+    } catch (e) {
+      setOpError(describeFirestoreError(e, '残量の更新'));
     } finally { setBusy(false); }
   };
 
@@ -307,6 +338,10 @@ export function InventoryClient({ user }: { user: User }) {
       />
 
       <div style={{ position: 'relative' }}>
+        {/* 読み取り失敗（空表示との区別）と、行操作の失敗。
+            モーダルを開いているときは重複させない（失敗はモーダル内に出す） */}
+        {readError && <p role="alert" style={alertBanner}>{readError}</p>}
+        {opError && !editor && !keepForm && <p role="alert" style={alertBanner}>{opError}</p>}
         {/* ─ header ─ */}
         <header style={{ marginBottom: 24 }}>
           {/* パンくず */}
@@ -962,7 +997,7 @@ export function InventoryClient({ user }: { user: User }) {
 
       {/* 在庫品目エディタ（追加 / 編集） */}
       {editor && (
-        <div onClick={() => setEditor(null)} style={modalBackdrop}>
+        <div onClick={() => { setEditor(null); setOpError(null); }} style={modalBackdrop}>
           <div onClick={(e) => e.stopPropagation()} style={modalCard}>
             <h3 style={modalTitle}>{editor.id ? '品目を編集' : '品目を追加'}</h3>
 
@@ -1010,9 +1045,12 @@ export function InventoryClient({ user }: { user: User }) {
               </label>
             </div>
 
+            {/* 失敗はモーダル内に出す（fixed オーバーレイなので本文側のバナーは裏に隠れる） */}
+            {opError && <p role="alert" style={alertInModal}>{opError}</p>}
+
             <div style={{ display: 'flex', gap: 8, marginTop: 4 }}>
               <button type="button" onClick={saveItem} disabled={busy || !editor.name.trim()} style={primaryBtn}>保存</button>
-              <button type="button" onClick={() => setEditor(null)} style={ghostBtn}>閉じる</button>
+              <button type="button" onClick={() => { setEditor(null); setOpError(null); }} style={ghostBtn}>閉じる</button>
             </div>
           </div>
         </div>
@@ -1020,7 +1058,7 @@ export function InventoryClient({ user }: { user: User }) {
 
       {/* ボトルキープ追加 */}
       {keepForm && (
-        <div onClick={() => setKeepForm(null)} style={modalBackdrop}>
+        <div onClick={() => { setKeepForm(null); setOpError(null); }} style={modalBackdrop}>
           <div onClick={(e) => e.stopPropagation()} style={modalCard}>
             <h3 style={modalTitle}>ボトルキープを追加</h3>
 
@@ -1042,9 +1080,11 @@ export function InventoryClient({ user }: { user: User }) {
               <input value={keepForm.remaining} onChange={(e) => setKeepForm({ ...keepForm, remaining: e.target.value })} placeholder="例：65% / 半分" style={fieldInput} />
             </label>
 
+            {opError && <p role="alert" style={alertInModal}>{opError}</p>}
+
             <div style={{ display: 'flex', gap: 8, marginTop: 4 }}>
               <button type="button" onClick={saveKeep} disabled={busy || !keepForm.customerName.trim() || !keepForm.item.trim()} style={primaryBtn}>保存</button>
-              <button type="button" onClick={() => setKeepForm(null)} style={ghostBtn}>閉じる</button>
+              <button type="button" onClick={() => { setKeepForm(null); setOpError(null); }} style={ghostBtn}>閉じる</button>
             </div>
           </div>
         </div>
@@ -1114,6 +1154,28 @@ const iconBtnStyle: React.CSSProperties = {
   fontSize: 12,
   padding: '4px 6px',
   fontFamily: 'var(--noxa-font-sans-jp)',
+};
+
+/** 失敗表示（本文側のバナー） */
+const alertBanner: React.CSSProperties = {
+  margin: '0 0 12px',
+  padding: '10px 12px',
+  borderRadius: 10,
+  fontSize: 13,
+  color: 'var(--noxa-status-error)',
+  background: 'rgba(229,115,115,0.08)',
+  border: '1px solid var(--noxa-status-error)',
+};
+
+/** 失敗表示（モーダル内。オーバーレイの裏だと見えないため） */
+const alertInModal: React.CSSProperties = {
+  margin: 0,
+  padding: '8px 10px',
+  borderRadius: 8,
+  fontSize: 12,
+  color: 'var(--noxa-status-error)',
+  background: 'rgba(229,115,115,0.08)',
+  border: '1px solid var(--noxa-status-error)',
 };
 
 const modalBackdrop: React.CSSProperties = {

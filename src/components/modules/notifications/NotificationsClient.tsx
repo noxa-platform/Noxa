@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { collection, getDocs, query, where, doc, updateDoc, Timestamp, type DocumentData } from 'firebase/firestore';
+import { describeFirestoreError } from '@/lib/firestore-error';
 import type { User } from 'firebase/auth';
 import { db } from '@/lib/firebase/config';
 import { Shell, Section, Empty, Eyebrow } from '@/components/modules/schedule/ScheduleClient';
@@ -53,26 +54,49 @@ export function NotificationsClient({ user }: { user: User }) {
     return () => { alive = false; };
   }, [user.uid]);
 
+  // 既読は楽観更新。失敗したらその1件だけ未読へ戻す（旧実装は握り潰しで、
+  // 画面は既読・サーバは未読のまま＝再読込で戻る理由が分からなかった）
   const markRead = async (id: string) => {
     setList((p) => p.map((n) => (n.id === id ? { ...n, read: true } : n)));
-    try { await updateDoc(doc(db, `notification_inbox/${id}`), { read: true }); } catch { /* skip */ }
+    setOpError(null);
+    try {
+      await updateDoc(doc(db, `notification_inbox/${id}`), { read: true });
+    } catch (e) {
+      setList((p) => p.map((n) => (n.id === id ? { ...n, read: false } : n)));
+      setOpError(describeFirestoreError(e, '既読の記録'));
+    }
   };
   const unread = list.filter((n) => !n.read);
 
   // 全件既読（1件ずつタップの手間を省く。楽観更新・失敗分は次回ロードで未読に戻る）
   const [markingAll, setMarkingAll] = useState(false);
+  const [opError, setOpError] = useState<string | null>(null);
   const markAllRead = async () => {
     const targets = unread;
     if (targets.length === 0 || markingAll) return;
     setMarkingAll(true);
+    setOpError(null);
     setList((p) => p.map((n) => ({ ...n, read: true })));
     try {
-      await Promise.all(targets.map((n) => updateDoc(doc(db, `notification_inbox/${n.id}`), { read: true }).catch(() => {})));
+      // 失敗した分は未読へ戻し、何件残ったかを伝える（全部黙って戻るのを防ぐ）
+      const results = await Promise.all(targets.map(async (n) => {
+        try { await updateDoc(doc(db, `notification_inbox/${n.id}`), { read: true }); return null; }
+        catch (e) { return { id: n.id, e }; }
+      }));
+      const failed = results.filter((r): r is { id: string; e: unknown } => r !== null);
+      if (failed.length > 0) {
+        const ids = new Set(failed.map((f) => f.id));
+        setList((p) => p.map((n) => (ids.has(n.id) ? { ...n, read: false } : n)));
+        setOpError(`${describeFirestoreError(failed[0].e, '既読の記録')}（${failed.length}件は未読のままです）`);
+      }
     } finally { setMarkingAll(false); }
   };
 
   return (
     <Shell title="通知センター" eyebrow="ノクサ · おしらせ" crumb="notifications">
+      {opError && (
+        <p role="alert" style={{ margin: '0 0 12px', padding: '10px 12px', borderRadius: 10, fontSize: 13, color: 'var(--noxa-status-error)', background: 'rgba(229,115,115,0.08)', border: '1px solid var(--noxa-status-error)' }}>{opError}</p>
+      )}
       {loading ? <Eyebrow>読み込み中…</Eyebrow> : error ? (
         <Section label="通知">
           <Empty>{error}</Empty>

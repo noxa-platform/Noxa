@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { useEffect, useMemo, useState } from 'react';
 import { addDoc, collection, deleteDoc, doc, getDoc, getDocs, setDoc, serverTimestamp, type DocumentData } from 'firebase/firestore';
+import { describeFirestoreError } from '@/lib/firestore-error';
 import type { User } from 'firebase/auth';
 import { db } from '@/lib/firebase/config';
 
@@ -31,6 +32,8 @@ export function ScheduleClient({ user }: { user: User }) {
   const [editKinds, setEditKinds] = useState(false);
   const [newKind, setNewKind] = useState('');
   const [busy, setBusy] = useState(false);
+  // 追加・削除・種別保存の失敗（旧実装は catch 無し／握り潰しで無音だった）
+  const [opError, setOpError] = useState<string | null>(null);
 
   const reload = async () => {
     try {
@@ -67,9 +70,17 @@ export function ScheduleClient({ user }: { user: User }) {
 
   // 種別の保存（本人のみ・既存予定の kind 文字列はそのまま残る）
   const saveKinds = async (next: string[]) => {
+    const prevKinds = kinds; const prevKind = kind;
     setKinds(next);
     if (!next.includes(kind)) setKind(next[0] ?? '');
-    try { await setDoc(doc(db, `personal_self_styles/${user.uid}`), { scheduleKinds: next, updatedAt: serverTimestamp() }, { merge: true }); } catch { /* skip */ }
+    setOpError(null);
+    try {
+      await setDoc(doc(db, `personal_self_styles/${user.uid}`), { scheduleKinds: next, updatedAt: serverTimestamp() }, { merge: true });
+    } catch (e) {
+      // 握り潰すと「保存されていないのに画面だけ変わった」状態が残る（再読込で消える）
+      setKinds(prevKinds); setKind(prevKind);
+      setOpError(describeFirestoreError(e, '種別の保存'));
+    }
   };
 
   const sorted = useMemo(() => [...items].sort((a, b) => a.date.localeCompare(b.date)), [items]);
@@ -79,16 +90,30 @@ export function ScheduleClient({ user }: { user: User }) {
 
   const add = async () => {
     if (!title.trim()) return;
-    setBusy(true);
+    setBusy(true); setOpError(null);
     try {
       await addDoc(collection(db, `personal_reminders/${user.uid}/items`), { title: title.trim(), date, kind, createdAt: serverTimestamp() });
       setTitle(''); await reload();
+    } catch (e) {
+      // catch が無いと、登録できていないのに入力が残るだけで成功と区別がつかない
+      setOpError(describeFirestoreError(e, '予定の登録'));
     } finally { setBusy(false); }
   };
-  const remove = async (id: string) => { await deleteDoc(doc(db, `personal_reminders/${user.uid}/items/${id}`)); setItems((p) => p.filter((x) => x.id !== id)); };
+  // 一覧からの除去は削除が成功してから（旧実装は先に画面から消しており、
+  // 失敗すると「消えたはずの予定が再読込で戻る」状態になっていた）
+  const remove = async (id: string) => {
+    setOpError(null);
+    try {
+      await deleteDoc(doc(db, `personal_reminders/${user.uid}/items/${id}`));
+      setItems((p) => p.filter((x) => x.id !== id));
+    } catch (e) { setOpError(describeFirestoreError(e, '予定の削除')); }
+  };
 
   return (
     <Shell title="スケジュール" eyebrow="ノクサ · スケジュール" crumb="schedule">
+      {opError && (
+        <p role="alert" style={{ margin: '0 0 12px', padding: '10px 12px', borderRadius: 10, fontSize: 13, color: 'var(--noxa-status-error)', background: 'rgba(229,115,115,0.08)', border: '1px solid var(--noxa-status-error)' }}>{opError}</p>
+      )}
       <div style={{ background: 'var(--noxa-surface-card)', border: '1px solid var(--noxa-border)', borderRadius: 14, padding: 14, display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'flex-end', marginBottom: 16 }}>
         <label style={{ display: 'flex', flexDirection: 'column', gap: 4, flex: '2 1 180px' }}>
           <span style={lbl}>予定</span>

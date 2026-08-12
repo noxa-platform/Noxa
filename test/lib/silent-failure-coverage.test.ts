@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync, readdirSync } from 'node:fs';
 import { join, relative } from 'node:path';
 
-// 「無音の失敗」再発防止ガード（Day106-PM）。
+// 「無音の失敗」再発防止ガード（Day106-PM 新設 → Day107 で債務完済・素のガードへ）。
 //
 // Day106 で潰したのは、Firestore への書き込みを
 //   try { await 書き込み(); 閉じる(); } finally { setBusy(false); }
@@ -16,25 +16,10 @@ import { join, relative } from 'node:path';
 //   1. 例外の中身を生のまま画面へ出していないか（`String((e as Error)?.message)` 等）
 //      → 失敗文言は src/lib/firestore-error.ts の describeFirestoreError に集約する
 //   2. `finally` で busy を戻すだけの try（＝catch が無い）に await 書き込みが入っていないか
-//      → 未返済分は KNOWN_DEBT に**件数つき**で明記する。ラチェット式で:
-//        ・新しいファイルで同じ書き方をしたら赤（債務を増やせない）
-//        ・既知ファイルで件数が増えたら赤
-//        ・件数が減ったら赤（返済したら KNOWN_DEBT を更新させる＝一覧が実態から腐らない）
+//      → Day107 で **全件返済**（inventory/transport/risk/schedule/business-card/notifications）したため、
+//        ラチェットの KNOWN_DEBT は撤去。以後は**1件でも増えたら赤**の素のガード。
 
 const COMPONENTS_ROOT = join(process.cwd(), 'src/components');
-
-/**
- * catch 無しの書き込みが残っている画面（返済待ち・Day107 以降の作業対象）。
- * 値は検出件数。ここに載っている＝「無音のまま」と分かっていて未対応、の意味。
- */
-const KNOWN_DEBT: Record<string, number> = {
-  'src/components/modules/business-card/BusinessCardClient.tsx': 1,
-  'src/components/modules/inventory/InventoryClient.tsx': 6,
-  'src/components/modules/notifications/NotificationsClient.tsx': 1,
-  'src/components/modules/risk/RiskClient.tsx': 3,
-  'src/components/modules/schedule/ScheduleClient.tsx': 1,
-  'src/components/modules/transport/TransportClient.tsx': 6,
-};
 
 function tsxFiles(dir: string): string[] {
   const out: string[] = [];
@@ -76,27 +61,27 @@ describe('無音の失敗ガード', () => {
     expect(offenders).toEqual([]);
   });
 
-  it('catch 無しの書き込みが新しいファイルに増えていない（債務は KNOWN_DEBT のみ）', () => {
-    const found = FILES
+  it('書き込みを含む try が catch 無しで finally だけ、になっていない（1件でも増えたら赤）', () => {
+    const offenders = FILES
       .map((f) => ({ path: f.path, count: countCatchlessWrites(f.src) }))
-      .filter((r) => r.count > 0);
-    const unexpected = found.filter((r) => KNOWN_DEBT[r.path] === undefined).map((r) => r.path);
-    expect(unexpected).toEqual([]);
+      .filter((r) => r.count > 0)
+      .map((r) => `${r.path}（${r.count}件）`);
+    expect(offenders).toEqual([]);
   });
 
-  it('既知ファイルの件数が増えていない / 返済したら KNOWN_DEBT を更新する', () => {
-    const actual: Record<string, number> = {};
-    for (const f of FILES) {
-      const n = countCatchlessWrites(f.src);
-      if (n > 0 || KNOWN_DEBT[f.path] !== undefined) actual[f.path] = n;
+  it('購読（onSnapshot）の失敗を console.warn だけで終わらせない（空表示と区別できなくなる）', () => {
+    // 在庫・送迎は購読エラーを console.warn するだけで、権限エラーでも
+    // 「1件も無い」と同じ空表示になっていた（Day107 で state に載せて画面へ出した）。
+    // console.warn の直後（同じハンドラ内）で state を更新しているかを見る。
+    const offenders: string[] = [];
+    for (const { path, src } of FILES) {
+      const lines = src.split('\n');
+      lines.forEach((line, i) => {
+        if (!line.includes('console.warn(')) return;
+        const window = lines.slice(i, i + 4).join('\n');
+        if (!/\bset[A-Z]\w*\(/.test(window)) offenders.push(`${path}:${i + 1}`);
+      });
     }
-    // 期待値そのままの比較。増えたら赤／減っても赤（＝一覧が実態から腐らない）
-    expect(actual).toEqual(KNOWN_DEBT);
-  });
-
-  it('KNOWN_DEBT に実在しないパスが残っていない（削除・改名の取りこぼし検知）', () => {
-    const known = new Set(FILES.map((f) => f.path));
-    const stale = Object.keys(KNOWN_DEBT).filter((p) => !known.has(p));
-    expect(stale).toEqual([]);
+    expect(offenders).toEqual([]);
   });
 });

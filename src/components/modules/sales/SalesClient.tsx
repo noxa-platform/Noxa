@@ -71,7 +71,7 @@ export function SalesClient({ user }: { user: User }) {
         unpaidAmount: typeof x.unpaidAmount === 'number' ? x.unpaidAmount : 0,
       }); });
       setSalesSnap({ colPath, list }); setLoadError(null);
-    }, (e) => { setSalesSnap({ colPath, list: [] }); setLoadError(`売上の読み込みに失敗しました（${e.code ?? e.message}）`); });
+    }, (e) => { setSalesSnap({ colPath, list: [] }); setLoadError(describeFirestoreError(e, '売上の読み込み')); });
     return () => unsub();
   }, [colPath, shop.loading]);
 

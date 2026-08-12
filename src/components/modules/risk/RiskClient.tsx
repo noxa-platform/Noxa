@@ -14,6 +14,7 @@ import {
 import type { User } from 'firebase/auth';
 import { db } from '@/lib/firebase/config';
 import { useShopRole, hasShopRole } from '@/lib/useShopRole';
+import { describeFirestoreError } from '@/lib/firestore-error';
 
 /**
  * リスク客共有 — Noxa OS モジュール（機微・オーナー専用）
@@ -92,6 +93,18 @@ function toEntry(id: string, data: DocumentData): RiskEntry {
   };
 }
 
+/** 失敗表示（操作した場所の近くに出す） */
+const rowAlert: React.CSSProperties = {
+  flex: '1 1 100%',
+  margin: 0,
+  padding: '8px 10px',
+  borderRadius: 8,
+  fontSize: 12,
+  color: 'var(--noxa-status-error)',
+  background: 'rgba(229,115,115,0.08)',
+  border: '1px solid var(--noxa-status-error)',
+};
+
 const today = () => new Date().toISOString().slice(0, 10);
 
 export function RiskClient({ user }: { user: User }) {
@@ -100,6 +113,11 @@ export function RiskClient({ user }: { user: User }) {
   // 出所（path）つきスナップショットから entries/loading を導出（set-state-in-effect 返済・Day18）
   const [entriesSnap, setEntriesSnap] = useState<{ path: string; list: RiskEntry[] } | null>(null);
   const [busy, setBusy] = useState(false);
+  // 追加・編集・削除の失敗（旧実装は catch が無く完全に無音だった）。
+  // 出禁/注意客は店全体の共有情報なので、登録できていないのに登録した気になるのが危ない
+  const [opError, setOpError] = useState<string | null>(null);
+  // 購読（読み取り）の失敗。0件表示と区別できないと「出禁客なし」と誤読される
+  const [readError, setReadError] = useState<string | null>(null);
 
   // 追加フォーム
   const [showForm, setShowForm] = useState(false);
@@ -131,7 +149,12 @@ export function RiskClient({ user }: { user: User }) {
         out.sort((a, b) => (b.date || '').localeCompare(a.date || ''));
         setEntriesSnap({ path, list: out });
       },
-      () => setEntriesSnap({ path, list: [] }), // エラーでも出所を確定し loading を解く
+      (e) => {
+        // 出所を確定して loading は解くが、「リスク記録なし」と誤読させない
+        // （読めていないのに0件に見えると出禁客をそのまま通してしまう）
+        setEntriesSnap({ path, list: [] });
+        setReadError(describeFirestoreError(e, 'リスク記録の読み込み'));
+      },
     );
     return () => unsub();
   }, [path]);
@@ -158,7 +181,7 @@ export function RiskClient({ user }: { user: User }) {
     if (!path || busy) return;
     const label = fLabel.trim();
     if (!label) return;
-    setBusy(true);
+    setBusy(true); setOpError(null);
     try {
       // undefined を書かない（空欄はそのまま空文字で保持）
       const payload: Record<string, unknown> = {
@@ -172,6 +195,9 @@ export function RiskClient({ user }: { user: User }) {
       await addDoc(collection(db, path), payload);
       resetForm();
       setShowForm(false);
+    } catch (e) {
+      // 失敗時は resetForm/閉じるに到達しないので入力は残る。理由を出す
+      setOpError(describeFirestoreError(e, 'リスク記録の登録'));
     } finally {
       setBusy(false);
     }
@@ -189,7 +215,7 @@ export function RiskClient({ user }: { user: User }) {
     if (!path || !editId || busy) return;
     const label = eLabel.trim();
     if (!label) return;
-    setBusy(true);
+    setBusy(true); setOpError(null);
     try {
       await updateDoc(doc(db, `${path}/${editId}`), {
         label,
@@ -198,6 +224,8 @@ export function RiskClient({ user }: { user: User }) {
         date: eDate || today(),
       });
       setEditId(null);
+    } catch (e) {
+      setOpError(describeFirestoreError(e, 'リスク記録の更新'));
     } finally {
       setBusy(false);
     }
@@ -205,9 +233,11 @@ export function RiskClient({ user }: { user: User }) {
 
   const remove = async (id: string) => {
     if (!path || busy) return;
-    setBusy(true);
+    setBusy(true); setOpError(null);
     try {
       await deleteDoc(doc(db, `${path}/${id}`));
+    } catch (e) {
+      setOpError(describeFirestoreError(e, 'リスク記録の削除'));
     } finally {
       setBusy(false);
     }
@@ -289,6 +319,13 @@ export function RiskClient({ user }: { user: User }) {
       />
 
       <div style={{ position: 'relative' }}>
+        {readError && (
+          <p role="alert" style={{ ...rowAlert, margin: '0 0 12px', fontSize: 13, padding: '10px 12px', borderRadius: 10 }}>{readError}</p>
+        )}
+        {/* 削除など、フォーム/編集行の外で起きた失敗（重複表示は避ける） */}
+        {opError && !showForm && editId === null && (
+          <p role="alert" style={{ ...rowAlert, margin: '0 0 12px', fontSize: 13, padding: '10px 12px', borderRadius: 10 }}>{opError}</p>
+        )}
         {/* breadcrumb */}
         <nav aria-label="breadcrumb" style={{ marginBottom: 10 }}>
           <ol
@@ -526,6 +563,9 @@ export function RiskClient({ user }: { user: User }) {
                             >
                               キャンセル
                             </button>
+                            {opError && editId === entry.id && (
+                              <p role="alert" style={rowAlert}>{opError}</p>
+                            )}
                             <button
                               type="button"
                               onClick={saveEdit}
@@ -741,6 +781,7 @@ export function RiskClient({ user }: { user: User }) {
                   >
                     キャンセル
                   </button>
+                  {opError && showForm && <p role="alert" style={rowAlert}>{opError}</p>}
                   <button
                     type="button"
                     onClick={add}

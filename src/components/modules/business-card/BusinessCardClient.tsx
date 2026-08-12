@@ -14,6 +14,7 @@ import {
 } from 'firebase/firestore';
 import type { User } from 'firebase/auth';
 import { db } from '@/lib/firebase/config';
+import { describeFirestoreError } from '@/lib/firestore-error';
 
 /**
  * ⑨ 名刺発注 — オリシャン名刺デザイン・印刷発注（Noxa OS 個人機能・実データ）
@@ -134,6 +135,9 @@ export function BusinessCardClient({ user }: { user: User }) {
   const [loading, setLoading] = useState(true);
   const [rows, setRows] = useState<OrderRow[]>([]);
   const [busy, setBusy] = useState(false);
+  // 発注・履歴削除の失敗（旧実装は catch が無く完全に無音＝「発注した」と誤解される）
+  const [opError, setOpError] = useState<string | null>(null);
+  const [ordered, setOrdered] = useState(false);
 
   const colPath = `personal_business_cards/${user.uid}/items`;
 
@@ -162,7 +166,7 @@ export function BusinessCardClient({ user }: { user: User }) {
   // 発注（Firestore へ保存）
   const placeOrder = async () => {
     if (busy || !genjName.trim()) return;
-    setBusy(true);
+    setBusy(true); setOpError(null); setOrdered(false);
     try {
       // undefined を書かないため、任意項目は値があるときだけ追加する
       const payload: Record<string, unknown> = {
@@ -177,6 +181,10 @@ export function BusinessCardClient({ user }: { user: User }) {
       if (sns.trim()) payload.contact = sns.trim();
       if (catchcopy.trim()) payload.finish = catchcopy.trim();
       await addDoc(collection(db, colPath), payload);
+      // 押した瞬間の手応えが無かったので、成否を必ず出す
+      setOrdered(true);
+    } catch (e) {
+      setOpError(describeFirestoreError(e, '名刺の発注'));
     } finally {
       setBusy(false);
     }
@@ -198,10 +206,14 @@ export function BusinessCardClient({ user }: { user: User }) {
     if (d.paper === 'matte' || d.paper === 'gloss' || d.paper === 'foil') setPaper(d.paper);
   };
 
+  // 一覧からの除去は削除が成功してから（失敗すると「消えたのに再読込で戻る」状態になる）
   const removeOrder = async (id: string) => {
     if (!window.confirm('この発注履歴を削除しますか？')) return;
-    await deleteDoc(doc(db, `${colPath}/${id}`));
-    setRows((p) => p.filter((r) => r.id !== id));
+    setOpError(null);
+    try {
+      await deleteDoc(doc(db, `${colPath}/${id}`));
+      setRows((p) => p.filter((r) => r.id !== id));
+    } catch (e) { setOpError(describeFirestoreError(e, '発注履歴の削除')); }
   };
 
   return (
@@ -903,6 +915,13 @@ export function BusinessCardClient({ user }: { user: User }) {
                 >
                   {busy ? '発注中…' : '発注する'}
                 </button>
+                {/* 発注の結果（旧実装は成功も失敗も無音で、届いたのか分からなかった） */}
+                {opError && (
+                  <p role="alert" style={{ margin: 0, padding: '8px 10px', borderRadius: 8, fontSize: 12, color: 'var(--noxa-status-error)', background: 'rgba(229,115,115,0.08)', border: '1px solid var(--noxa-status-error)' }}>{opError}</p>
+                )}
+                {ordered && !opError && (
+                  <p role="status" style={{ margin: 0, padding: '8px 10px', borderRadius: 8, fontSize: 12, color: 'var(--noxa-status-success)', background: 'rgba(123,232,161,0.10)', border: '1px solid var(--noxa-status-success)' }}>発注を受け付けました。下の発注履歴に「依頼」として記録されています。</p>
+                )}
                 {/* 前回デザインで再注文ボタン（secondary）*/}
                 <button
                   type="button"

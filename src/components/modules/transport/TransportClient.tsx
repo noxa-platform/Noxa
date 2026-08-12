@@ -16,6 +16,7 @@ import type { User } from 'firebase/auth';
 import { db } from '@/lib/firebase/config';
 import { useShopId } from '@/lib/useShopId';
 import { useShopConfig, type ChoiceItem } from '@/lib/shopConfig';
+import { describeFirestoreError } from '@/lib/firestore-error';
 
 /**
  * ⑦ 送迎 — 配車ボード + 送迎リクエスト一覧 + 地図プレースホルダ（実データ）
@@ -68,6 +69,29 @@ type TransportRequest = {
 // ─────────────────────────────────────────────
 
 const mono = 'var(--noxa-font-mono)';
+
+/** 失敗表示（フォーム内。入力の近くに出す） */
+const formAlert: React.CSSProperties = {
+  flex: '1 1 100%',
+  margin: 0,
+  padding: '8px 10px',
+  borderRadius: 8,
+  fontSize: 12,
+  color: 'var(--noxa-status-error)',
+  background: 'rgba(229,115,115,0.08)',
+  border: '1px solid var(--noxa-status-error)',
+};
+
+/** 失敗表示（本文バナー。行操作・読み取り失敗） */
+const alertBanner: React.CSSProperties = {
+  margin: '0 0 12px',
+  padding: '10px 12px',
+  borderRadius: 10,
+  fontSize: 13,
+  color: 'var(--noxa-status-error)',
+  background: 'rgba(229,115,115,0.08)',
+  border: '1px solid var(--noxa-status-error)',
+};
 
 const VEHICLE_STATUS_META: Record<VehicleStatus, { label: string; color: string }> = {
   standby:    { label: '待機中',   color: 'var(--noxa-status-success)' },
@@ -160,6 +184,11 @@ export function TransportClient({ user }: { user: User }) {
   const [reqSnap, setReqSnap] = useState<{ path: string; list: TransportRequest[] } | null>(null);
   const [selectedRequestId, setSelectedRequestId] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  // 配車・ステータス送り・削除の失敗（旧実装は catch が無く完全に無音だった）。
+  // 送迎は「送り忘れ」が事故なので、登録できていないのに登録された風に見えるのが最も危ない
+  const [opError, setOpError] = useState<string | null>(null);
+  // 購読（読み取り）の失敗。console.warn だけだと「今夜の送迎は0件」と同じ空表示になる
+  const [readError, setReadError] = useState<string | null>(null);
 
   const reqPath = shop.shopId ? `shop_shops/${shop.shopId}/transport` : null;
   const vehPath = shop.shopId ? `shop_shops/${shop.shopId}/transport_vehicles` : null;
@@ -188,7 +217,10 @@ export function TransportClient({ user }: { user: User }) {
       });
       list.sort((a, b) => a.time.localeCompare(b.time) || a.createdMs - b.createdMs);
       setReqSnap({ path: reqPath, list });
-    }, (e) => console.warn('[noxa:transport] リクエスト購読エラー', e?.message ?? e));
+    }, (e) => {
+      console.warn('[noxa:transport] リクエスト購読エラー', e?.message ?? e);
+      setReadError(describeFirestoreError(e, '送迎リクエストの読み込み'));
+    });
     return () => unsub();
   }, [reqPath]);
 
@@ -209,7 +241,10 @@ export function TransportClient({ user }: { user: User }) {
       });
       list.sort((a, b) => a.name.localeCompare(b.name, 'ja'));
       setVehSnap({ path: vehPath, list });
-    }, (e) => console.warn('[noxa:transport] 車両購読エラー', e?.message ?? e));
+    }, (e) => {
+      console.warn('[noxa:transport] 車両購読エラー', e?.message ?? e);
+      setReadError(describeFirestoreError(e, '車両の読み込み'));
+    });
     return () => unsub();
   }, [vehPath]);
 
@@ -220,9 +255,12 @@ export function TransportClient({ user }: { user: User }) {
   }, [vehicles]);
 
   // ── リクエスト操作 ──
-  const addRequest = async (input: { time: string; type: RequestType; target: string; area: string; memo: string }) => {
-    if (!reqPath || busy) return;
-    setBusy(true);
+  // 失敗時は文言を返す。フォームは成功（null）のときだけ入力をクリアする
+  // ——旧実装は onAdd を await せず即クリアしていたため、書き込みが失敗すると
+  // 「入力は消えたのに登録されていない」＝送り忘れに直結していた
+  const addRequest = async (input: { time: string; type: RequestType; target: string; area: string; memo: string }): Promise<string | null> => {
+    if (!reqPath || busy) return null;
+    setBusy(true); setOpError(null);
     try {
       await addDoc(collection(db, reqPath), compact({
         time: input.time,
@@ -234,45 +272,56 @@ export function TransportClient({ user }: { user: User }) {
         createdAt: serverTimestamp(),
         createdBy: user.uid,
       }));
+      return null;
+    } catch (e) {
+      return describeFirestoreError(e, '送迎リクエストの登録');
     } finally { setBusy(false); }
   };
   const advanceStatus = async (req: TransportRequest) => {
     if (!reqPath || busy) return;
     const next = NEXT_STATUS[req.status];
     if (!next) return;
-    setBusy(true);
+    setBusy(true); setOpError(null);
+    // 「配車→迎車中→完了」が押しても進まないだけ、では現場が状況を見失う
     try { await updateDoc(doc(db, `${reqPath}/${req.id}`), { status: next }); }
+    catch (e) { setOpError(describeFirestoreError(e, 'ステータスの更新')); }
     finally { setBusy(false); }
   };
   const setRequestStatus = async (req: TransportRequest, status: RequestStatus) => {
     if (!reqPath || busy) return;
-    setBusy(true);
+    setBusy(true); setOpError(null);
     try { await updateDoc(doc(db, `${reqPath}/${req.id}`), { status }); }
+    catch (e) { setOpError(describeFirestoreError(e, 'ステータスの更新')); }
     finally { setBusy(false); }
   };
   const assignVehicle = async (req: TransportRequest, vehicleId: string) => {
     if (!reqPath || busy) return;
-    setBusy(true);
+    setBusy(true); setOpError(null);
     try {
       const veh = vehicles.find((v) => v.id === vehicleId);
       const patch: Record<string, unknown> = vehicleId
         ? compact({ vehicleId, driver: veh?.driver, status: req.status === 'waiting' ? 'assigned' : req.status })
         : { vehicleId: '', driver: '' };
       await updateDoc(doc(db, `${reqPath}/${req.id}`), patch);
+    } catch (e) {
+      setOpError(describeFirestoreError(e, '配車の割り当て'));
     } finally { setBusy(false); }
   };
   const removeRequest = async (r: TransportRequest) => {
     if (!reqPath) return;
     // 今夜の送迎依頼の誤タップ消失＝送り忘れ事故に直結するため対象入りで確認
     if (!window.confirm(`「${r.target}」${r.time ? ` ${r.time}` : ''} の送迎リクエストを削除しますか？`)) return;
-    await deleteDoc(doc(db, `${reqPath}/${r.id}`));
-    if (selectedRequestId === r.id) setSelectedRequestId(null);
+    setOpError(null);
+    try {
+      await deleteDoc(doc(db, `${reqPath}/${r.id}`));
+      if (selectedRequestId === r.id) setSelectedRequestId(null);
+    } catch (e) { setOpError(describeFirestoreError(e, '送迎リクエストの削除')); }
   };
 
   // ── 車両操作 ──
-  const addVehicle = async (input: { name: string; driver: string }) => {
-    if (!vehPath || busy) return;
-    setBusy(true);
+  const addVehicle = async (input: { name: string; driver: string }): Promise<string | null> => {
+    if (!vehPath || busy) return null;
+    setBusy(true); setOpError(null);
     try {
       await addDoc(collection(db, vehPath), compact({
         name: input.name.trim(),
@@ -281,20 +330,26 @@ export function TransportClient({ user }: { user: User }) {
         createdAt: serverTimestamp(),
         createdBy: user.uid,
       }));
+      return null;
+    } catch (e) {
+      return describeFirestoreError(e, '車両の登録');
     } finally { setBusy(false); }
   };
   const cycleVehicleStatus = async (veh: Vehicle) => {
     if (!vehPath || busy) return;
     const idx = VEHICLE_STATUS_ORDER.indexOf(veh.status);
     const next = VEHICLE_STATUS_ORDER[(idx + 1) % VEHICLE_STATUS_ORDER.length];
-    setBusy(true);
+    setBusy(true); setOpError(null);
     try { await updateDoc(doc(db, `${vehPath}/${veh.id}`), { status: next }); }
+    catch (e) { setOpError(describeFirestoreError(e, '車両ステータスの更新')); }
     finally { setBusy(false); }
   };
   const removeVehicle = async (v: Vehicle) => {
     if (!vehPath) return;
     if (!window.confirm(`車両「${v.name}」を削除しますか？`)) return;
-    await deleteDoc(doc(db, `${vehPath}/${v.id}`));
+    setOpError(null);
+    try { await deleteDoc(doc(db, `${vehPath}/${v.id}`)); }
+    catch (e) { setOpError(describeFirestoreError(e, '車両の削除')); }
   };
 
   const selectedRequest = requests.find((r) => r.id === selectedRequestId) ?? null;
@@ -338,6 +393,9 @@ export function TransportClient({ user }: { user: User }) {
       />
 
       <div style={{ position: 'relative' }}>
+        {/* 読み取り失敗（空表示との区別）と行操作の失敗。フォームの失敗はフォーム内に出す */}
+        {readError && <p role="alert" style={alertBanner}>{readError}</p>}
+        {opError && <p role="alert" style={alertBanner}>{opError}</p>}
 
         {/* ─ ヘッダー ─ */}
         <header style={{ marginBottom: 20 }}>
@@ -1078,12 +1136,16 @@ export function TransportClient({ user }: { user: User }) {
 // ─────────────────────────────────────────────
 // 車両追加フォーム
 // ─────────────────────────────────────────────
-function VehicleForm({ onAdd, busy }: { onAdd: (v: { name: string; driver: string }) => void; busy: boolean }) {
+function VehicleForm({ onAdd, busy }: { onAdd: (v: { name: string; driver: string }) => Promise<string | null>; busy: boolean }) {
   const [name, setName] = useState('');
   const [driver, setDriver] = useState('');
-  const submit = () => {
+  const [error, setError] = useState<string | null>(null);
+  // 登録が成功したときだけ入力をクリアする（失敗時に消すと打ち直しになる）
+  const submit = async () => {
     if (!name.trim() || busy) return;
-    onAdd({ name, driver });
+    setError(null);
+    const err = await onAdd({ name, driver });
+    if (err) { setError(err); return; }
     setName(''); setDriver('');
   };
   return (
@@ -1097,6 +1159,7 @@ function VehicleForm({ onAdd, busy }: { onAdd: (v: { name: string; driver: strin
         <input value={driver} onChange={(e) => setDriver(e.target.value)} placeholder="田中ドライバー" style={field} />
       </label>
       <button type="button" onClick={submit} disabled={busy || !name.trim()} style={{ ...chip(true), minHeight: 40, padding: '0 18px', opacity: busy || !name.trim() ? 0.6 : 1 }}>車両追加</button>
+      {error && <p role="alert" style={formAlert}>{error}</p>}
     </div>
   );
 }
@@ -1104,7 +1167,7 @@ function VehicleForm({ onAdd, busy }: { onAdd: (v: { name: string; driver: strin
 // ─────────────────────────────────────────────
 // リクエスト追加フォーム
 // ─────────────────────────────────────────────
-function RequestForm({ onAdd, busy, types }: { onAdd: (v: { time: string; type: RequestType; target: string; area: string; memo: string }) => void; busy: boolean; types: ChoiceItem[] }) {
+function RequestForm({ onAdd, busy, types }: { onAdd: (v: { time: string; type: RequestType; target: string; area: string; memo: string }) => Promise<string | null>; busy: boolean; types: ChoiceItem[] }) {
   const defaultType = types[0]?.id ?? 'companion_pickup';
   const [time, setTime] = useState('');
   const [type, setType] = useState<RequestType>(defaultType);
@@ -1113,9 +1176,14 @@ function RequestForm({ onAdd, busy, types }: { onAdd: (v: { time: string; type: 
   const [memo, setMemo] = useState('');
   // 設定変更で現在の選択が消えた場合は先頭扱い（effect での setState 補正はカスケード再レンダー＝導出に変更）
   const effType = types.some((t) => t.id === type) ? type : defaultType;
-  const submit = () => {
+  const [error, setError] = useState<string | null>(null);
+  // 登録が成功したときだけ入力をクリアする。旧実装は await せず即クリアしていたため、
+  // 失敗すると「入力が消えたのに登録されていない」＝送り忘れになっていた
+  const submit = async () => {
     if (!target.trim() || busy) return;
-    onAdd({ time, type: effType, target, area, memo });
+    setError(null);
+    const err = await onAdd({ time, type: effType, target, area, memo });
+    if (err) { setError(err); return; }
     setTime(''); setTarget(''); setArea(''); setMemo(''); setType(defaultType);
   };
   return (
@@ -1145,6 +1213,7 @@ function RequestForm({ onAdd, busy, types }: { onAdd: (v: { time: string; type: 
         <input value={memo} onChange={(e) => setMemo(e.target.value)} placeholder="任意" style={field} />
       </label>
       <button type="button" onClick={submit} disabled={busy || !target.trim()} style={{ ...chip(true), minHeight: 40, padding: '0 18px', opacity: busy || !target.trim() ? 0.6 : 1 }}>リクエスト追加</button>
+      {error && <p role="alert" style={formAlert}>{error}</p>}
     </div>
   );
 }

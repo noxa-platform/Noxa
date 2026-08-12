@@ -144,6 +144,8 @@ export function UnpaidClient({ user }: { user: User }) {
   // 追加・削除・ステータス変更・一部回収の失敗（旧実装は catch が無く完全に無音だった）。
   // 売掛は債権なので「記録できたのか分からない」は金銭事故に直結する
   const [opError, setOpError] = useState<string | null>(null);
+  // 購読（読み取り）の失敗。0件表示と区別できないと「売掛は無い」と誤読される
+  const [readError, setReadError] = useState<string | null>(null);
 
   // 機微: owner/manager/accounting（rules の isShopMemberWithSalesEdit と一致。店長が未収を見られない問題の解消）
   const allowed = hasShopRole(shop, ['manager', 'accounting']);
@@ -172,7 +174,11 @@ export function UnpaidClient({ user }: { user: User }) {
         out.sort((a, b) => (b.date < a.date ? -1 : b.date > a.date ? 1 : 0));
         setRecordsSnap({ path, list: out });
       },
-      () => setRecordsSnap({ path, list: [] }), // エラーでも出所を確定し loading を解く
+      (e) => {
+        // 出所を確定して loading は解くが、「売掛なし」と誤読させない（回収漏れになる）
+        setRecordsSnap({ path, list: [] });
+        setReadError(describeFirestoreError(e, '売掛の読み込み'));
+      },
     );
     return () => unsub();
   }, [path]);
@@ -283,6 +289,7 @@ export function UnpaidClient({ user }: { user: User }) {
       />
 
       <div style={{ position: 'relative' }}>
+        {readError && <p role="alert" style={{ color: 'var(--noxa-status-error)', fontSize: 13, margin: '0 0 12px', padding: '10px 12px', borderRadius: 10, background: 'rgba(229,115,115,0.08)', border: '1px solid var(--noxa-status-error)' }}>{readError}</p>}
         {/* 追加・削除・ステータス変更・一部回収の失敗（旧実装は無音で「押しても何も起きない」ように見えた） */}
         {opError && <p role="alert" style={{ color: 'var(--noxa-status-error)', fontSize: 13, margin: '0 0 12px', padding: '10px 12px', borderRadius: 10, background: 'rgba(229,115,115,0.08)', border: '1px solid var(--noxa-status-error)' }}>{opError}</p>}
         {/* breadcrumb */}
