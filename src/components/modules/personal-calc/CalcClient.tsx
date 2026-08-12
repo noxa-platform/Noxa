@@ -5,6 +5,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { collection, doc, getDoc, getDocs, query, where } from 'firebase/firestore';
 import type { User } from 'firebase/auth';
 import { db } from '@/lib/firebase/config';
+import { describeFirestoreError } from '@/lib/firestore-error';
 import type { StoreConfig } from '@/lib/pos/types';
 import { createDefaultStoreConfig } from '@/lib/pos/defaultConfig';
 import {
@@ -28,25 +29,35 @@ const CUSTOMER_TYPES: { id: CustomerType; label: string }[] = [
 
 type ShopRef = { id: string; name: string };
 
-// 所属店舗を集める（owner shop ＋ memberships 逆引き）
-async function loadShops(uid: string): Promise<ShopRef[]> {
+/**
+ * 所属店舗を集める（owner shop ＋ memberships 逆引き）。
+ * 旧実装は両方の失敗を `catch { /* skip *\/ }` で捨てており、通信断でも
+ * 「所属している店舗が見つかりません」＝**未所属と同じ表示**になっていた（Day109 と同型）。
+ * 失敗は理由として返し、画面が「所属していない」と言い切らないようにする。
+ */
+async function loadShops(uid: string): Promise<{ shops: ShopRef[]; error: string | null }> {
   const map = new Map<string, string>();
+  let error: string | null = null;
   try {
     const owned = await getDocs(query(collection(db, 'shop_shops'), where('ownerUid', '==', uid)));
     owned.forEach((d) => map.set(d.id, (d.data().name as string) ?? d.id));
-  } catch { /* skip */ }
+  } catch (e) { error ??= describeFirestoreError(e, '店舗情報の取得'); }
   try {
     const ms = await getDocs(collection(db, `account_users/${uid}/memberships`));
     ms.forEach((d) => { const x = d.data(); map.set(d.id, (x.shopName as string) ?? d.id); });
-  } catch { /* skip */ }
-  return Array.from(map.entries()).map(([id, name]) => ({ id, name }));
+  } catch (e) { error ??= describeFirestoreError(e, '店舗情報の取得'); }
+  return { shops: Array.from(map.entries()).map(([id, name]) => ({ id, name })), error };
 }
 
 export function CalcClient({ user }: { user: User }) {
   // 出所つきスナップショットから shops/config/loading を導出（set-state-in-effect 返済・Day21）
   const [shopsSnap, setShopsSnap] = useState<ShopRef[] | null>(null);
   const [shopId, setShopId] = useState<string | null>(null);
-  const [cfgSnap, setCfgSnap] = useState<{ shopId: string; config: StoreConfig } | null>(null);
+  // config は「読めた（StoreConfig）」「読めなかった（null＋error）」を区別して持つ。
+  // 既定料金で黙って計算を続けると**間違った金額**を正しい金額として出してしまう（Day110）
+  const [cfgSnap, setCfgSnap] = useState<{ shopId: string; config: StoreConfig | null; error?: string } | null>(null);
+  // 店舗一覧の読み取り失敗（未所属と区別する）
+  const [shopsError, setShopsError] = useState<string | null>(null);
   const [state, setState] = useState<CalculatorState>(() => createInitialState(createDefaultStoreConfig()));
   const [activeCategory, setActiveCategory] = useState('');
   const [customItem, setCustomItem] = useState<{ name: string } | null>(null);
@@ -55,17 +66,19 @@ export function CalcClient({ user }: { user: User }) {
 
   const shops = shopsSnap ?? [];
   const config = shopId && cfgSnap?.shopId === shopId ? cfgSnap.config : null;
+  const cfgError = shopId && cfgSnap?.shopId === shopId ? (cfgSnap.error ?? null) : null;
   const loading = shopsSnap === null || (!!shopId && cfgSnap?.shopId !== shopId);
 
   useEffect(() => { const t = setInterval(() => setTick((n) => n + 1), 30000); return () => clearInterval(t); }, []);
 
   useEffect(() => {
     let alive = true;
-    loadShops(user.uid).then((s) => {
+    loadShops(user.uid).then((r) => {
       if (!alive) return;
-      setShopsSnap(s);
-      setShopId(s[0]?.id ?? null);
-    }).catch(() => { if (alive) setShopsSnap([]); });
+      setShopsSnap(r.shops);
+      setShopsError(r.error);
+      setShopId(r.shops[0]?.id ?? null);
+    }).catch((e) => { if (alive) { setShopsSnap([]); setShopsError(describeFirestoreError(e, '店舗情報の取得')); } });
     return () => { alive = false; };
   }, [user.uid]);
 
@@ -73,14 +86,21 @@ export function CalcClient({ user }: { user: User }) {
     if (!shopId) return;
     let alive = true;
     (async () => {
-      let cfg = createDefaultStoreConfig('active');
+      let cfg: StoreConfig | null = null;
+      let error: string | undefined;
       try {
         const snap = await getDoc(doc(db, `shop_shops/${shopId}/pos_config/active`));
-        if (snap.exists()) cfg = { ...createDefaultStoreConfig('active'), ...(snap.data() as Partial<StoreConfig>) } as StoreConfig;
-      } catch { /* default */ }
+        // doc 未作成（＝店舗がまだ料金を設定していない）は既定でよい。**読み取り失敗は既定に落とさない**
+        cfg = snap.exists()
+          ? ({ ...createDefaultStoreConfig('active'), ...(snap.data() as Partial<StoreConfig>) } as StoreConfig)
+          : createDefaultStoreConfig('active');
+      } catch (e) {
+        error = describeFirestoreError(e, '料金設定の読み込み');
+      }
       if (!alive) return;
+      setCfgSnap({ shopId, config: cfg, error });
+      if (!cfg) return; // 料金が分からないまま計算機を出さない（既定料金の金額を提示しない）
       configRef.current = cfg;
-      setCfgSnap({ shopId, config: cfg });
       setState(createInitialState(cfg));
       setActiveCategory(cfg.menuCategories[0]?.id ?? '');
     })();
@@ -95,11 +115,22 @@ export function CalcClient({ user }: { user: User }) {
   );
 
   if (loading) return <Shell><div className="noxa-eyebrow" style={{ padding: '40px 0' }}>読み込み中…</div></Shell>;
+  // 料金設定が読めなかった場合は計算機を出さない（既定料金の金額を自店の金額として見せないため）
+  if (cfgError) {
+    return (
+      <Shell>
+        <Empty>
+          <p role="alert" style={{ margin: '0 0 8px', color: 'var(--noxa-status-error)' }}>{cfgError}</p>
+          <p style={{ margin: 0, fontSize: 13, color: 'var(--noxa-text-muted)' }}>料金が分からないため試算を表示していません（既定料金で計算すると実際と違う金額になります）。画面を再読み込みしてください。</p>
+        </Empty>
+      </Shell>
+    );
+  }
   if (shops.length === 0 || !config) {
     return (
       <Shell>
         <Empty>
-          <p style={{ margin: '0 0 8px' }}>所属している店舗が見つかりません。</p>
+          <p style={{ margin: '0 0 8px' }}>{shopsError ? `${shopsError} 所属していないのか、一時的に確認できないだけなのか判断できません。画面を再読み込みしてください。` : '所属している店舗が見つかりません。'}</p>
           <p style={{ margin: 0, fontSize: 13, color: 'var(--noxa-text-muted)' }}>店舗に所属するか、<Link href="/store/new" style={{ color: 'var(--noxa-accent-primary-ink)' }}>店舗を登録</Link> すると、その料金設定で伝票計算ができます。</p>
         </Empty>
       </Shell>

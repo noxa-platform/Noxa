@@ -11,6 +11,7 @@ import { useSearchParams } from 'next/navigation';
 import type { User } from 'firebase/auth';
 import { AuthGuard } from '@/components/AuthGuard';
 import { auth } from '@/lib/firebase/config';
+import { describeFirestoreError } from '@/lib/firestore-error';
 
 function JoinClient({ user }: { user: User }) {
   const params = useSearchParams();
@@ -39,7 +40,7 @@ function JoinClient({ user }: { user: User }) {
       setResult({ shopName: json.shopName, role: json.role });
       setState('done');
     } catch (e) {
-      setError(String((e as Error)?.message ?? e));
+      setError(describeFirestoreError(e, '店舗への参加'));
       setState('idle');
     }
   };

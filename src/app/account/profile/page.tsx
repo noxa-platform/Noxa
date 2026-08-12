@@ -7,12 +7,15 @@ import { AccountShell } from '@/components/AccountShell';
 import { ThemeSwitcher } from '@/components/ThemeSwitcher';
 import { ProModeSwitcher } from '@/components/ProModeSwitcher';
 import { db } from '@/lib/firebase/config';
+import { describeFirestoreError } from '@/lib/firestore-error';
 import type { User } from 'firebase/auth';
 
 function ProfileEditor({ user }: { user: User }) {
   const [displayName, setDisplayName] = useState(user.displayName ?? '');
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
+  // 保存失敗（旧実装は catch 無しで無音だった）
+  const [saveError, setSaveError] = useState<string | null>(null);
 
   useEffect(() => {
     (async () => {
@@ -26,7 +29,7 @@ function ProfileEditor({ user }: { user: User }) {
   }, [user.uid]);
 
   async function save() {
-    setSaving(true);
+    setSaving(true); setSaveError(null);
     try {
       await updateProfile(user, { displayName });
       await setDoc(
@@ -36,6 +39,9 @@ function ProfileEditor({ user }: { user: User }) {
       );
       setSaved(true);
       setTimeout(() => setSaved(false), 2000);
+    } catch (e) {
+      // 旧実装は catch が無く、権限/通信エラーでも「保存しました」が出ないだけの無音だった
+      setSaveError(describeFirestoreError(e, '表示名の保存'));
     } finally {
       setSaving(false);
     }
@@ -76,6 +82,7 @@ function ProfileEditor({ user }: { user: User }) {
         >
           {saving ? '保存中…' : saved ? '保存しました ✓' : '保存'}
         </button>
+        {saveError && <p role="alert" style={{ color: 'var(--noxa-status-error)', fontSize: 13, margin: 0, padding: '10px 12px', borderRadius: 10, background: 'rgba(229,115,115,0.08)', border: '1px solid var(--noxa-status-error)' }}>{saveError}</p>}
       </div>
 
       <div className="noxa-card" style={{ maxWidth: 640, marginTop: 20 }}>

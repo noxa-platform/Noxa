@@ -14,6 +14,7 @@ import { doc, getDoc, onSnapshot, setDoc, serverTimestamp } from 'firebase/fires
 import type { User } from 'firebase/auth';
 import { db } from '@/lib/firebase/config';
 import { useShopId } from '@/lib/useShopId';
+import { describeFirestoreError } from '@/lib/firestore-error';
 
 export type ModuleCfg = { key: string; enabled: boolean; label?: string };
 export type RoleWage = { name: string; wage: number };
@@ -126,6 +127,14 @@ export type UseShopConfig = {
   canManage: boolean;
   /** 店舗の確認に失敗した理由（useShopId から素通し。null なら shopId は確定値・Day109） */
   shopError: string | null;
+  /**
+   * 店舗設定そのものの**読み取りに失敗**した理由（Day110）。
+   * 失敗時も表示は既定値で続くが、`config` は**その店舗の設定ではない**。
+   * とくに設定画面はこの値がある間フォームを出してはいけない——既定値で初期化された
+   * フォームをそのまま保存すると、用語・モジュール構成・ロール時給・送迎タイプ・
+   * 在庫カテゴリが**既定値で上書き**されて消える。
+   */
+  configError: string | null;
   industry: string | undefined;
   config: ShopConfig;
   /** 用語解決（店舗上書き → 業種プリセット → 既定） */
@@ -136,18 +145,21 @@ export type UseShopConfig = {
 export function useShopConfig(user: User): UseShopConfig {
   const shop = useShopId(user);
   // 出所（shopId）つきスナップショットから config/loading を導出（set-state-in-effect 返済・Day19）
-  const [cfgSnap, setCfgSnap] = useState<{ shopId: string; config: ShopConfig } | null>(null);
+  const [cfgSnap, setCfgSnap] = useState<{ shopId: string; config: ShopConfig; error?: string } | null>(null);
   const [industry, setIndustry] = useState<string | undefined>(undefined);
   const config = useMemo(
     () => (shop.shopId && cfgSnap?.shopId === shop.shopId ? cfgSnap.config : DEFAULT_CONFIG),
     [cfgSnap, shop.shopId],
   );
 
+  // 業種（用語プリセットの土台）。読めないと用語が既定へ戻るため、失敗は握り潰さず error に載せる
+  const [industryError, setIndustryError] = useState<string | null>(null);
   useEffect(() => {
     if (!shop.shopId) return;
     getDoc(doc(db, `shop_shops/${shop.shopId}`)).then((s) => {
       setIndustry((s.data() as { storeTypeName?: string } | undefined)?.storeTypeName);
-    }).catch(() => { /* skip */ });
+      setIndustryError(null);
+    }).catch((e) => { setIndustryError(describeFirestoreError(e, '店舗情報の読み込み')); });
   }, [shop.shopId]);
 
   useEffect(() => {
@@ -156,7 +168,7 @@ export function useShopConfig(user: User): UseShopConfig {
     const ref = doc(db, `shop_shops/${sid}/config/settings`);
     const unsub = onSnapshot(ref, (snap) => {
       const d = snap.exists() ? (snap.data() as Partial<ShopConfig>) : {};
-      setCfgSnap({ shopId: sid, config: {
+      setCfgSnap({ shopId: sid, error: undefined, config: {
         terminology: d.terminology ?? {},
         roles: d.roles?.length ? d.roles : DEFAULT_ROLES,
         modules: mergeModules(d.modules),
@@ -166,7 +178,11 @@ export function useShopConfig(user: User): UseShopConfig {
         transportTypes: d.transportTypes?.length ? d.transportTypes : DEFAULT_TRANSPORT_TYPES,
         inventoryCategories: d.inventoryCategories?.length ? d.inventoryCategories : DEFAULT_INVENTORY_CATEGORIES,
       } });
-    }, () => setCfgSnap({ shopId: sid, config: DEFAULT_CONFIG })); // エラーでも既定で確定し loading を解く
+    }, (e) => {
+      // エラーでも既定で確定し loading は解く（画面は動かす）。ただし「既定＝店舗の設定」ではないので
+      // 理由を残す。設定画面はこれを見て編集を止める（既定値での上書き保存の防止・Day110）
+      setCfgSnap({ shopId: sid, config: DEFAULT_CONFIG, error: describeFirestoreError(e, '店舗設定の読み込み') });
+    });
     return () => unsub();
   }, [shop.loading, shop.shopId]);
 
@@ -177,5 +193,7 @@ export function useShopConfig(user: User): UseShopConfig {
 
   const t = useCallback((key: string) => resolveTerm(config, industry, key), [config, industry]);
 
-  return { loading: shop.loading || (!!shop.shopId && cfgSnap?.shopId !== shop.shopId), shopId: shop.shopId, canManage: shop.canManage, shopError: shop.shopError, industry, config, t, save };
+  const configError = shop.shopId && cfgSnap?.shopId === shop.shopId ? (cfgSnap.error ?? industryError) : industryError;
+
+  return { loading: shop.loading || (!!shop.shopId && cfgSnap?.shopId !== shop.shopId), shopId: shop.shopId, canManage: shop.canManage, shopError: shop.shopError, configError, industry, config, t, save };
 }

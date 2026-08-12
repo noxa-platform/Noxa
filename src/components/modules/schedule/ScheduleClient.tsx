@@ -34,13 +34,18 @@ export function ScheduleClient({ user }: { user: User }) {
   const [busy, setBusy] = useState(false);
   // 追加・削除・種別保存の失敗（旧実装は catch 無し／握り潰しで無音だった）
   const [opError, setOpError] = useState<string | null>(null);
+  // 一覧の読み取り失敗（「予定なし」と区別する・Day110）
+  const [readError, setReadError] = useState<string | null>(null);
 
   const reload = async () => {
     try {
       const snap = await getDocs(collection(db, `personal_reminders/${user.uid}/items`));
       const list: Item[] = []; snap.forEach((d) => list.push(mapItem(d.id, d.data())));
-      setItems(list);
-    } catch { /* skip */ }
+      setItems(list); setReadError(null);
+    } catch (e) {
+      // 握り潰すと「予定はありません」と同じ表示になり、入っている予定を見落とす（Day110）
+      setReadError(describeFirestoreError(e, '予定の読み込み'));
+    }
     setLoading(false);
   };
   // 初回ロードは then 形式（async 関数の同期区間から辿れる setState を避ける・set-state-in-effect 対応）。
@@ -51,9 +56,9 @@ export function ScheduleClient({ user }: { user: User }) {
       .then((snap) => {
         if (!alive) return;
         const list: Item[] = []; snap.forEach((d) => list.push(mapItem(d.id, d.data())));
-        setItems(list); setLoading(false);
+        setItems(list); setReadError(null); setLoading(false);
       })
-      .catch(() => { if (alive) setLoading(false); });
+      .catch((e) => { if (alive) { setReadError(describeFirestoreError(e, '予定の読み込み')); setLoading(false); } });
     return () => { alive = false; };
   }, [user.uid]);
 
@@ -111,6 +116,9 @@ export function ScheduleClient({ user }: { user: User }) {
 
   return (
     <Shell title="スケジュール" eyebrow="ノクサ · スケジュール" crumb="schedule">
+      {readError && (
+        <p role="alert" style={{ margin: '0 0 12px', padding: '10px 12px', borderRadius: 10, fontSize: 13, color: 'var(--noxa-status-error)', background: 'rgba(229,115,115,0.08)', border: '1px solid var(--noxa-status-error)' }}>{readError} 予定が無いのではなく、読み込めていません。</p>
+      )}
       {opError && (
         <p role="alert" style={{ margin: '0 0 12px', padding: '10px 12px', borderRadius: 10, fontSize: 13, color: 'var(--noxa-status-error)', background: 'rgba(229,115,115,0.08)', border: '1px solid var(--noxa-status-error)' }}>{opError}</p>
       )}

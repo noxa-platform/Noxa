@@ -298,14 +298,18 @@ function ShiftCalendar({ shopId, uid, shifts }: { shopId: string; uid: string; s
   const [busy, setBusy] = useState(false);
   // 予定の保存/クリアの失敗（旧実装は catch が無く、エディタが開いたまま無反応だった）
   const [opError, setOpError] = useState<string | null>(null);
+  // 予定の読み取り失敗（カレンダーが空＝「予定を出していない」と誤読される・Day110）
+  const [readError, setReadError] = useState<string | null>(null);
 
   const reloadPlans = async () => {
     try {
       const snap = await getDocs(query(collection(db, `shop_shops/${shopId}/shift_plans`), where('castUid', '==', uid)));
       const m: Record<string, Plan> = {};
       snap.forEach((d) => { const v = d.data() as DocumentData; if (v.date) m[v.date as string] = { date: v.date as string, start: (v.start as string) ?? '', end: (v.end as string) ?? '', off: v.off === true }; });
-      setPlans(m);
-    } catch { /* skip */ }
+      setPlans(m); setReadError(null);
+    } catch (e) {
+      setReadError(describeFirestoreError(e, '出勤予定の読み込み'));
+    }
   };
   // 初回ロードは then 形式で（async 関数の同期区間から辿れる setState を避ける）。
   // 保存/クリア後の再読込はハンドラから reloadPlans を呼ぶ
@@ -316,9 +320,9 @@ function ShiftCalendar({ shopId, uid, shifts }: { shopId: string; uid: string; s
         if (!alive) return;
         const m: Record<string, Plan> = {};
         snap.forEach((d) => { const v = d.data() as DocumentData; if (v.date) m[v.date as string] = { date: v.date as string, start: (v.start as string) ?? '', end: (v.end as string) ?? '', off: v.off === true }; });
-        setPlans(m);
+        setPlans(m); setReadError(null);
       })
-      .catch(() => { /* skip */ });
+      .catch((e) => { if (alive) setReadError(describeFirestoreError(e, '出勤予定の読み込み')); });
     return () => { alive = false; };
   }, [shopId, uid]);
 
@@ -357,6 +361,8 @@ function ShiftCalendar({ shopId, uid, shifts }: { shopId: string; uid: string; s
 
   return (
     <Section label={`シフトカレンダー（出勤予定 ${shiftCount}日）`}>
+      {/* 読み取り失敗は「予定を出していない」と同じ空カレンダーになるため必ず出す（Day110） */}
+      {readError && <p role="alert" style={{ margin: '0 0 10px', fontSize: 12, color: 'var(--noxa-status-error)', padding: '8px 10px', borderRadius: 8, background: 'rgba(229,115,115,0.08)', border: '1px solid var(--noxa-status-error)' }}>{readError} 予定が入っていないのではなく、読み込めていません。</p>}
       {/* 月送り */}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
         <button type="button" onClick={() => move(-1)} style={navBtn}>‹</button>

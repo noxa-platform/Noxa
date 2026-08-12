@@ -7,6 +7,7 @@ import { AuthGuard } from '@/components/AuthGuard';
 import { AccountShell } from '@/components/AccountShell';
 import { useShopConfig, DEFAULT_MODULES, DEFAULT_TERMS, DEFAULT_TRANSPORT_TYPES, DEFAULT_INVENTORY_CATEGORIES, type ModuleCfg, type RoleWage, type SalesAttribution, type ChoiceItem } from '@/lib/shopConfig';
 import { MembersSection } from '@/components/store/MembersSection';
+import { describeFirestoreError } from '@/lib/firestore-error';
 
 const TERM_KEYS: { key: string; label: string }[] = [
   { key: 'cast', label: 'スタッフの呼称' },
@@ -19,11 +20,21 @@ const TERM_KEYS: { key: string; label: string }[] = [
 const moduleLabel = (key: string) => DEFAULT_MODULES.find((d) => d.key === key)?.label ?? key;
 
 function SettingsClient({ user }: { user: User }) {
-  const { loading, shopId, canManage, config, save } = useShopConfig(user);
+  const { loading, shopId, canManage, config, configError, shopError, save } = useShopConfig(user);
 
   if (loading) return <P>読み込み中…</P>;
-  if (!shopId) return <P>店舗が見つかりません。</P>;
+  if (!shopId) return <P>{shopError ? `${shopError} 店舗を確認できないため設定を開けません。画面を再読み込みしてください。` : '店舗が見つかりません。'}</P>;
   if (!canManage) return <P>この設定はオーナー専用です。</P>;
+  // 設定が読めていないときにフォームを出さない（Day110）。
+  // 既定値で初期化されたフォームを保存すると、店舗の設定が**既定値で上書き**されて消える。
+  if (configError) {
+    return (
+      <P>
+        <span role="alert" style={{ color: 'var(--noxa-status-error)' }}>{configError}</span>
+        <br />いまの設定を読み取れていないため、編集フォームを表示していません（このまま保存すると店舗の設定が既定値で上書きされます）。画面を再読み込みしてください。
+      </P>
+    );
+  }
 
   // 編集セッション: key=shopId でフォームを再マウントし、初期値は lazy initializer で確定
   // （useShopConfig の loading は config 到着で解けるため、この時点で config は確定済み。
@@ -44,6 +55,8 @@ function SettingsForm({ shopId, myUid, config, save }: {
   const [invCats, setInvCats] = useState<ChoiceItem[]>(() => config.inventoryCategories?.length ? config.inventoryCategories : DEFAULT_INVENTORY_CATEGORIES);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
+  // 保存の失敗（旧実装は catch が無く無音だった）
+  const [saveError, setSaveError] = useState<string | null>(null);
 
   // 未保存インジケータ: マウント時の内容と比較して導出（PosConfig の Day15 事故対策の横展開。
   // 保存成功でベースラインを更新）
@@ -65,11 +78,15 @@ function SettingsForm({ shopId, myUid, config, save }: {
   };
 
   const onSave = async () => {
-    setSaving(true); setSaved(false);
+    setSaving(true); setSaved(false); setSaveError(null);
     try {
       await save({ terminology: terms, roles: roles.filter((r) => r.name.trim()), modules, salesAttribution: attr, setTimeLength: Math.max(1, setLen), rotationTimeLength: Math.max(1, rotLen), transportTypes: transportTypes.filter((t) => t.label.trim()), inventoryCategories: invCats.filter((t) => t.label.trim()) });
       setBaselineJson(draftJson);
       setSaved(true); setTimeout(() => setSaved(false), 2000);
+    } catch (e) {
+      // 旧実装は catch が無く、権限/通信エラーでも「保存しました」が出ないだけの無音だった
+      // （未保存のまま離脱すると設定が消えたように見える）
+      setSaveError(describeFirestoreError(e, '店舗設定の保存'));
     } finally { setSaving(false); }
   };
 
@@ -178,10 +195,13 @@ function SettingsForm({ shopId, myUid, config, save }: {
         <p style={{ fontSize: 11, color: 'var(--noxa-text-faint)', margin: '8px 0 0' }}>新規に作成する卓の既定値。各卓の個別設定は席回し画面の卓詳細から変更できます。</p>
       </Section>
 
+      {saveError && (
+        <p role="alert" style={{ color: 'var(--noxa-status-error)', fontSize: 13, margin: '8px 0 0', padding: '10px 12px', borderRadius: 10, background: 'rgba(229,115,115,0.08)', border: '1px solid var(--noxa-status-error)' }}>{saveError} 入力内容はそのまま残っています。</p>
+      )}
       <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 8 }}>
         <button type="button" onClick={onSave} disabled={saving} className="noxa-btn noxa-btn-primary" style={{ padding: '12px 28px', fontSize: 15 }}>{saving ? '保存中…' : '設定を保存'}</button>
         {saved && <span style={{ color: 'var(--noxa-status-success)', fontSize: 13 }}>✓ 保存しました</span>}
-        {dirty && !saving && !saved && <span style={{ color: 'var(--noxa-status-warning)', fontSize: 13 }}>● 未保存の変更があります</span>}
+        {dirty && !saving && !saved && !saveError && <span style={{ color: 'var(--noxa-status-warning)', fontSize: 13 }}>● 未保存の変更があります</span>}
       </div>
     </div>
   );

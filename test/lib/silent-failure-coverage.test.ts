@@ -28,6 +28,11 @@ const COMPONENTS_ROOT = join(process.cwd(), 'src/components');
 // 画面だけを見ていたため、`useShopId` や POS/席回しストアが**画面より手前で**
 // 読み取り失敗を握り潰していたのを取り逃していた（＝どの画面も直せば直るように見えて直らない）。
 const LIB_ROOT = join(process.cwd(), 'src/lib');
+// Day110: さらに `src/app` のクライアント画面（page.tsx 等）も対象へ。
+// 店舗設定の保存・プロフィール保存が **catch 無しのまま**残っていたのを取り逃していた
+// （画面は `src/components` だけにあるという前提が崩れている）。
+// `src/app/api` は**サーバのルート**で、console.warn はサーバログとして妥当なので除外する。
+const APP_ROOT = join(process.cwd(), 'src/app');
 
 function sourceFiles(dir: string, exts: string[]): string[] {
   const out: string[] = [];
@@ -43,8 +48,10 @@ const load = (paths: string[]) =>
   paths.map((p) => ({ path: relative(process.cwd(), p).split(/[\\/]/).join('/'), src: readFileSync(p, 'utf8') }));
 
 const FILES = load(sourceFiles(COMPONENTS_ROOT, ['.tsx']));
-/** 画面＋hooks/ストア（文言・catch の規律はどちらにも同じく効かせる） */
-const ALL_FILES = [...FILES, ...load(sourceFiles(LIB_ROOT, ['.ts', '.tsx']))];
+/** `src/app` のクライアント画面（api ルートは除外） */
+const APP_FILES = load(sourceFiles(APP_ROOT, ['.tsx', '.ts'])).filter((f) => !f.path.startsWith('src/app/api/'));
+/** 画面＋hooks/ストア（文言・catch の規律はどこにも同じく効かせる） */
+const ALL_FILES = [...FILES, ...APP_FILES, ...load(sourceFiles(LIB_ROOT, ['.ts', '.tsx']))];
 
 /** ファイルごとの「catch 無しで finally だけの try に書き込みがある」件数 */
 function countCatchlessWrites(src: string): number {
@@ -66,16 +73,22 @@ describe('無音の失敗ガード', () => {
     expect(FILES.length).toBeGreaterThan(20);
   });
 
-  it('走査対象に hooks/ストア（src/lib）も入っている（Day109 で拡張）', () => {
+  it('走査対象に hooks/ストア（src/lib）と app 画面（src/app・api 除く）も入っている', () => {
     expect(ALL_FILES.length).toBeGreaterThan(FILES.length + 20);
-    expect(ALL_FILES.some((f) => f.path === 'src/lib/useShopId.ts')).toBe(true);
+    expect(ALL_FILES.some((f) => f.path === 'src/lib/useShopId.ts')).toBe(true);           // Day109
+    expect(ALL_FILES.some((f) => f.path === 'src/app/store/settings/page.tsx')).toBe(true); // Day110
+    expect(ALL_FILES.some((f) => f.path.startsWith('src/app/api/'))).toBe(false);           // サーバは対象外
   });
 
   it('例外の中身を生のまま画面に出さない（文言は describeFirestoreError に集約する）', () => {
     // 旧実装: window.alert(String((e as Error)?.message ?? e)) —— 現場に「permission-denied」と出るだけ
     // POS/席回しストアも同型で、店舗解決の失敗を生の message のまま画面に載せていた（Day109）
-    const RAW = /\(e as Error\)\??\.message/;
-    const offenders = ALL_FILES.filter((f) => RAW.test(f.src)).map((f) => f.path);
+    //
+    // 判定は「**画面へ渡している**」に限定する（Day110）。`(e as Error).message` を
+    // `auth/credential-already-in-use` 等の**分類に使い、そのあと日本語へマップする**コード
+    // （account/connections・account/merge）は現場に生コードを見せないので対象外。
+    const RAW_TO_UI = /(set\w*Error\w*|window\.alert|alert)\(\s*String\(\(e as Error\)|(set\w*Error\w*)\(\s*\(e as Error\)\??\.message/;
+    const offenders = ALL_FILES.filter((f) => RAW_TO_UI.test(f.src)).map((f) => f.path);
     expect(offenders).toEqual([]);
   });
 

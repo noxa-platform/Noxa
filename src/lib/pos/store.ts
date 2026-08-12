@@ -92,6 +92,8 @@ export type UsePosStore = {
   canConfig: boolean;
   isDevice: boolean;
   error: string | null;
+  /** 料金設定（pos_config）の読み取り失敗。**既定料金で会計させない**ための理由・Day110 */
+  configError: string | null;
   config: StoreConfig;
   tables: FloorTable[];
   casts: Cast[];
@@ -111,6 +113,8 @@ export function usePosStore(user: User): UsePosStore {
   const shopId = shop.shopId;
 
   const [config, setConfig] = useState<StoreConfig>(() => createDefaultStoreConfig());
+  // 料金設定の読み取り失敗（既定料金での会計を止めるための理由・Day110）
+  const [configError, setConfigError] = useState<string | null>(null);
   // 卓は出所（shopId）つきで保持し loading を導出（Day17: set-state-in-effect 返済・seating store と同型）
   const [tablesSnap, setTablesSnap] = useState<{ shopId: string; list: FloorTable[] } | null>(null);
   const [casts, setCasts] = useState<Cast[]>([]);
@@ -143,6 +147,7 @@ export function usePosStore(user: User): UsePosStore {
         const ref = doc(db, `shop_shops/${shopId}/pos_config/active`);
         const snap = await getDoc(ref);
         if (!alive) return;
+        setConfigError(null);
         if (snap.exists()) {
           setConfig({ ...createDefaultStoreConfig('active'), ...(snap.data() as Partial<StoreConfig>) } as StoreConfig);
         } else if (shop.canConfig) {
@@ -152,8 +157,10 @@ export function usePosStore(user: User): UsePosStore {
         } else {
           setConfig(createDefaultStoreConfig('active'));
         }
-      } catch {
-        if (alive) setConfig(createDefaultStoreConfig('active'));
+      } catch (e) {
+        // 既定料金で会計を続けると**間違った金額で伝票を切り、その額が売上として記録される**。
+        // 画面側が会計を止められるよう理由を残す（Day110）
+        if (alive) { setConfig(createDefaultStoreConfig('active')); setConfigError(describeFirestoreError(e, '料金設定の読み込み')); }
       }
     })();
     return () => { alive = false; };
@@ -369,10 +376,10 @@ export function usePosStore(user: User): UsePosStore {
 
   return useMemo(() => ({
     loading: shop.loading || loadingData,
-    shopId, canConfig: shop.canConfig, isDevice: shop.isDevice, error: shop.error,
+    shopId, canConfig: shop.canConfig, isDevice: shop.isDevice, error: shop.error, configError,
     config, tables, casts, customers, needsSeed,
     seedTables, addSlip, dispatchSlip, renameSlip, removeSlip, checkoutSlip, resultFor,
-  }), [shop.loading, loadingData, shopId, shop.canConfig, shop.isDevice, shop.error, config, tables, casts, customers, needsSeed, seedTables, addSlip, dispatchSlip, renameSlip, removeSlip, checkoutSlip, resultFor]);
+  }), [shop.loading, loadingData, shopId, shop.canConfig, shop.isDevice, shop.error, configError, config, tables, casts, customers, needsSeed, seedTables, addSlip, dispatchSlip, renameSlip, removeSlip, checkoutSlip, resultFor]);
 }
 
 let __slipSeq = 0;

@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import type { User } from 'firebase/auth';
 import { doc, getDoc } from 'firebase/firestore';
+import { describeFirestoreError } from '@/lib/firestore-error';
 import { AuthGuard } from '@/components/AuthGuard';
 import { AccountShell } from '@/components/AccountShell';
 import { db } from '@/lib/firebase/config';
@@ -105,7 +106,7 @@ function ProfileLinkClient({ user }: { user: User }) {
       });
       setSaved(true); setTimeout(() => setSaved(false), 2000);
     } catch (e) {
-      setError(String((e as Error)?.message ?? e));
+      setError(describeFirestoreError(e, '保存'));
     } finally { setSaving(false); }
   };
 

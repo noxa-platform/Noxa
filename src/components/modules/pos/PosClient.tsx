@@ -58,7 +58,21 @@ export function PosClient({ user, focusTableId, embedded }: { user: User; focusT
   if (!store.shopId) {
     return (
       <Shell embedded={embedded}>
-        <Empty>POS は店舗運営機能です。<Link href="/store/new" style={{ color: 'var(--noxa-accent-primary-ink)' }}>店舗を登録</Link> すると解放されます。</Empty>
+        {store.error
+          // 店舗を確認できていないだけの状態で「店舗を登録」を促さない（在籍中の店員には誤誘導・Day109/110）
+          ? <Empty><span role="alert" style={{ color: 'var(--noxa-status-error)' }}>{store.error}</span><br />店舗を確認できないため POS を開けません。画面を再読み込みしてください。</Empty>
+          : <Empty>POS は店舗運営機能です。<Link href="/store/new" style={{ color: 'var(--noxa-accent-primary-ink)' }}>店舗を登録</Link> すると解放されます。</Empty>}
+      </Shell>
+    );
+  }
+  // 料金設定が読めていない状態で会計させない（既定料金で伝票を切ると、その誤った金額が売上に記録される）
+  if (store.configError) {
+    return (
+      <Shell device={store.isDevice} embedded={embedded}>
+        <Empty>
+          <span role="alert" style={{ color: 'var(--noxa-status-error)' }}>{store.configError}</span>
+          <br />料金が分からないため POS を開けません（既定料金で会計すると実際と違う金額が売上に記録されます）。画面を再読み込みしてください。
+        </Empty>
       </Shell>
     );
   }
