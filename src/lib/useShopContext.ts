@@ -3,7 +3,9 @@ import { useEffect, useState } from 'react';
 import { collection, getDocs, query, where } from 'firebase/firestore';
 import type { User } from 'firebase/auth';
 import { db } from '@/lib/firebase/config';
-import { resolveStoreAccess } from '@/lib/store-access';
+import { resolveStoreAccessState } from '@/lib/store-access';
+import { describeFirestoreError } from '@/lib/firestore-error';
+import { SHOP_UNRESOLVED_TEXT } from '@/lib/shop-id-state';
 
 export type DeviceClaims = {
   loading: boolean;
@@ -53,6 +55,11 @@ export type ShopContext = {
   isOwner: boolean;
   /** 自分がオーナーの店舗一覧（従来どおりオーナー分のみ） */
   shops: { id: string; name: string }[];
+  /**
+   * 判定に必要な読み取りが失敗した理由（Day109）。null なら hasShop / isOwner は確定値。
+   * 値がある間、画面は「店舗が無い」前提の案内（＋店舗を登録すると解放）を出してはいけない。
+   */
+  error: string | null;
 };
 
 /**
@@ -62,8 +69,8 @@ export type ShopContext = {
  * オーナーだけを見ると、参加直後のキャストがスマホで打刻すら開けない（store-access.ts 参照）。
  * 個人ユーザー（MyDeck のみ）は hasShop=false → 店舗 UI を出さない。
  */
-const NO_SHOP: ShopContext = { loading: false, hasShop: false, isOwner: false, shops: [] };
-const LOADING_SHOP: ShopContext = { loading: true, hasShop: false, isOwner: false, shops: [] };
+const NO_SHOP: ShopContext = { loading: false, hasShop: false, isOwner: false, shops: [], error: null };
+const LOADING_SHOP: ShopContext = { loading: true, hasShop: false, isOwner: false, shops: [], error: null };
 
 export function useShopContext(uid: string | undefined): ShopContext {
   // 出所（uid）つきスナップショットから導出（useDeviceClaims と同じ理由）
@@ -74,14 +81,23 @@ export function useShopContext(uid: string | undefined): ShopContext {
     let alive = true;
     (async () => {
       // 2つの読み取りは独立させる（片方の失敗でもう片方まで消さない＝到達性の劣化を局所化）
-      const owned = await getDocs(query(collection(db, 'shop_shops'), where('ownerUid', '==', uid))).catch(() => null);
+      let failure: string | null = null;
+      const owned = await getDocs(query(collection(db, 'shop_shops'), where('ownerUid', '==', uid)))
+        .catch((e) => { failure ??= describeFirestoreError(e, '店舗情報の取得'); return null; });
       // 所属（招待参加）の逆引き。CF が members/{uid} から同期する読み取り専用インデックス
-      const ms = await getDocs(collection(db, `account_users/${uid}/memberships`)).catch(() => null);
+      const ms = await getDocs(collection(db, `account_users/${uid}/memberships`))
+        .catch((e) => { failure ??= describeFirestoreError(e, '店舗情報の取得'); return null; });
       if (!alive) return;
-      if (!owned && !ms) { setSnap({ uid, ctx: NO_SHOP }); return; }
       const shops = (owned?.docs ?? []).map((d) => ({ id: d.id, name: (d.data().name as string) ?? d.id }));
-      const { hasStore, isOwner } = resolveStoreAccess(shops.map((s) => s.id), (ms?.docs ?? []).map((d) => d.id));
-      setSnap({ uid, ctx: { loading: false, hasShop: hasStore, isOwner, shops } });
+      // 読み取り失敗を「店舗が無い」と同一視しない（store-access.ts の resolveStoreAccessState 参照）
+      const { hasStore, isOwner, unresolved } = resolveStoreAccessState(
+        owned ? shops.map((s) => s.id) : null,
+        ms ? ms.docs.map((d) => d.id) : null,
+      );
+      setSnap({ uid, ctx: {
+        loading: false, hasShop: hasStore, isOwner, shops,
+        error: unresolved ? (failure ?? SHOP_UNRESOLVED_TEXT) : null,
+      } });
     })();
     return () => { alive = false; };
   }, [uid]);

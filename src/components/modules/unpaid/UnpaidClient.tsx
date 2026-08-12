@@ -17,6 +17,7 @@ import { db } from '@/lib/firebase/config';
 import { useShopRole, hasShopRole } from '@/lib/useShopRole';
 import { UNPAID_STATUS_OPTIONS, balanceOf, collectPatch, isOverdue as isOverdueAt, statusChangePatch, type UnpaidStatus } from '@/lib/unpaid/logic';
 import { describeFirestoreError } from '@/lib/firestore-error';
+import { describeMissingShop } from '@/lib/shop-id-state';
 
 /**
  * 売掛管理モジュール（機微・オーナー専用・実データ）
@@ -401,7 +402,7 @@ export function UnpaidClient({ user }: { user: User }) {
         ) : !allowed ? (
           <p style={{ fontFamily: mono, fontSize: 12, color: 'var(--noxa-text-faint)' }}>このモジュールはオーナー専用です。</p>
         ) : !shop.shopId ? (
-          <p style={{ fontFamily: mono, fontSize: 12, color: 'var(--noxa-text-faint)' }}>所属店舗が見つかりません。</p>
+          <p style={{ fontFamily: mono, fontSize: 12, color: 'var(--noxa-text-faint)' }}>{describeMissingShop(shop.shopError)}</p>
         ) : (
           <>
             {/* ── サマリカード ── */}

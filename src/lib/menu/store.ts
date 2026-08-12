@@ -37,6 +37,8 @@ export type UseMenuStore = {
   shopId: string | null;
   canManage: boolean;   // オーナー（設定/PIN 管理）
   isDevice: boolean;
+  /** 店舗の確認に失敗した理由（useShopId から素通し。未所属と区別する・Day109） */
+  shopError: string | null;
   panels: MenuPanel[];          // 表示順ソート済み（visible 含む全件）
   visiblePanels: MenuPanel[];   // visible のみ（タブレット用）
   tables: ShopTable[];
@@ -264,7 +266,7 @@ export function useMenuStore(user: User): UseMenuStore {
 
   return {
     loading: shop.loading || (!!shopId && (castsSnap?.shopId !== shopId || cfgSnap?.shopId !== shopId)),
-    shopId, canManage: shop.canManage, isDevice: shop.isDevice,
+    shopId, canManage: shop.canManage, isDevice: shop.isDevice, shopError: shop.shopError,
     panels, visiblePanels, tables, orders, config,
     addCastPanel, savePanelMeta, removePanel, setPanelImage, reorderPanel, addInfoCard,
     submitOrders, updateOrder, deleteOrder, clearOrders, saveConfig, setPanelPin,

@@ -31,7 +31,9 @@ function saleYm(d: DocumentData): string | null {
   return null;
 }
 
-type Perf = { byMonth: Record<string, number>; currentTypes: Record<string, number> };
+// 読み取りに失敗したかを一緒に返す（Day109）。旧実装は catch で握り潰しており、
+// 権限エラー/通信断でも「今月の売上 0 円・達成率 0%」と**実績が無いのと同じ表示**になっていた。
+type Perf = { byMonth: Record<string, number>; currentTypes: Record<string, number>; error?: string };
 
 async function loadPerf(uid: string): Promise<Perf> {
   const byMonth: Record<string, number> = {};
@@ -63,7 +65,9 @@ async function loadPerf(uid: string): Promise<Perf> {
         : await getDocs(query(col, where('castUid', '==', uid)));
       ss.forEach((x) => add(x.data()));
     }
-  } catch { /* skip */ }
+  } catch (e) {
+    return { byMonth, currentTypes, error: describeFirestoreError(e, '売上実績の読み込み') };
+  }
   return { byMonth, currentTypes };
 }
 
@@ -97,14 +101,16 @@ export function GoalsClient({ user }: { user: User }) {
   const [draft, setDraft] = useState<number>(0);
   const [perf, setPerf] = useState<Perf>({ byMonth: {}, currentTypes: {} });
   const [saveError, setSaveError] = useState<string | null>(null);
+  // 実績の読み取り失敗（0円表示と区別する・Day109）
+  const [readError, setReadError] = useState<string | null>(null);
 
   useEffect(() => {
     let alive = true;
     (async () => {
       const g = await loadGoals(user.uid);
       if (alive) { setGoalsByYm(g.byYm); setGoalSales(g.currentGoal); setDraft(g.currentGoal); }
-      const p = await loadPerf(user.uid).catch(() => ({ byMonth: {}, currentTypes: {} }));
-      if (alive) { setPerf(p); setLoading(false); }
+      const p = await loadPerf(user.uid).catch((e) => ({ byMonth: {}, currentTypes: {}, error: describeFirestoreError(e, '売上実績の読み込み') }));
+      if (alive) { setPerf(p); setReadError(p.error ?? null); setLoading(false); }
     })();
     return () => { alive = false; };
   }, [user.uid]);
@@ -166,6 +172,11 @@ export function GoalsClient({ user }: { user: User }) {
           <div className="noxa-eyebrow" style={{ padding: '40px 0' }}>読み込み中…</div>
         ) : (
           <>
+            {/* 実績が読めていないことの通知（0円・達成率0%と区別する） */}
+            {readError && (
+              <p role="alert" style={{ color: 'var(--noxa-status-error)', fontSize: 13, margin: '0 0 12px', padding: '10px 12px', borderRadius: 10, background: 'rgba(229,115,115,0.08)', border: '1px solid var(--noxa-status-error)' }}>{readError} 表示中の実績は正しくありません。</p>
+            )}
+
             {/* 保存失敗の通知（握りつぶすと「保存できたつもり」になる） */}
             {saveError && (
               <p role="alert" style={{ color: 'var(--noxa-status-error)', fontSize: 13, margin: '0 0 12px', padding: '10px 12px', borderRadius: 10, background: 'rgba(229,115,115,0.08)', border: '1px solid var(--noxa-status-error)' }}>{saveError}</p>

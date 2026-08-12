@@ -63,7 +63,7 @@ function AccountDashboard({ user }: { user: User }) {
   const [sub, setSub] = useState<Sub | null>(null);
   // hasShop はオーナーだけでなく「招待で参加したメンバー」も true（店舗運営セクションの到達性）。
   // isOwner は「自分の店を登録済みか」＝登録 CTA を出すかの判定にのみ使う。
-  const { hasShop, isOwner } = useShopContext(user.uid);
+  const { hasShop, isOwner, error: shopCtxError } = useShopContext(user.uid);
 
   useEffect(() => {
     (async () => {
@@ -260,8 +260,10 @@ function AccountDashboard({ user }: { user: User }) {
               </Link>
             ))}
           </div>
-          {/* 所属メンバー（オーナーではない）にも「自分の店を登録する」導線は残す */}
-          {!isOwner && (
+          {/* 所属メンバー（オーナーではない）にも「自分の店を登録する」導線は残す。
+              ただし所有クエリが読めていない（shopCtxError）ときは出さない＝オーナーに
+              「自分の店を登録する」と表示するのは誤誘導（Day109） */}
+          {!isOwner && !shopCtxError && (
             <div style={{ marginTop: -20, marginBottom: 32 }}>
               <Link href="/store/new" className="noxa-mono" style={{ color: 'var(--noxa-accent-primary-ink)', fontSize: 12, textDecoration: 'none' }}>
                 ＋ 自分のお店を登録する →
@@ -269,6 +271,13 @@ function AccountDashboard({ user }: { user: User }) {
             </div>
           )}
         </>
+      ) : shopCtxError ? (
+        // 読み取り失敗を「店舗が無い」と言い切らない（Day109）。すでに店舗があるのに
+        // 「＋ 店舗を登録すると解放」を出すと、在籍中のスタッフに自分の店を作れと誘導してしまう
+        <div role="alert" style={{ background: 'var(--noxa-surface-card)', border: '1px solid var(--noxa-status-error)', borderRadius: 16, padding: 24, marginBottom: 32, color: 'var(--noxa-text-muted)', fontSize: 13, lineHeight: 1.7 }}>
+          <span className="noxa-eyebrow">店舗運営</span>
+          <p style={{ margin: '8px 0 0' }}>{shopCtxError} 店舗に所属しているかを確認できないため、店舗運営メニューを表示していません。画面を再読み込みしてください。</p>
+        </div>
       ) : (
         <Link href="/store/new" className="flex flex-col" style={{ background: 'var(--noxa-surface-card)', border: '1px dashed var(--noxa-border-strong)', borderRadius: 16, padding: 24, gap: 8, textDecoration: 'none', marginBottom: 32 }}>
           <span className="noxa-eyebrow">店舗運営</span>

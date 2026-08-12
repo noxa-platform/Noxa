@@ -124,6 +124,8 @@ export type UseShopConfig = {
   loading: boolean;
   shopId: string | null;
   canManage: boolean;
+  /** 店舗の確認に失敗した理由（useShopId から素通し。null なら shopId は確定値・Day109） */
+  shopError: string | null;
   industry: string | undefined;
   config: ShopConfig;
   /** 用語解決（店舗上書き → 業種プリセット → 既定） */
@@ -175,5 +177,5 @@ export function useShopConfig(user: User): UseShopConfig {
 
   const t = useCallback((key: string) => resolveTerm(config, industry, key), [config, industry]);
 
-  return { loading: shop.loading || (!!shop.shopId && cfgSnap?.shopId !== shop.shopId), shopId: shop.shopId, canManage: shop.canManage, industry, config, t, save };
+  return { loading: shop.loading || (!!shop.shopId && cfgSnap?.shopId !== shop.shopId), shopId: shop.shopId, canManage: shop.canManage, shopError: shop.shopError, industry, config, t, save };
 }

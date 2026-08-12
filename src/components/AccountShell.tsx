@@ -88,7 +88,7 @@ function SectionLabel({ easy, children }: { easy: boolean; children: React.React
 export function AccountShell({ user, children }: { user: User; children: React.ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
-  const { hasShop } = useShopContext(user.uid);
+  const { hasShop, error: shopCtxError } = useShopContext(user.uid);
   const device = useDeviceClaims(user);
   useTheme(user); // 業種テーマ（コンカフェ等）を <html data-theme> に適用
   const easy = useUiMode() === 'easy'; // かんたんモード（既定）でナビを大きく
@@ -178,6 +178,12 @@ export function AccountShell({ user, children }: { user: User; children: React.R
                 <SectionLabel easy={easy}>お店の運営</SectionLabel>
                 {storeNav.map(navLink)}
                 {navLink({ label: '店舗設定', href: '/store/settings' })}
+              </div>
+            ) : shopCtxError ? (
+              // 所属を確認できていない間は「＋ お店を登録」を出さない（すでに店があるのに
+              // 自分の店を作れという誘導になる）。理由を出して再読み込みを促す・Day109
+              <div role="alert" style={{ padding: 14, borderRadius: 12, border: '1px solid var(--noxa-status-error)', color: 'var(--noxa-text-muted)', fontSize: 12, lineHeight: 1.6 }}>
+                {shopCtxError}<br />お店のメニューを表示できません。再読み込みしてください。
               </div>
             ) : !hasShop ? (
               <Link href="/store/new" style={{ display: 'flex', alignItems: 'center', gap: 10, padding: 14, borderRadius: 12, border: '1px dashed var(--noxa-border-strong)', color: 'var(--noxa-text-muted)', fontSize: 13, textDecoration: 'none', lineHeight: 1.5 }}>

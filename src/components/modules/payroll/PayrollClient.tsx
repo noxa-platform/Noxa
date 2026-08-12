@@ -6,7 +6,8 @@ import type { User } from 'firebase/auth';
 import { db, auth } from '@/lib/firebase/config';
 import { useDeviceClaims } from '@/lib/useShopContext';
 import { useShopId } from '@/lib/useShopId';
-import { getActiveShop, pickShopId } from '@/lib/workspace';
+import { getActiveShop } from '@/lib/workspace';
+import { resolveShopIdState, SHOP_UNRESOLVED_TEXT, SHOP_NOT_FOUND_TEXT } from '@/lib/shop-id-state';
 import { describeFirestoreError } from '@/lib/firestore-error';
 import { Shell, Section, Empty, Eyebrow } from '@/components/modules/schedule/ScheduleClient';
 
@@ -71,9 +72,21 @@ export function PayrollClient({ user }: { user: User }) {
       let shopId: string | null = device.isDevice ? device.shopId || null : null;
       try {
         if (!shopId) {
-          const owned = await getDocs(query(collection(db, 'shop_shops'), where('ownerUid', '==', user.uid)));
-          const ms = await getDocs(collection(db, `account_users/${user.uid}/memberships`));
-          shopId = pickShopId(owned.docs.map((d) => d.id), ms.docs.map((d) => d.id), getActiveShop()).shopId;
+          // 読み取りは独立させ、失敗を「所属していない」と混ぜない（Day109・shop-id-state.ts）
+          let failure: string | null = null;
+          const owned = await getDocs(query(collection(db, 'shop_shops'), where('ownerUid', '==', user.uid)))
+            .then((snap) => snap.docs.map((d) => d.id))
+            .catch((e) => { failure ??= describeFirestoreError(e, '店舗情報の取得'); return null; });
+          const ms = await getDocs(collection(db, `account_users/${user.uid}/memberships`))
+            .then((snap) => snap.docs.map((d) => d.id))
+            .catch((e) => { failure ??= describeFirestoreError(e, '店舗情報の取得'); return null; });
+          const st = resolveShopIdState({ owned, memberships: ms, active: getActiveShop() });
+          if (st.unresolved) {
+            // 未所属と言い切らず、確認できなかったことを出す（給与は「明細が無い」と誤解されやすい）
+            if (alive) { setLoadError(failure ?? SHOP_UNRESOLVED_TEXT); setLoading(false); }
+            return;
+          }
+          shopId = st.shopId;
         }
         if (!shopId) { if (alive) { setNoShop(true); setLoading(false); } return; }
         const snap = await getDocs(collection(db, `shop_shops/${shopId}/payrolls/${user.uid}/items`));
@@ -98,7 +111,7 @@ export function PayrollClient({ user }: { user: User }) {
       <PayrollFinalize user={user} />
       {loadError && <p role="alert" style={{ color: 'var(--noxa-status-error)', fontSize: 13, margin: '0 0 12px', padding: '10px 12px', borderRadius: 10, background: 'rgba(229,115,115,0.08)', border: '1px solid var(--noxa-status-error)' }}>{loadError}</p>}
       {loading ? <Eyebrow>読み込み中…</Eyebrow> : noShop ? (
-        <Section label="給与"><Empty>所属店舗が見つかりません。店舗に所属すると給与明細が表示されます。</Empty></Section>
+        <Section label="給与"><Empty>{`${SHOP_NOT_FOUND_TEXT}店舗に所属すると給与明細が表示されます。`}</Empty></Section>
       ) : periods.length === 0 ? (
         <Section label="給与明細"><Empty>確定済みの給与明細はまだありません（オーナーが給与を確定するとここに表示されます）。</Empty></Section>
       ) : (

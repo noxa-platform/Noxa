@@ -21,7 +21,9 @@ import {
 import type { User } from 'firebase/auth';
 import { db } from '@/lib/firebase/config';
 import { useDeviceClaims } from '@/lib/useShopContext';
-import { getActiveShop, pickShopId } from '@/lib/workspace';
+import { getActiveShop } from '@/lib/workspace';
+import { resolveShopIdState, SHOP_UNRESOLVED_TEXT } from '@/lib/shop-id-state';
+import { describeFirestoreError } from '@/lib/firestore-error';
 import type { StoreConfig } from './types';
 import { createDefaultStoreConfig } from './defaultConfig';
 import {
@@ -64,15 +66,20 @@ function usePosShop(user: User): PosShopContext {
         if (alive) setCtx({ loading: false, shopId: device.shopId, canConfig: false, isDevice: true, error: null });
         return;
       }
-      try {
-        const snap = await getDocs(query(collection(db, 'shop_shops'), where('ownerUid', '==', user.uid)));
-        const ms = await getDocs(collection(db, `account_users/${user.uid}/memberships`));
-        if (!alive) return;
-        const { shopId, isOwner } = pickShopId(snap.docs.map((d) => d.id), ms.docs.map((d) => d.id), getActiveShop());
-        setCtx({ loading: false, shopId, canConfig: isOwner, isDevice: false, error: null });
-      } catch (e) {
-        if (alive) setCtx({ loading: false, shopId: null, canConfig: false, isDevice: false, error: String((e as Error)?.message ?? e) });
-      }
+      // 読み取りは独立させ、失敗を「未所属」と混ぜない（Day109・shop-id-state.ts）
+      let failure: string | null = null;
+      const owned = await getDocs(query(collection(db, 'shop_shops'), where('ownerUid', '==', user.uid)))
+        .then((snap) => snap.docs.map((d) => d.id))
+        .catch((e) => { failure ??= describeFirestoreError(e, '店舗情報の取得'); return null; });
+      const ms = await getDocs(collection(db, `account_users/${user.uid}/memberships`))
+        .then((snap) => snap.docs.map((d) => d.id))
+        .catch((e) => { failure ??= describeFirestoreError(e, '店舗情報の取得'); return null; });
+      if (!alive) return;
+      const st = resolveShopIdState({ owned, memberships: ms, active: getActiveShop() });
+      setCtx({
+        loading: false, shopId: st.shopId, canConfig: st.isOwner, isDevice: false,
+        error: st.unresolved ? (failure ?? SHOP_UNRESOLVED_TEXT) : null,
+      });
     })();
     return () => { alive = false; };
   }, [user.uid, device.loading, device.isDevice, device.shopId]);

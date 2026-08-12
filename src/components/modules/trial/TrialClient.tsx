@@ -18,6 +18,7 @@ import type { User } from 'firebase/auth';
 import { db } from '@/lib/firebase/config';
 import { useShopId } from '@/lib/useShopId';
 import { describeFirestoreError } from '@/lib/firestore-error';
+import { describeMissingShop } from '@/lib/shop-id-state';
 
 /**
  * 体験入店 — Noxa OS モジュール（実データ）
@@ -1014,7 +1015,7 @@ export function TrialClient({ user }: { user: User }) {
               fontSize: 13,
             }}
           >
-            所属店舗が見つかりません。
+            {describeMissingShop(shop.shopError)}
           </div>
         ) : (
           <>

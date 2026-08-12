@@ -25,3 +25,34 @@ export function resolveStoreAccess(
   const isOwner = ownedShopIds.length > 0;
   return { hasStore: isOwner || membershipShopIds.length > 0, isOwner };
 }
+
+export interface StoreAccessState extends StoreAccess {
+  /** 判定に必要な読み取りが欠けている（＝「店舗が無い」と言い切れない）・Day109 */
+  unresolved: boolean;
+}
+
+/**
+ * 読み取り失敗（`null`）を「店舗が無い」と同一視しない版（Day109）。
+ *
+ * 旧実装は所有・所属の両方が失敗したとき素通りで hasStore=false にしていた。その結果、
+ * 通信断でアカウント画面の店舗運営セクションが丸ごと消え、しかも
+ * **「＋ 店舗を登録すると解放」**（＝すでに店舗があるのに自分の店を作れという誘導）が出ていた。
+ * 片方だけ失敗した場合も同様で、所属クエリが落ちるとキャストは店舗 UI を失う。
+ *
+ * 方針: 判明している側だけで**肯定に確定できるならする**（1件でもあれば hasStore は覆らない）。
+ * 否定（hasStore=false）と isOwner=false は、その根拠となる読み取りが揃っているときだけ確定する。
+ */
+export function resolveStoreAccessState(
+  ownedShopIds: readonly string[] | null,
+  membershipShopIds: readonly string[] | null,
+): StoreAccessState {
+  const owned = ownedShopIds ?? [];
+  const memberships = membershipShopIds ?? [];
+  const base = resolveStoreAccess(owned, memberships);
+  // isOwner=false は所有クエリが読めたときだけ確定（読めていなければ登録 CTA を出してはいけない）
+  const ownerUnknown = ownedShopIds === null;
+  if (base.hasStore) return { hasStore: true, isOwner: base.isOwner, unresolved: ownerUnknown };
+  // 否定は両方揃って初めて言える
+  const unresolved = ownerUnknown || membershipShopIds === null;
+  return { hasStore: false, isOwner: false, unresolved };
+}

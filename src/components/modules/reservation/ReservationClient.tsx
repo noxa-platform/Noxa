@@ -18,6 +18,7 @@ import { createDefaultStoreConfig } from '@/lib/pos/defaultConfig';
 import type { StoreConfig } from '@/lib/pos/types';
 import { businessDayKey } from '@/lib/datetime';
 import { describeFirestoreError } from '@/lib/firestore-error';
+import { describeMissingShop } from '@/lib/shop-id-state';
 
 /**
  * 予約モジュール（実データ）
@@ -449,7 +450,7 @@ export function ReservationClient({ user }: { user: User }) {
           <div className="noxa-eyebrow" style={{ padding: '40px 0' }}>読み込み中…</div>
         ) : !shop.shopId ? (
           <div style={{ padding: 24, border: '1px solid var(--noxa-border)', borderRadius: 14, background: 'var(--noxa-surface-card)' }}>
-            <p style={{ margin: 0, fontSize: 15 }}>所属店舗が見つかりません。</p>
+            <p style={{ margin: 0, fontSize: 15 }}>{describeMissingShop(shop.shopError)}</p>
           </div>
         ) : (
           <>

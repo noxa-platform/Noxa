@@ -24,19 +24,27 @@ import { join, relative } from 'node:path';
 //        現場は誤った判断（入店させる・回収し忘れる・予約を見落とす）をする。
 
 const COMPONENTS_ROOT = join(process.cwd(), 'src/components');
+// Day109: 走査対象を hooks / ストア（src/lib）まで広げる。
+// 画面だけを見ていたため、`useShopId` や POS/席回しストアが**画面より手前で**
+// 読み取り失敗を握り潰していたのを取り逃していた（＝どの画面も直せば直るように見えて直らない）。
+const LIB_ROOT = join(process.cwd(), 'src/lib');
 
-function tsxFiles(dir: string): string[] {
+function sourceFiles(dir: string, exts: string[]): string[] {
   const out: string[] = [];
   for (const e of readdirSync(dir, { withFileTypes: true })) {
     const p = join(dir, e.name);
-    if (e.isDirectory()) out.push(...tsxFiles(p));
-    else if (e.name.endsWith('.tsx')) out.push(p);
+    if (e.isDirectory()) out.push(...sourceFiles(p, exts));
+    else if (exts.some((x) => e.name.endsWith(x))) out.push(p);
   }
   return out;
 }
 
-const FILES = tsxFiles(COMPONENTS_ROOT)
-  .map((p) => ({ path: relative(process.cwd(), p).split(/[\\/]/).join('/'), src: readFileSync(p, 'utf8') }));
+const load = (paths: string[]) =>
+  paths.map((p) => ({ path: relative(process.cwd(), p).split(/[\\/]/).join('/'), src: readFileSync(p, 'utf8') }));
+
+const FILES = load(sourceFiles(COMPONENTS_ROOT, ['.tsx']));
+/** 画面＋hooks/ストア（文言・catch の規律はどちらにも同じく効かせる） */
+const ALL_FILES = [...FILES, ...load(sourceFiles(LIB_ROOT, ['.ts', '.tsx']))];
 
 /** ファイルごとの「catch 無しで finally だけの try に書き込みがある」件数 */
 function countCatchlessWrites(src: string): number {
@@ -58,15 +66,21 @@ describe('無音の失敗ガード', () => {
     expect(FILES.length).toBeGreaterThan(20);
   });
 
+  it('走査対象に hooks/ストア（src/lib）も入っている（Day109 で拡張）', () => {
+    expect(ALL_FILES.length).toBeGreaterThan(FILES.length + 20);
+    expect(ALL_FILES.some((f) => f.path === 'src/lib/useShopId.ts')).toBe(true);
+  });
+
   it('例外の中身を生のまま画面に出さない（文言は describeFirestoreError に集約する）', () => {
     // 旧実装: window.alert(String((e as Error)?.message ?? e)) —— 現場に「permission-denied」と出るだけ
+    // POS/席回しストアも同型で、店舗解決の失敗を生の message のまま画面に載せていた（Day109）
     const RAW = /\(e as Error\)\??\.message/;
-    const offenders = FILES.filter((f) => RAW.test(f.src)).map((f) => f.path);
+    const offenders = ALL_FILES.filter((f) => RAW.test(f.src)).map((f) => f.path);
     expect(offenders).toEqual([]);
   });
 
   it('書き込みを含む try が catch 無しで finally だけ、になっていない（1件でも増えたら赤）', () => {
-    const offenders = FILES
+    const offenders = ALL_FILES
       .map((f) => ({ path: f.path, count: countCatchlessWrites(f.src) }))
       .filter((r) => r.count > 0)
       .map((r) => `${r.path}（${r.count}件）`);

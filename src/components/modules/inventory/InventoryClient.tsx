@@ -20,6 +20,7 @@ import { useShopConfig, type ChoiceItem } from '@/lib/shopConfig';
 import { stockStatus, keepExpiryStatus, type StockStatus, type ExpiryStatus } from '@/lib/inventory/status';
 import { nextStockQty, nextRemainingPct, parseRemainingPct } from '@/lib/inventory/adjust';
 import { describeFirestoreError } from '@/lib/firestore-error';
+import { describeMissingShop } from '@/lib/shop-id-state';
 
 /**
  * ⑧ 在庫管理 — Noxa OS（実データ）
@@ -316,7 +317,7 @@ export function InventoryClient({ user }: { user: User }) {
   if (!shop.shopId) {
     return (
       <div style={shellStyle}>
-        <p style={{ color: 'var(--noxa-text-faint)', fontFamily: mono, fontSize: 13 }}>所属店舗が見つかりません。</p>
+        <p style={{ color: 'var(--noxa-text-faint)', fontFamily: mono, fontSize: 13 }}>{describeMissingShop(shop.shopError)}</p>
       </div>
     );
   }

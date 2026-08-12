@@ -15,6 +15,7 @@ import type { User } from 'firebase/auth';
 import { db } from '@/lib/firebase/config';
 import { useShopRole, hasShopRole } from '@/lib/useShopRole';
 import { describeFirestoreError } from '@/lib/firestore-error';
+import { describeMissingShop } from '@/lib/shop-id-state';
 
 /**
  * リスク客共有 — Noxa OS モジュール（機微・オーナー専用）
@@ -448,7 +449,7 @@ export function RiskClient({ user }: { user: User }) {
         {shop.loading || (canView && loading) ? (
           <p style={{ margin: 0, fontFamily: mono, fontSize: 12, color: 'var(--noxa-text-faint)' }}>読み込み中…</p>
         ) : !shop.shopId ? (
-          <p style={{ margin: 0, fontFamily: mono, fontSize: 12, color: 'var(--noxa-text-faint)' }}>所属店舗が見つかりません。</p>
+          <p style={{ margin: 0, fontFamily: mono, fontSize: 12, color: 'var(--noxa-text-faint)' }}>{describeMissingShop(shop.shopError)}</p>
         ) : !canView && shop.roleError ? (
           // 取得失敗を「権限なし」と言い切らない（店長/経理が権限を失ったように見えるのを防ぐ・Day108）
           <p role="alert" style={{ margin: 0, fontSize: 13, color: 'var(--noxa-status-error)', padding: '10px 12px', borderRadius: 10, background: 'rgba(229,115,115,0.08)', border: '1px solid var(--noxa-status-error)' }}>

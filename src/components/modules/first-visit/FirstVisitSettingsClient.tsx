@@ -12,6 +12,7 @@ import { useMenuStore } from '@/lib/menu/store';
 import { compressImage } from '@/lib/menu/imageCompress';
 import { COLOR_HEX, COLOR_LABEL, type MenuConfig, type MenuPanel } from '@/lib/menu/types';
 import { Shell, Section, Empty, Eyebrow, lbl, field, chip } from '@/components/modules/schedule/ScheduleClient';
+import { describeMissingShop } from '@/lib/shop-id-state';
 
 const mono = 'var(--noxa-font-mono)';
 
@@ -38,7 +39,7 @@ export function FirstVisitSettingsClient({ user }: { user: User }) {
   const setCfg = (c: MenuConfig) => { if (store.shopId) setCfgOverride({ shopId: store.shopId, config: c }); };
 
   if (store.loading) return <Shell title="初回案内 設定" eyebrow="Noxa OS · First Visit" crumb="first-visit/settings"><Eyebrow>読み込み中…</Eyebrow></Shell>;
-  if (!store.shopId) return <Shell title="初回案内 設定" eyebrow="Noxa OS · First Visit" crumb="first-visit/settings"><Section label="設定"><Empty>所属店舗が見つかりません。</Empty></Section></Shell>;
+  if (!store.shopId) return <Shell title="初回案内 設定" eyebrow="Noxa OS · First Visit" crumb="first-visit/settings"><Section label="設定"><Empty>{describeMissingShop(store.shopError)}</Empty></Section></Shell>;
   if (!store.canManage) return <Shell title="初回案内 設定" eyebrow="Noxa OS · First Visit" crumb="first-visit/settings"><Section label="設定"><Empty>この設定はオーナー専用です。</Empty></Section></Shell>;
 
   const openEdit = (p?: MenuPanel) => {

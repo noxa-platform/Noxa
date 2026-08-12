@@ -17,6 +17,7 @@ import { db } from '@/lib/firebase/config';
 import { useShopId } from '@/lib/useShopId';
 import { useShopConfig, type ChoiceItem } from '@/lib/shopConfig';
 import { describeFirestoreError } from '@/lib/firestore-error';
+import { describeMissingShop } from '@/lib/shop-id-state';
 
 /**
  * ⑦ 送迎 — 配車ボード + 送迎リクエスト一覧 + 地図プレースホルダ（実データ）
@@ -494,7 +495,7 @@ export function TransportClient({ user }: { user: User }) {
           <p className="noxa-eyebrow" style={{ fontSize: 11 }}>読み込み中…</p>
         ) : !shop.shopId ? (
           <div style={{ background: 'var(--noxa-surface-card)', border: '1px solid var(--noxa-border)', borderRadius: 16, padding: '28px 20px', textAlign: 'center', color: 'var(--noxa-text-muted)', fontSize: 14 }}>
-            所属店舗が見つかりません。
+            {describeMissingShop(shop.shopError)}
           </div>
         ) : (
         <>

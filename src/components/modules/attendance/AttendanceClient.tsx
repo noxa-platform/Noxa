@@ -5,7 +5,8 @@ import { addDoc, collection, deleteDoc, doc, getDocs, query, where, serverTimest
 import type { User } from 'firebase/auth';
 import { db } from '@/lib/firebase/config';
 import { useDeviceClaims } from '@/lib/useShopContext';
-import { getActiveShop, pickShopId } from '@/lib/workspace';
+import { getActiveShop } from '@/lib/workspace';
+import { resolveShopIdState, describeMissingShop, SHOP_UNRESOLVED_TEXT } from '@/lib/shop-id-state';
 import { useShopRole, hasShopRole } from '@/lib/useShopRole';
 import { summarizeTeamShifts, type TeamShift } from '@/lib/attendance/summary';
 import { resolveOvernightEndMs } from '@/lib/attendance/shift-time';
@@ -45,6 +46,8 @@ export function AttendanceClient({ user }: { user: User }) {
   const canOversee = !device.isDevice && hasShopRole(roleCtx, ['manager']);
   const [loading, setLoading] = useState(true);
   const [shopId, setShopId] = useState<string | null>(null);
+  // 店舗を「確認できなかった」理由（未所属と区別する・Day109）
+  const [shopError, setShopError] = useState<string | null>(null);
   const [shifts, setShifts] = useState<Shift[]>([]);
   const [busy, setBusy] = useState(false);
   // 30秒ティック。render 中の Date.now() 直呼び（react-hooks/purity）を避けるため now を state で持つ
@@ -71,15 +74,24 @@ export function AttendanceClient({ user }: { user: User }) {
     let alive = true;
     (async () => {
       let sid: string | null = device.isDevice ? device.shopId || null : null;
-      try {
-        if (!sid) {
-          const o = await getDocs(query(collection(db, 'shop_shops'), where('ownerUid', '==', user.uid)));
-          const ms = await getDocs(collection(db, `account_users/${user.uid}/memberships`));
-          sid = pickShopId(o.docs.map((d) => d.id), ms.docs.map((d) => d.id), getActiveShop()).shopId;
-        }
-      } catch { /* skip */ }
+      let unresolved: string | null = null;
+      if (!sid) {
+        // 旧実装は解決の失敗を `catch { /* skip */ }` で捨てており、通信断でも
+        // 「所属店舗が見つかりません」＝**打刻できない理由が分からない**状態だった（Day109）
+        let failure: string | null = null;
+        const owned = await getDocs(query(collection(db, 'shop_shops'), where('ownerUid', '==', user.uid)))
+          .then((snap) => snap.docs.map((d) => d.id))
+          .catch((e) => { failure ??= describeFirestoreError(e, '店舗情報の取得'); return null; });
+        const ms = await getDocs(collection(db, `account_users/${user.uid}/memberships`))
+          .then((snap) => snap.docs.map((d) => d.id))
+          .catch((e) => { failure ??= describeFirestoreError(e, '店舗情報の取得'); return null; });
+        const st = resolveShopIdState({ owned, memberships: ms, active: getActiveShop() });
+        sid = st.shopId;
+        if (st.unresolved) unresolved = failure ?? SHOP_UNRESOLVED_TEXT;
+      }
       if (!alive) return;
       setShopId(sid);
+      setShopError(unresolved);
       if (sid) await reload(sid);
       if (alive) setLoading(false);
     })();
@@ -116,7 +128,7 @@ export function AttendanceClient({ user }: { user: User }) {
   return (
     <Shell title="勤怠" eyebrow="ノクサ · 勤怠" crumb="attendance" badge={device.isDevice ? '店舗端末 · 実データ' : '実データ'}>
       {loading ? <Eyebrow>読み込み中…</Eyebrow> : !shopId ? (
-        <Section label="勤怠"><Empty>所属店舗が見つかりません。</Empty></Section>
+        <Section label="勤怠"><Empty>{describeMissingShop(shopError)}</Empty></Section>
       ) : (
         <>
           {loadError && <p role="alert" style={{ color: 'var(--noxa-status-error)', fontSize: 13, margin: '0 0 12px', padding: '10px 12px', borderRadius: 10, background: 'rgba(229,115,115,0.08)', border: '1px solid var(--noxa-status-error)' }}>{loadError}</p>}

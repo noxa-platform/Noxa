@@ -85,6 +85,8 @@ describe('静的ガード（1件の読み取り失敗で全ワークスペース
   it('useShopContext も所有クエリと所属クエリを独立させている', () => {
     const src = read('src/lib/useShopContext.ts');
     const body = src.split('export function useShopContext')[1];
-    expect((body.match(/\.catch\(\(\) => null\)/g) ?? []).length).toBe(2);
+    // Day109 で catch は「理由を控えて null を返す」形になった（失敗を未所属と混ぜないため）。
+    // 独立した catch が2つあり、いずれも null を返すこと＝片方の失敗で他方まで消さない構造
+    expect((body.match(/\.catch\(\([\s\S]{0,120}?return null; \}\)/g) ?? []).length).toBe(2);
   });
 });

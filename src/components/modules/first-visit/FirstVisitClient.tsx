@@ -12,6 +12,7 @@ import type { User } from 'firebase/auth';
 import { useMenuStore } from '@/lib/menu/store';
 import { useShopConfig } from '@/lib/shopConfig';
 import { COLOR_HEX, COLOR_LABEL, COLOR_ORDER, type MenuColor, type MenuPanel } from '@/lib/menu/types';
+import { describeMissingShop } from '@/lib/shop-id-state';
 
 const mono = 'var(--noxa-font-mono)';
 
@@ -103,7 +104,7 @@ export function FirstVisitClient({ user }: { user: User }) {
   }, [fsIndex, visiblePanels.length]);
 
   if (store.loading) return <div style={{ padding: 40, color: 'var(--noxa-text-muted)' }}>読み込み中…</div>;
-  if (!store.shopId) return <div style={{ padding: 40, color: 'var(--noxa-text-muted)' }}>所属店舗が見つかりません。</div>;
+  if (!store.shopId) return <div style={{ padding: 40, color: 'var(--noxa-text-muted)' }}>{describeMissingShop(store.shopError)}</div>;
 
   const fsPanel = fsIndex !== null ? visiblePanels[fsIndex] : null;
 
