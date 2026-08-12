@@ -63,6 +63,9 @@ export function CustomersClient({ user }: { user: User }) {
   const colPath = shop.shopId ? `shop_shops/${shop.shopId}/customers` : `personal_customers/${user.uid}/items`;
   // 出所（colPath）つきスナップショットから custs/loading を導出（set-state-in-effect 返済・Day18）
   const [custsSnap, setCustsSnap] = useState<{ path: string; list: Cust[] } | null>(null);
+  // 購読（読み取り）の失敗。空リスト確定だけだと「顧客0件」と同じ表示になり、
+  // 台帳が消えたように見える（Day108）
+  const [readError, setReadError] = useState<string | null>(null);
   const custs = useMemo(() => (custsSnap?.path === colPath ? custsSnap.list : []), [custsSnap, colPath]);
   const loading = shop.loading || custsSnap?.path !== colPath;
   const [sort, setSort] = useState<Sort>('sales');
@@ -107,7 +110,12 @@ export function CustomersClient({ user }: { user: User }) {
     const unsub = onSnapshot(collection(db, colPath), (snap) => {
       const list: Cust[] = []; snap.forEach((d) => list.push(mapCust(d.id, d.data())));
       setCustsSnap({ path: colPath, list });
-    }, () => setCustsSnap({ path: colPath, list: [] })); // エラーでも出所を確定し loading を解く
+      setReadError(null);
+    }, (e) => {
+      // 出所を確定して loading は解くが、「顧客が0件」と誤読させない（台帳が消えたように見える）
+      setCustsSnap({ path: colPath, list: [] });
+      setReadError(describeFirestoreError(e, '顧客台帳の読み込み'));
+    });
     return () => unsub();
   }, [colPath, shop.loading]);
 
@@ -137,6 +145,11 @@ export function CustomersClient({ user }: { user: User }) {
         </div>
         <button type="button" onClick={() => setAdding(true)} className="noxa-btn noxa-btn-primary">＋ 顧客を追加</button>
       </div>
+
+      {/* 読み取り失敗は「顧客0件」と区別する（台帳が消えたように見えるのを防ぐ・Day108） */}
+      {readError && (
+        <p role="alert" style={{ margin: '0 0 14px', padding: '10px 12px', borderRadius: 10, fontSize: 13, color: 'var(--noxa-status-error)', background: 'rgba(229,115,115,0.08)', border: '1px solid var(--noxa-status-error)' }}>{readError}</p>
+      )}
 
       {/* 一覧 / キャスト別成績 タブ（owner/manager のみ） */}
       {canTeam && (

@@ -705,6 +705,8 @@ export function TrialClient({ user }: { user: User }) {
   const [busy, setBusy] = useState(false);
   // 保存・ステータス遷移・削除・本入店の失敗（旧実装は catch が無く完全に無音だった）
   const [opError, setOpError] = useState<string | null>(null);
+  // 購読（読み取り）の失敗。空リスト確定だけだと「候補者0人」と同じ表示になる（Day108）
+  const [readError, setReadError] = useState<string | null>(null);
   // null=非表示, 'new'=新規, それ以外=編集対象 id
   const [editorKey, setEditorKey] = useState<DraftKey | null>(null);
 
@@ -727,8 +729,13 @@ export function TrialClient({ user }: { user: User }) {
           return a.name.localeCompare(b.name);
         });
         setCandSnap({ path, list: out });
+        setReadError(null);
       },
-      () => setCandSnap({ path, list: [] }), // エラーでも出所を確定し loading を解く
+      (e) => {
+        // 出所を確定して loading は解くが、「体験入店の候補者なし」と誤読させない
+        setCandSnap({ path, list: [] });
+        setReadError(describeFirestoreError(e, '体験入店記録の読み込み'));
+      },
     );
     return () => unsub();
   }, [path]);
@@ -893,6 +900,7 @@ export function TrialClient({ user }: { user: User }) {
       />
 
       <div style={{ position: 'relative' }}>
+        {readError && <p role="alert" style={{ color: 'var(--noxa-status-error)', fontSize: 13, margin: '0 0 12px', padding: '10px 12px', borderRadius: 10, background: 'rgba(229,115,115,0.08)', border: '1px solid var(--noxa-status-error)' }}>{readError}</p>}
         {/* 保存・ステータス遷移・削除・本入店の失敗（旧実装は無音で「押しても何も起きない」ように見えた） */}
         {opError && <p role="alert" style={{ color: 'var(--noxa-status-error)', fontSize: 13, margin: '0 0 12px', padding: '10px 12px', borderRadius: 10, background: 'rgba(229,115,115,0.08)', border: '1px solid var(--noxa-status-error)' }}>{opError}</p>}
         {/* breadcrumb */}

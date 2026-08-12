@@ -393,6 +393,11 @@ export function UnpaidClient({ user }: { user: User }) {
         {/* ── 状態分岐 ── */}
         {shop.loading || loading ? (
           <p style={{ fontFamily: mono, fontSize: 12, color: 'var(--noxa-text-faint)' }}>読み込み中…</p>
+        ) : !allowed && shop.roleError ? (
+          // 取得失敗を「権限なし」と言い切らない（店長/経理が権限を失ったように見えるのを防ぐ・Day108）
+          <p role="alert" style={{ margin: 0, fontSize: 13, color: 'var(--noxa-status-error)', padding: '10px 12px', borderRadius: 10, background: 'rgba(229,115,115,0.08)', border: '1px solid var(--noxa-status-error)' }}>
+            {shop.roleError} 権限があるか判断できないため、この画面は開けません。画面を再読み込みしてください。
+          </p>
         ) : !allowed ? (
           <p style={{ fontFamily: mono, fontSize: 12, color: 'var(--noxa-text-faint)' }}>このモジュールはオーナー専用です。</p>
         ) : !shop.shopId ? (

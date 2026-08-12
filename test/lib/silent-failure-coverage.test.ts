@@ -18,6 +18,10 @@ import { join, relative } from 'node:path';
 //   2. `finally` で busy を戻すだけの try（＝catch が無い）に await 書き込みが入っていないか
 //      → Day107 で **全件返済**（inventory/transport/risk/schedule/business-card/notifications）したため、
 //        ラチェットの KNOWN_DEBT は撤去。以後は**1件でも増えたら赤**の素のガード。
+//   3. 購読（onSnapshot）の失敗を「console.warn だけ」「空リストを入れるだけ」で終わらせていないか
+//      → **読み取りの無音**は「機能が壊れている」ことすら見えない（Day107/108）。
+//        権限エラーでも「予約0件」「出禁客なし」「売掛なし」と同じ表示になり、
+//        現場は誤った判断（入店させる・回収し忘れる・予約を見落とす）をする。
 
 const COMPONENTS_ROOT = join(process.cwd(), 'src/components');
 
@@ -80,6 +84,39 @@ describe('無音の失敗ガード', () => {
         if (!line.includes('console.warn(')) return;
         const window = lines.slice(i, i + 4).join('\n');
         if (!/\bset[A-Z]\w*\(/.test(window)) offenders.push(`${path}:${i + 1}`);
+      });
+    }
+    expect(offenders).toEqual([]);
+  });
+
+  it('購読の失敗を「空リストを入れるだけ」で終わらせない（0件表示と区別できなくなる）', () => {
+    // 旧実装: onSnapshot(ref, ok, () => setXSnap({ path, list: [] }))
+    //   → 出所を確定して loading は解けるが、画面は「1件も無い」と同じになる。
+    // 空リストを入れるエラーハンドラは、同じハンドラ内で失敗も state に載せること。
+    //
+    // 判定: `list: []` を含む行から**直近の `=>`（ハンドラの入口）まで戻り**、
+    // そのハンドラ本体の範囲（`});` / `),` / 行末の `;` まで・最大8行）だけを見る。
+    // 成功コールバック側の setReadError(null) を誤って拾わないよう、窓ではなく本体で判定する。
+    const ERROR_STATE = /\bset\w*Error\w*\(/;
+    const offenders: string[] = [];
+    for (const { path, src } of FILES) {
+      const lines = src.split('\n');
+      lines.forEach((line, i) => {
+        if (!/list:\s*\[\]/.test(line)) return;
+        // ハンドラの入口（=> を含む行）を最大3行遡って探す
+        let start = -1;
+        for (let j = i; j >= Math.max(0, i - 3); j -= 1) {
+          if (lines[j].includes('=>')) { start = j; break; }
+        }
+        if (start < 0) return; // ハンドラ外の list: []（初期値など）は対象外
+        // 本体の終わりを探す（同じ行で閉じる単文アローも含む）
+        let body = '';
+        for (let j = start; j < Math.min(lines.length, start + 8); j += 1) {
+          body += `${lines[j]}\n`;
+          if (j > start && /^\s*(\}\)|\),|\}\);)/.test(lines[j])) break;
+          if (j === start && /=>[^{]*\)\s*[;,]\s*$/.test(lines[j])) break; // 単文アローで完結
+        }
+        if (!ERROR_STATE.test(body)) offenders.push(`${path}:${i + 1}`);
       });
     }
     expect(offenders).toEqual([]);

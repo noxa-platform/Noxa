@@ -51,7 +51,11 @@ export function SalesClient({ user }: { user: User }) {
       snap.forEach((d) => { const x = d.data() as DocumentData; list.push({ id: d.id, name: (x.name as string) ?? '（無名）' }); });
       list.sort((a, b) => a.name.localeCompare(b.name, 'ja'));
       setCustomersSnap({ shopId: sid, list });
-    }, () => setCustomersSnap({ shopId: sid, list: [] }));
+    }, (e) => {
+      // 顧客が読めないと「顧客を選ぶ」欄が空になり、紐付けできない理由が分からない
+      setCustomersSnap({ shopId: sid, list: [] });
+      setLoadError((prev) => prev ?? describeFirestoreError(e, '顧客台帳の読み込み'));
+    });
     return () => unsub();
   }, [shop.shopId]);
 

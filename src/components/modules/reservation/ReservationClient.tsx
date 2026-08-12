@@ -117,6 +117,9 @@ export function ReservationClient({ user }: { user: User }) {
   const [busy, setBusy] = useState(false);
   // 保存・ステータス変更・削除の失敗（旧実装は catch が無く完全に無音だった）
   const [opError, setOpError] = useState<string | null>(null);
+  // 購読（読み取り）の失敗。空リスト確定だけだと「この日の予約はありません」と同じ表示になり、
+  // 当日の予約を見落とす（Day108）
+  const [readError, setReadError] = useState<string | null>(null);
 
   const resPath = shop.shopId ? `shop_shops/${shop.shopId}/reservations` : null;
   const custPath = shop.shopId ? `shop_shops/${shop.shopId}/customers` : null;
@@ -140,7 +143,10 @@ export function ReservationClient({ user }: { user: User }) {
         snap.forEach((d) => { const v = d.data() as DocumentData; list.push({ id: d.id, name: (v.name as string) ?? d.id }); });
         list.sort((a, b) => a.name.localeCompare(b.name, 'ja'));
         setSeatTables(list);
-      }, () => { /* 同上 */ }),
+      }, () => {
+        // 卓が読めないと「担当/席」の選択肢が空になり、来店済→開卓の連携も静かに効かなくなる
+        setReadError((prev) => prev ?? '席・キャストの一覧を読み込めませんでした。担当/席の選択が空になります。');
+      }),
     ];
     getDoc(doc(db, `shop_shops/${sid}/pos_config/active`))
       .then((s) => { if (s.exists()) setPosCfg({ ...createDefaultStoreConfig('active'), ...(s.data() as Partial<StoreConfig>) } as StoreConfig); })
@@ -155,7 +161,12 @@ export function ReservationClient({ user }: { user: User }) {
       const out: Reservation[] = [];
       snap.forEach((d) => out.push(mapReservation(d.id, d.data())));
       setResSnap({ path: resPath, list: out });
-    }, () => setResSnap({ path: resPath, list: [] })); // エラーでも出所を確定し loading を解く
+      setReadError(null);
+    }, (e) => {
+      // 出所を確定して loading は解くが、「予約なし」と誤読させない
+      setResSnap({ path: resPath, list: [] });
+      setReadError(describeFirestoreError(e, '予約の読み込み'));
+    });
     return () => unsub();
   }, [resPath]);
 
@@ -333,6 +344,7 @@ export function ReservationClient({ user }: { user: User }) {
       />
 
       <div style={{ position: 'relative' }}>
+        {readError && <p role="alert" style={{ color: 'var(--noxa-status-error)', fontSize: 13, margin: '0 0 12px', padding: '10px 12px', borderRadius: 10, background: 'rgba(229,115,115,0.08)', border: '1px solid var(--noxa-status-error)' }}>{readError}</p>}
         {/* ステータス変更・削除・来店処理の失敗（旧実装は無音で「押しても何も起きない」ように見えた）。
             フォームを開いているときはフォーム内に出すので、ここでは重複表示しない */}
         {opError && !showForm && <p role="alert" style={{ color: 'var(--noxa-status-error)', fontSize: 13, margin: '0 0 12px', padding: '10px 12px', borderRadius: 10, background: 'rgba(229,115,115,0.08)', border: '1px solid var(--noxa-status-error)' }}>{opError}</p>}
