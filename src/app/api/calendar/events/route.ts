@@ -32,6 +32,10 @@ export async function GET(request: NextRequest) {
 
   try {
     const allEvents = [];
+    // 取得できなかったカレンダー。旧実装は `continue` で黙って飛ばしており、
+    // 権限剥奪・カレンダー削除・レート制限のいずれでも「その日は予定なし」と同じ応答になっていた
+    // （＝出勤や同伴の予定を見落とす）。全滅は 502、部分失敗はヘッダで伝える（Day111）。
+    const failed: string[] = [];
 
     for (const calendarId of calendarIds) {
       const params = new URLSearchParams({
@@ -46,7 +50,7 @@ export async function GET(request: NextRequest) {
         { headers: { Authorization: `Bearer ${token}` } }
       );
 
-      if (!res.ok) continue;
+      if (!res.ok) { failed.push(calendarId); continue; }
 
       const data = await res.json();
       for (const item of data.items || []) {
@@ -61,9 +65,17 @@ export async function GET(request: NextRequest) {
       }
     }
 
-    return NextResponse.json(allEvents);
+    if (failed.length === calendarIds.length) {
+      // 1件も読めていない。空配列＋200 は「予定が無い」と区別できないので成功を装わない
+      return NextResponse.json(
+        { error: 'カレンダーを取得できませんでした', failedCalendarIds: failed },
+        { status: 502, headers: { 'X-Calendar-Failed': failed.join(',') } },
+      );
+    }
+    // 部分失敗は取得できた分を返しつつ、欠けている事実をヘッダで伝える（既存の配列レスポンス互換）
+    return NextResponse.json(allEvents, failed.length ? { headers: { 'X-Calendar-Failed': failed.join(',') } } : undefined);
   } catch {
-    return NextResponse.json([], { status: 500 });
+    return NextResponse.json({ error: 'カレンダーを取得できませんでした' }, { status: 500 });
   }
 }
 

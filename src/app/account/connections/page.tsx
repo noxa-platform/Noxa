@@ -1,11 +1,24 @@
 'use client';
 
-import { useState } from 'react';
+import { Suspense, useState } from 'react';
 import Link from 'next/link';
+import { useSearchParams } from 'next/navigation';
 import type { User } from 'firebase/auth';
 import { AuthGuard } from '@/components/AuthGuard';
 import { AccountShell } from '@/components/AccountShell';
 import { linkedProviderIds, linkGoogle, linkApple, linkEmailPassword, unlinkProvider } from '@/lib/auth';
+
+/**
+ * Google カレンダー連携（/api/calendar/callback）の結果表示・Day111。
+ * 旧実装は存在しない `/calendar` `/calendar/connect` へ戻しており、連携の成否にかかわらず 404 だった。
+ */
+const CALENDAR_RESULT: Record<string, { kind: 'ok' | 'err'; text: string }> = {
+  connected: { kind: 'ok', text: 'Google カレンダーと連携しました。' },
+  no_code: { kind: 'err', text: 'Google カレンダーの連携が中断されました（認可コードがありません）。もう一度お試しください。' },
+  token_exchange: { kind: 'err', text: 'Google カレンダーの連携に失敗しました（トークンの取得エラー）。時間をおいてもう一度お試しください。' },
+  invalid_state: { kind: 'err', text: 'Google カレンダーの連携リンクが無効か期限切れです（10分で失効します）。最初からやり直してください。' },
+  unknown: { kind: 'err', text: 'Google カレンダーの連携に失敗しました。時間をおいてもう一度お試しください。' },
+};
 
 const PROVIDERS: { id: string; label: string; hint: string }[] = [
   { id: 'google.com', label: 'Google', hint: 'Google アカウントでログイン' },
@@ -14,6 +27,7 @@ const PROVIDERS: { id: string; label: string; hint: string }[] = [
 ];
 
 function ConnectionsClient({ user }: { user: User }) {
+  const calendarResult = CALENDAR_RESULT[useSearchParams().get('calendar') ?? ''] ?? null;
   const [, setTick] = useState(0);
   const [busy, setBusy] = useState<string | null>(null);
   const [msg, setMsg] = useState<{ kind: 'ok' | 'err'; text: string } | null>(null);
@@ -69,6 +83,10 @@ function ConnectionsClient({ user }: { user: User }) {
       <p style={{ color: 'var(--noxa-text-muted)', fontSize: 13, lineHeight: 1.7, margin: '0 0 20px' }}>
         このアカウントに複数のログイン方法を紐付けられます。どの方法でも同じアカウントに入れます（1ユーザー＝1アカウント）。
       </p>
+
+      {calendarResult && (
+        <p role={calendarResult.kind === 'err' ? 'alert' : undefined} style={{ fontSize: 13, lineHeight: 1.6, padding: '10px 12px', borderRadius: 10, marginBottom: 16, background: calendarResult.kind === 'ok' ? 'rgba(123,232,161,0.10)' : 'rgba(226,109,109,0.10)', color: calendarResult.kind === 'ok' ? 'var(--noxa-status-success)' : 'var(--noxa-accent-destructive)', border: '1px solid var(--noxa-border)' }}>{calendarResult.text}</p>
+      )}
 
       {msg && (
         <p style={{ fontSize: 13, lineHeight: 1.6, padding: '10px 12px', borderRadius: 10, marginBottom: 16, background: msg.kind === 'ok' ? 'rgba(123,232,161,0.10)' : 'rgba(226,109,109,0.10)', color: msg.kind === 'ok' ? 'var(--noxa-status-success)' : 'var(--noxa-accent-destructive)', border: '1px solid var(--noxa-border)' }}>{msg.text}</p>
@@ -143,5 +161,6 @@ const btnLink: React.CSSProperties = { padding: '8px 16px', borderRadius: 10, cu
 const btnGhost: React.CSSProperties = { padding: '6px 12px', borderRadius: 8, cursor: 'pointer', background: 'transparent', color: 'var(--noxa-text-muted)', border: '1px solid var(--noxa-border)', fontSize: 12 };
 
 export default function Page() {
-  return <AuthGuard>{(user) => <AccountShell user={user}><ConnectionsClient user={user} /></AccountShell>}</AuthGuard>;
+  // useSearchParams は Suspense 境界が要る（静的プリレンダー時にビルドが落ちる）
+  return <AuthGuard>{(user) => <AccountShell user={user}><Suspense fallback={null}><ConnectionsClient user={user} /></Suspense></AccountShell>}</AuthGuard>;
 }

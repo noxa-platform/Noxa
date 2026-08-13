@@ -56,6 +56,12 @@ async function getTokenDoc(uid: string): Promise<TokenDoc | null> {
 }
 
 // Firestoreにトークンを保存
+//
+// refreshToken が空のときは**そのフィールドを書かない**（Day111）。
+// Google は再同意なしの再連携で refresh_token を返さないことがあり、旧実装はそれを空文字で
+// 上書きしていた。すると保存直後は動くが、アクセストークンが失効した瞬間に
+// `getValidToken` が「refreshToken 無し → null」となり、**連携が無言で死ぬ**
+// （画面には「カレンダー0件」と出るだけで、再連携が必要なことは伝わらない）。
 export async function saveTokenDoc(uid: string, data: {
   accessToken: string;
   refreshToken: string;
@@ -64,7 +70,7 @@ export async function saveTokenDoc(uid: string, data: {
   const db = getAdminDb();
   await db.doc(`account_google_tokens/${uid}`).set({
     accessToken: data.accessToken,
-    refreshToken: data.refreshToken,
+    ...(data.refreshToken ? { refreshToken: data.refreshToken } : {}),
     expiresAt: new Date(Date.now() + data.expiresIn * 1000),
     updatedAt: new Date(),
   }, { merge: true });
