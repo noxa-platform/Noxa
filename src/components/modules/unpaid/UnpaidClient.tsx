@@ -18,12 +18,14 @@ import { useShopRole, hasShopRole } from '@/lib/useShopRole';
 import { UNPAID_STATUS_OPTIONS, balanceOf, collectPatch, isOverdue as isOverdueAt, statusChangePatch, type UnpaidStatus } from '@/lib/unpaid/logic';
 import { describeFirestoreError } from '@/lib/firestore-error';
 import { describeMissingShop } from '@/lib/shop-id-state';
+import { SALES_EDIT_ROLES, SALES_EDIT_ROLE_LABEL, describeSalesEditDenied } from '@/lib/permission-guidance';
 
 /**
- * 売掛管理モジュール（機微・オーナー専用・実データ）
+ * 売掛管理モジュール（機微・実データ）
  *
- * shop_shops/{shopId}/unpaid を読み書きする。canManage（オーナー）のみ表示・編集可能。
- * 店舗端末・一般メンバーには「オーナー専用」表示のみを出す。
+ * shop_shops/{shopId}/unpaid を読み書きする。**owner / manager / accounting** が表示・編集可能
+ * （rules の `isShopMemberWithSalesEdit` と一致）。店舗端末・その他のロールには理由と依頼先を出す。
+ * 表示文言を「オーナー専用」と書くと、本来開ける店長・経理が諦めるので実態に合わせること（Day114）。
  */
 
 const mono = 'var(--noxa-font-mono)';
@@ -149,7 +151,7 @@ export function UnpaidClient({ user }: { user: User }) {
   const [readError, setReadError] = useState<string | null>(null);
 
   // 機微: owner/manager/accounting（rules の isShopMemberWithSalesEdit と一致。店長が未収を見られない問題の解消）
-  const allowed = hasShopRole(shop, ['manager', 'accounting']);
+  const allowed = hasShopRole(shop, SALES_EDIT_ROLES);
   const path = shop.shopId && allowed ? `shop_shops/${shop.shopId}/unpaid` : null;
   const records = useMemo(() => (path && recordsSnap?.path === path ? recordsSnap.list : []), [recordsSnap, path]);
   const loading = shop.loading || (!!path && recordsSnap?.path !== path);
@@ -360,7 +362,7 @@ export function UnpaidClient({ user }: { user: User }) {
             </h1>
           </div>
 
-          {/* オーナー専用バッジ */}
+          {/* 権限バッジ（実際の許可は owner/manager/accounting） */}
           <div
             style={{
               display: 'inline-flex',
@@ -387,7 +389,7 @@ export function UnpaidClient({ user }: { user: User }) {
                 boxShadow: '0 0 6px var(--noxa-status-warning)',
               }}
             />
-            オーナー専用
+            {SALES_EDIT_ROLE_LABEL}
           </div>
         </div>
 
@@ -400,7 +402,11 @@ export function UnpaidClient({ user }: { user: User }) {
             {shop.roleError} 権限があるか判断できないため、この画面は開けません。画面を再読み込みしてください。
           </p>
         ) : !allowed ? (
-          <p style={{ fontFamily: mono, fontSize: 12, color: 'var(--noxa-text-faint)' }}>このモジュールはオーナー専用です。</p>
+          // 実際の許可は owner/manager/accounting（rules の isShopMemberWithSalesEdit と一致）。
+          // 「オーナー専用」と言い切ると、**本来は開ける店長・経理が「自分には無理」と諦める**（Day114）
+          <p style={{ fontFamily: mono, fontSize: 12, color: 'var(--noxa-text-faint)' }}>
+            {describeSalesEditDenied('売掛管理')}
+          </p>
         ) : !shop.shopId ? (
           <p style={{ fontFamily: mono, fontSize: 12, color: 'var(--noxa-text-faint)' }}>{describeMissingShop(shop.shopError)}</p>
         ) : (

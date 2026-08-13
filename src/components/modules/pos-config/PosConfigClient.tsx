@@ -9,6 +9,7 @@ import { getActiveShop, pickShopId } from '@/lib/workspace';
 import type { StoreConfig, MenuItemDef, MenuCategoryDef, PinnedOrderDef } from '@/lib/pos/types';
 import { createDefaultStoreConfig } from '@/lib/pos/defaultConfig';
 import { describeFirestoreError } from '@/lib/firestore-error';
+import { describeOwnerSettingDenied } from '@/lib/permission-guidance';
 
 /**
  * POS 設定エディタ — 店舗ごとの料金・メニュー・税/手数料・クイック・カテゴリ・半額ルールを
@@ -26,6 +27,14 @@ export function PosConfigClient({ user }: { user: User }) {
   const [savedAt, setSavedAt] = useState<string | null>(null);
   const [dirty, setDirty] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  /**
+   * 自分が「オーナーではないが在籍している」か（Day114）。
+   * この画面は所有クエリしか見ないため、店長・経理・キャストは全員 `shops.empty` に落ちる。
+   * 旧実装はそこで一律に「店舗を登録してください」と案内しており、**在籍中のスタッフに
+   * 自分の店を作れと誘導**していた（Day109 の誤誘導と同型）。
+   * null は「所属を確認できていない」＝どちらとも言い切らない。
+   */
+  const [isMember, setIsMember] = useState<boolean | null>(null);
 
   // 未保存の変更がある間はタブ閉じ/リロードを確認（料金表の編集途中の入力消失防止）
   useEffect(() => {
@@ -41,7 +50,14 @@ export function PosConfigClient({ user }: { user: User }) {
       try {
         const shops = await getDocs(query(collection(db, 'shop_shops'), where('ownerUid', '==', user.uid)));
         if (!alive) return;
-        if (shops.empty) { setLoading(false); return; }
+        if (shops.empty) {
+          // オーナーではない＝在籍しているのか本当に店が無いのかで案内が真逆になる
+          const ms = await getDocs(collection(db, `account_users/${user.uid}/memberships`))
+            .then((s) => !s.empty)
+            .catch(() => null); // 確認できないときは断定しない（Day109）
+          if (alive) { setIsMember(ms); setLoading(false); }
+          return;
+        }
         // アクティブ店舗を尊重（WorkspaceSwitcher）。旧実装は「最初の店」固定で、
         // 複数店舗オーナーが選択中でない店の料金設定を書き換える事故があった
         const ownedIds = shops.docs.map((d) => d.id);
@@ -83,6 +99,28 @@ export function PosConfigClient({ user }: { user: User }) {
           <Empty>
             <span role="alert" style={{ color: 'var(--noxa-status-error)' }}>{err}</span>
             <br />店舗と権限を確認できないため、料金設定を開けません。画面を再読み込みしてください。
+          </Empty>
+        </Shell>
+      );
+    }
+    // 在籍しているスタッフに「店舗を登録してください」は誤誘導。自分にできる次の一手を出す（Day114）
+    if (isMember) {
+      return (
+        <Shell>
+          <Empty>
+            {describeOwnerSettingDenied('料金・メニュー')}
+            <br /><Link href="/pos" style={{ color: 'var(--noxa-accent-primary-ink)' }}>POS へ戻る</Link>
+          </Empty>
+        </Shell>
+      );
+    }
+    if (isMember === null) {
+      // 所属を確認できていない＝「店が無い」前提の案内を出さない
+      return (
+        <Shell>
+          <Empty>
+            料金・メニューの設定はオーナー専用です。所属を確認できなかったため、画面を再読み込みしてください。
+            <br /><Link href="/pos" style={{ color: 'var(--noxa-accent-primary-ink)' }}>POS へ戻る</Link>
           </Empty>
         </Shell>
       );

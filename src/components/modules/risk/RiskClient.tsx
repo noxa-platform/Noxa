@@ -16,14 +16,16 @@ import { db } from '@/lib/firebase/config';
 import { useShopRole, hasShopRole } from '@/lib/useShopRole';
 import { describeFirestoreError } from '@/lib/firestore-error';
 import { describeMissingShop } from '@/lib/shop-id-state';
+import { SALES_EDIT_ROLES, SALES_EDIT_ROLE_LABEL, describeSalesEditDenied } from '@/lib/permission-guidance';
 
 /**
- * リスク客共有 — Noxa OS モジュール（機微・オーナー専用）
+ * リスク客共有 — Noxa OS モジュール（機微）
  *
  * 出禁・要注意・売掛トラブル・迷惑行為客を店舗内で共有するモジュール。
  * 実名は伏せ、イニシャル＋特徴のみ表示。共有範囲は自店のみ。
  * shop_shops/{shopId}/risk_customers を読み書きする（onSnapshot でリアルタイム）。
- * オーナー（shop.canManage）のみ閲覧・編集可能。
+ * **owner / manager / accounting** が閲覧・編集可能（rules の `isShopMemberWithSalesEdit` と一致）。
+ * 表示文言を「オーナー専用」と書くと、本来開ける店長・経理が諦めるので実態に合わせること（Day114）。
  */
 
 const mono = 'var(--noxa-font-mono)';
@@ -135,7 +137,7 @@ export function RiskClient({ user }: { user: User }) {
   const [eDate, setEDate] = useState('');
 
   // 機微: owner/manager/accounting（rules の isShopMemberWithSalesEdit と一致）
-  const canView = hasShopRole(shop, ['manager', 'accounting']);
+  const canView = hasShopRole(shop, SALES_EDIT_ROLES);
   const path = shop.shopId && canView ? `shop_shops/${shop.shopId}/risk_customers` : null;
   const entries = useMemo(() => (path && entriesSnap?.path === path ? entriesSnap.list : []), [entriesSnap, path]);
   const loading = shop.loading || (!!path && entriesSnap?.path !== path);
@@ -456,7 +458,11 @@ export function RiskClient({ user }: { user: User }) {
             {shop.roleError} 権限があるか判断できないため、この画面は開けません。画面を再読み込みしてください。
           </p>
         ) : !canView ? (
-          <p style={{ margin: 0, fontFamily: mono, fontSize: 12, color: 'var(--noxa-text-faint)' }}>このモジュールはオーナー専用です。</p>
+          // 実際の許可は owner/manager/accounting（rules の isShopMemberWithSalesEdit と一致）。
+          // 「オーナー専用」と言い切ると、**本来は開ける店長・経理が「自分には無理」と諦める**（Day114）
+          <p style={{ margin: 0, fontFamily: mono, fontSize: 12, color: 'var(--noxa-text-faint)' }}>
+            {describeSalesEditDenied('リスク客の共有')}
+          </p>
         ) : (
           <>
             {/* フィルタ */}

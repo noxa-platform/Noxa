@@ -44,7 +44,7 @@ export function resolveShopRoleState(input: {
 }
 
 /** 指定ロールのいずれかを持つか（オーナーは常に true）。取得失敗時は false のまま＝許可へ倒さない */
-export function hasRole(state: { canManage: boolean; role: string | null }, roles: string[]): boolean {
+export function hasRole(state: { canManage: boolean; role: string | null }, roles: readonly string[]): boolean {
   if (state.canManage) return true;
   return state.role !== null && roles.includes(state.role);
 }

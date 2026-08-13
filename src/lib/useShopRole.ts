@@ -55,6 +55,6 @@ export function useShopRole(user: User): ShopRoleCtx {
 }
 
 /** 指定ロールのいずれかを持つか（オーナーは常に true・実体は shop-role-state の純関数） */
-export function hasShopRole(ctx: ShopRoleCtx, roles: string[]): boolean {
+export function hasShopRole(ctx: ShopRoleCtx, roles: readonly string[]): boolean {
   return hasRole(ctx, roles);
 }

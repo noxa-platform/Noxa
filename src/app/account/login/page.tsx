@@ -4,7 +4,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { onAuthStateChanged } from 'firebase/auth';
 import type { AuthCredential } from 'firebase/auth';
-import { loginWithEmail, signinWithGoogle, signinWithApple, handlePostLoginRedirect, isAllowedRedirect, LinkPasswordRequiredError } from '@/lib/auth';
+import { loginWithEmail, signinWithGoogle, signinWithApple, handlePostLoginRedirect, describePostLoginDestination, LinkPasswordRequiredError } from '@/lib/auth';
 import { startLineLogin, isLineLoginEnabled } from '@/lib/auth/line';
 import { LinkAccountDialog } from '@/components/auth/LinkAccountDialog';
 import { auth } from '@/lib/firebase/config';
@@ -13,6 +13,8 @@ function LoginForm() {
   const router = useRouter();
   const params = useSearchParams();
   const redirect = params.get('redirect');
+  // ログイン後の戻り先の説明（同一 origin はパス・別アプリはホスト名。無ければ null）
+  const destination = describePostLoginDestination(redirect);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
@@ -187,11 +189,11 @@ function LoginForm() {
           </h1>
           <p style={{ color: 'var(--noxa-text-muted)', fontSize: 14, margin: 0 }}>
             Noxa アカウントでログイン
-            {redirect && isAllowedRedirect(redirect) && (
+            {destination && (
               <>
                 <br />
                 <span style={{ fontSize: 12 }}>
-                  (ログイン後 {safeHost(redirect)} に戻ります)
+                  ({destination})
                 </span>
               </>
             )}
@@ -336,14 +338,6 @@ function LoginForm() {
       )}
     </main>
   );
-}
-
-function safeHost(url: string): string {
-  try {
-    return new URL(url).hostname;
-  } catch {
-    return url;
-  }
 }
 
 function parseFirebaseAuthError(err: unknown): string {

@@ -104,6 +104,33 @@ export function planPostLoginNavigation(
   return { kind: 'cross-origin', url: redirect };
 }
 
+/**
+ * ログイン画面に出す「ログイン後どこへ戻るか」の説明（Day114）。
+ *
+ * 旧実装は redirect の **hostname** を一律に出しており、AuthGuard に弾かれた同一 origin の
+ * 復帰（＝大半のケース）でも「ログイン後 noxa-delta.vercel.app に戻ります」と表示していた。
+ * 自分が今いるサイトの名前を出されると**別サイトへ飛ばされる**ように読め、戻り先が伝わらない。
+ * 同一 origin はパス、別アプリ（yorulog 等）はホスト名——判定は planPostLoginNavigation を流用する。
+ * 戻り先が無い/許可外なら null（何も出さない）。
+ */
+export function describePostLoginDestination(
+  redirect: string | null | undefined,
+  origin: string | null = currentOrigin(),
+): string | null {
+  const plan = planPostLoginNavigation(redirect, origin);
+  if (plan.kind === 'fallback') return null;
+  if (plan.kind === 'same-origin') {
+    // クエリは招待コード等を含むので表示しない（肩越しに見られる想定の店舗端末もある）
+    const path = plan.path.split('?')[0].split('#')[0] || '/';
+    return `ログイン後 ${path} に戻ります`;
+  }
+  try {
+    return `ログイン後 ${new URL(plan.url).hostname} に戻ります`;
+  } catch {
+    return null;
+  }
+}
+
 /** Email/Password サインアップ */
 export async function signupWithEmail(email: string, password: string, displayName?: string): Promise<User> {
   const cred = await createUserWithEmailAndPassword(auth, email, password);

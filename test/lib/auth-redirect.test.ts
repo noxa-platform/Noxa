@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import type { User } from 'firebase/auth';
 import {
   isAllowedRedirect, needsEmailVerification, linkedProviderIds,
-  buildLoginRedirectUrl, planPostLoginNavigation,
+  buildLoginRedirectUrl, planPostLoginNavigation, describePostLoginDestination,
 } from '../../src/lib/auth';
 
 // クロスドメイン redirect のオープン redirect 防止ガード（Day55）。
@@ -200,5 +200,32 @@ describe('linkedProviderIds', () => {
   it('providerData の providerId を列挙する', () => {
     expect(linkedProviderIds(fakeUser({ providerIds: ['google.com', 'password'] }))).toEqual(['google.com', 'password']);
     expect(linkedProviderIds(fakeUser({ providerIds: [] }))).toEqual([]);
+  });
+});
+
+// ログイン後の戻り先の**説明文**（Day114）。旧実装は同一 origin の復帰でも hostname を出しており、
+// AuthGuard に弾かれた利用者に「ログイン後 noxa-delta.vercel.app に戻ります」と、
+// いま自分がいるサイトの名前を見せていた（別サイトへ飛ばされるように読める）。
+describe('describePostLoginDestination', () => {
+  const ORIGIN = 'https://noxa-delta.vercel.app';
+
+  it('同一 origin はホスト名ではなくパスで示す', () => {
+    expect(describePostLoginDestination(`${ORIGIN}/store/join`, ORIGIN)).toBe('ログイン後 /store/join に戻ります');
+  });
+
+  it('クエリ・ハッシュは出さない（招待コードを画面に晒さない）', () => {
+    expect(describePostLoginDestination(`${ORIGIN}/store/join?shop=S1&code=SECRET#x`, ORIGIN))
+      .toBe('ログイン後 /store/join に戻ります');
+  });
+
+  it('別アプリ（許可ホスト）はホスト名で示す', () => {
+    expect(describePostLoginDestination('https://yorulog.vercel.app/home', ORIGIN))
+      .toBe('ログイン後 yorulog.vercel.app に戻ります');
+  });
+
+  it('戻り先が無い・許可外なら何も出さない', () => {
+    expect(describePostLoginDestination(null, ORIGIN)).toBeNull();
+    expect(describePostLoginDestination('https://evil.example.com/x', ORIGIN)).toBeNull();
+    expect(describePostLoginDestination('not-a-url', ORIGIN)).toBeNull();
   });
 });
