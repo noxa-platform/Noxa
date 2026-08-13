@@ -10,6 +10,7 @@ import {
   signInWithEmailAndPassword,
   createUserWithEmailAndPassword,
   sendEmailVerification,
+  sendPasswordResetEmail,
   signInWithPopup,
   signOut as fbSignOut,
   GoogleAuthProvider,
@@ -110,6 +111,29 @@ export async function signupWithEmail(email: string, password: string, displayNa
   // メール検証（Day11）: 送信失敗でもサインアップ自体は成立させる（バナーから再送可能）
   try { await sendEmailVerification(cred.user); } catch { /* 再送導線あり */ }
   return cred.user;
+}
+
+/**
+ * パスワード再設定メールの送信（Day112）。
+ *
+ * ログイン画面には「パスワードを忘れた？」の導線が前からあるのに、遷移先の `/account/reset` も
+ * `sendPasswordResetEmail` の呼び出しも**リポジトリ内に存在しなかった**＝メール＋パスワードで
+ * 登録した利用者はパスワードを忘れた時点でアカウントに二度と入れなかった（詰みの導線）。
+ *
+ * **存在しないメールでもエラーにしない**（`auth/user-not-found` を握る）。
+ * ここで「そのメールは登録されていません」と返すと、**どのメールが登録済みかを外部から確認できる**
+ * （ユーザー列挙）。夜職の利用者にとって在籍の露見は実害なので、成否にかかわらず同じ案内を出す。
+ * ネットワーク断や送信上限などの**本当に再試行が要る失敗は投げる**（黙って成功に見せない）。
+ */
+export async function sendPasswordReset(email: string): Promise<void> {
+  try {
+    await sendPasswordResetEmail(auth, email);
+  } catch (e) {
+    const code = (e as { code?: string })?.code ?? '';
+    // 未登録・形式不正は「送った」と同じ扱い（列挙させない）
+    if (code === 'auth/user-not-found' || code === 'auth/invalid-email') return;
+    throw e;
+  }
 }
 
 /** 検証メールの再送（未検証バナー用） */

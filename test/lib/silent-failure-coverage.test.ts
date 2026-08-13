@@ -53,6 +53,35 @@ const APP_FILES = load(sourceFiles(APP_ROOT, ['.tsx', '.ts'])).filter((f) => !f.
 /** 画面＋hooks/ストア（文言・catch の規律はどこにも同じく効かせる） */
 const ALL_FILES = [...FILES, ...APP_FILES, ...load(sourceFiles(LIB_ROOT, ['.ts', '.tsx']))];
 
+/**
+ * `try` に入れずに await 書き込みしている「画面を動かす関数」を拾う（Day112）。
+ *
+ * 既存の判定は `try { … } finally { … }` の形だけを見ていたため、**try 自体が無い**書き癖を
+ * 取り逃していた（`/account/notifications` の保存がこれで、失敗するとボタンが「保存中…」のまま固まる）。
+ * 呼び出し側で catch する薄いラッパ（本体が書き込み1行だけ）まで赤にすると誤検知になるので、
+ * **自分で画面状態を更新している関数**（`set*(...)` を含む）に限定する。
+ */
+function bareWriteHandlers(src: string): number {
+  const WRITE = /await\s+(addDoc|updateDoc|deleteDoc|setDoc|runTransaction)\s*\(/;
+  const HEAD = /(async function\s+\w+\s*\([^)]*\)\s*\{|const\s+\w+\s*=\s*async\s*\([^)]*\)\s*=>\s*\{)/g;
+  let n = 0;
+  let m: RegExpExecArray | null;
+  while ((m = HEAD.exec(src)) !== null) {
+    // 関数本体を波括弧の対応で切り出す
+    let i = HEAD.lastIndex;
+    let depth = 1;
+    while (i < src.length && depth > 0) {
+      const c = src[i];
+      if (c === '{') depth += 1;
+      else if (c === '}') depth -= 1;
+      i += 1;
+    }
+    const body = src.slice(HEAD.lastIndex, i);
+    if (WRITE.test(body) && !/\bcatch\b/.test(body) && /\bset[A-Z]\w*\(/.test(body)) n += 1;
+  }
+  return n;
+}
+
 /** ファイルごとの「catch 無しで finally だけの try に書き込みがある」件数 */
 function countCatchlessWrites(src: string): number {
   // `try { … await addDoc/updateDoc/deleteDoc/setDoc/runTransaction … } finally { … }`
@@ -95,6 +124,14 @@ describe('無音の失敗ガード', () => {
   it('書き込みを含む try が catch 無しで finally だけ、になっていない（1件でも増えたら赤）', () => {
     const offenders = ALL_FILES
       .map((f) => ({ path: f.path, count: countCatchlessWrites(f.src) }))
+      .filter((r) => r.count > 0)
+      .map((r) => `${r.path}（${r.count}件）`);
+    expect(offenders).toEqual([]);
+  });
+
+  it('try に入れない裸の await 書き込みで画面を動かしていない（「保存中…」のまま固まる形）', () => {
+    const offenders = ALL_FILES
+      .map((f) => ({ path: f.path, count: bareWriteHandlers(f.src) }))
       .filter((r) => r.count > 0)
       .map((r) => `${r.path}（${r.count}件）`);
     expect(offenders).toEqual([]);

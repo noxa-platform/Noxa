@@ -1,5 +1,6 @@
 'use client';
 import { useState, useEffect } from 'react';
+import Link from 'next/link';
 import { doc, getDoc, setDoc, serverTimestamp } from 'firebase/firestore';
 import { updateProfile } from 'firebase/auth';
 import { AuthGuard } from '@/components/AuthGuard';
@@ -83,6 +84,16 @@ function ProfileEditor({ user }: { user: User }) {
           {saving ? '保存中…' : saved ? '保存しました ✓' : '保存'}
         </button>
         {saveError && <p role="alert" style={{ color: 'var(--noxa-status-error)', fontSize: 13, margin: 0, padding: '10px 12px', borderRadius: 10, background: 'rgba(229,115,115,0.08)', border: '1px solid var(--noxa-status-error)' }}>{saveError}</p>}
+      </div>
+
+      {/* 通知設定への導線（Day112）。このページはどこからもリンクされておらず、
+          Noxa 全サービス共通の通知 ON/OFF を変更する手段が無かった */}
+      <div className="noxa-card" style={{ maxWidth: 640, marginTop: 20, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16, flexWrap: 'wrap' }}>
+        <div>
+          <div style={{ color: 'var(--noxa-text-primary)', fontSize: 14, fontWeight: 500, marginBottom: 4 }}>通知設定</div>
+          <div style={{ color: 'var(--noxa-text-muted)', fontSize: 12 }}>誕生日・次回アクション・ご無沙汰・日次サマリの受け取りを切り替えます</div>
+        </div>
+        <Link href="/account/notifications" className="noxa-btn noxa-btn-secondary" style={{ padding: '10px 16px', fontSize: 13 }}>開く →</Link>
       </div>
 
       <div className="noxa-card" style={{ maxWidth: 640, marginTop: 20 }}>
