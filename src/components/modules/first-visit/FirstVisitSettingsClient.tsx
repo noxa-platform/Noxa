@@ -13,6 +13,7 @@ import { compressImage } from '@/lib/menu/imageCompress';
 import { COLOR_HEX, COLOR_LABEL, type MenuConfig, type MenuPanel } from '@/lib/menu/types';
 import { Shell, Section, Empty, Eyebrow, lbl, field, chip } from '@/components/modules/schedule/ScheduleClient';
 import { describeMissingShop } from '@/lib/shop-id-state';
+import { describeFirestoreError } from '@/lib/firestore-error';
 
 const mono = 'var(--noxa-font-mono)';
 
@@ -30,6 +31,9 @@ export function FirstVisitSettingsClient({ user }: { user: User }) {
   const [busy, setBusy] = useState(false);
   const [pin, setPin] = useState('');
   const [pinMsg, setPinMsg] = useState('');
+  // パネル保存・画像取り込みの失敗（旧実装は catch が無く、保存を押しても
+  // ダイアログが閉じないだけで理由が出なかった＝Day106 の書き癖の未返済分・Day115）
+  const [opError, setOpError] = useState<string | null>(null);
   // 表示設定: 未編集の間は store.config に追従し、編集を始めたら override（出所=shopId つき）が勝つ
   // （menu store の loading は casts 到着基準で config は後着し得るため、mount 時固定だと
   //  「既定値のまま保存→実設定を上書き」の穴がある。旧 effect ミラーは set-state-in-effect
@@ -49,13 +53,15 @@ export function FirstVisitSettingsClient({ user }: { user: User }) {
 
   const onFile = async (file: File) => {
     if (!edit) return;
+    setOpError(null);
     try { const dataUrl = await compressImage(file); setEdit({ ...edit, image: dataUrl, imageDirty: true }); }
-    catch { /* skip */ }
+    // 旧実装は握り潰しており、画像を選んでも**何も起きない**（選び直しを繰り返すだけ）だった
+    catch { setOpError('画像を読み込めませんでした。別の画像（JPEG/PNG）でお試しください。'); }
   };
 
   const saveEdit = async () => {
     if (!edit || busy) return;
-    setBusy(true);
+    setBusy(true); setOpError(null);
     try {
       let id = edit.id;
       if (!id) {
@@ -67,6 +73,9 @@ export function FirstVisitSettingsClient({ user }: { user: User }) {
       await store.savePanelMeta(id, meta);
       if (edit.imageDirty && edit.image) await store.setPanelImage(id, edit.image);
       setEdit(null);
+    } catch (e) {
+      // 失敗時は setEdit(null) に到達しない＝編集内容は残る。理由を必ず出す
+      setOpError(describeFirestoreError(e, 'パネルの保存'));
     } finally { setBusy(false); }
   };
 
@@ -80,6 +89,15 @@ export function FirstVisitSettingsClient({ user }: { user: User }) {
 
   return (
     <Shell title="初回案内 設定" eyebrow="Noxa OS · First Visit" crumb="first-visit/settings" badge="オーナー設定">
+      {/* 購読の失敗（空表示＝「未設定」と誤読させない・Day115）／操作の失敗 */}
+      {store.dataError && (
+        <p role="alert" style={{ margin: '0 0 12px', padding: '10px 12px', borderRadius: 10, fontSize: 13, color: 'var(--noxa-status-error)', background: 'rgba(229,115,115,0.08)', border: '1px solid var(--noxa-status-error)' }}>
+          {store.dataError} 一覧が空に見えても「未設定」とは限りません。画面を再読み込みしてください。
+        </p>
+      )}
+      {opError && (
+        <p role="alert" style={{ margin: '0 0 12px', padding: '10px 12px', borderRadius: 10, fontSize: 13, color: 'var(--noxa-status-error)', background: 'rgba(229,115,115,0.08)', border: '1px solid var(--noxa-status-error)' }}>{opError}</p>
+      )}
       {/* パネル管理 */}
       <Section label={`パネル（${store.panels.length}）`}>
         <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>

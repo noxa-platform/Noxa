@@ -62,7 +62,7 @@ const ALL_FILES = [...FILES, ...APP_FILES, ...load(sourceFiles(LIB_ROOT, ['.ts',
  * **自分で画面状態を更新している関数**（`set*(...)` を含む）に限定する。
  */
 function bareWriteHandlers(src: string): number {
-  const WRITE = /await\s+(addDoc|updateDoc|deleteDoc|setDoc|runTransaction)\s*\(/;
+  const WRITE = new RegExp(String.raw`await\s+(` + WRITE_SRC + `)`);
   const HEAD = /(async function\s+\w+\s*\([^)]*\)\s*\{|const\s+\w+\s*=\s*async\s*\([^)]*\)\s*=>\s*\{)/g;
   let n = 0;
   let m: RegExpExecArray | null;
@@ -83,16 +83,55 @@ function bareWriteHandlers(src: string): number {
 }
 
 /** ファイルごとの「catch 無しで finally だけの try に書き込みがある」件数 */
+/**
+ * 「書き込み」の判定（Day115）。
+ *
+ * 旧実装は Firestore API の**直呼び**（addDoc 等）だけを書き込みと見なしていたため、
+ * **ストア経由の書き込み**（`await store.savePanelMeta(...)` のように useXxxStore が
+ * 内部で setDoc する形）が全判定を素通りしていた。実際に初回案内の
+ * パネル保存とオーダー送信が catch 無しのまま残り、失敗しても画面に何も出ていなかった。
+ * ストアのメソッド名は増えるので、**`store.` 経由の await 呼び出し**を書き込み候補として扱う。
+ */
+const WRITE_SRC = String.raw`(addDoc|updateDoc|deleteDoc|setDoc|runTransaction)\s*\(|store\.\w+\s*\(`;
+
 function countCatchlessWrites(src: string): number {
   // `try { … await addDoc/updateDoc/deleteDoc/setDoc/runTransaction … } finally { … }`
   // の形（間に catch が挟まらないもの）を検出する。ネストは深追いせず、
   // 「try の直後に catch を挟まず finally が来る」ケースだけを見る。
-  const WRITE = /\b(addDoc|updateDoc|deleteDoc|setDoc|runTransaction)\s*\(/;
+  const WRITE = new RegExp(WRITE_SRC);
   const re = /\btry\s*\{([\s\S]*?)\}\s*(catch|finally)\b/g;
   let n = 0;
   let m: RegExpExecArray | null;
   while ((m = re.exec(src)) !== null) {
     if (m[2] === 'finally' && WRITE.test(m[1])) n += 1;
+  }
+  return n;
+}
+
+/**
+ * **中身が空のエラーハンドラ**を拾う（Day115）。
+ *
+ * これまでの判定はすべて「ハンドラが何かをしている」ことを前提にしていた
+ * （console.warn している／空リストを入れている／生 message を画面に出している）。
+ * そのため `() => {}` や `.catch(() => {})` のように**何もしないハンドラ**は、
+ * 5 つの判定を全部すり抜けていた。実際に
+ *   - 店舗設定の発行済み招待（onSnapshot の第3引数が注釈だけの noop）
+ *   - 予約からの開卓（pos_config の `.catch(() => { 既定料金のまま })`）
+ * が無音のまま残り、後者は**既定料金の伝票が売上まで流れる**形だった。
+ *
+ * localStorage / clipboard / JSON.parse など「失敗しても実害が無い」ものまで赤にすると
+ * 誤検知だらけになるので、**Firestore の購読・取得に付いた空ハンドラ**に限定する。
+ */
+function emptyFirestoreHandlers(src: string): number {
+  const EMPTY = String.raw`\(\s*\w*\s*\)\s*=>\s*\{\s*(/\*[\s\S]*?\*/|//[^\n]*)?\s*\}`;
+  let n = 0;
+  // onSnapshot(..., success, <空ハンドラ>)
+  for (const m of src.matchAll(new RegExp(String.raw`onSnapshot\(` + String.raw`[\s\S]*?` + String.raw`,\s*` + EMPTY + String.raw`\s*\)`, 'g'))) {
+    if (m[0].includes('onSnapshot')) n += 1;
+  }
+  // getDoc/getDocs(...).then(...).catch(<空ハンドラ>)
+  for (const m of src.matchAll(new RegExp(String.raw`(getDoc|getDocs)\(` + String.raw`[\s\S]{0,400}?` + String.raw`\.catch\(\s*` + EMPTY + String.raw`\s*\)`, 'g'))) {
+    if (m[0]) n += 1;
   }
   return n;
 }
@@ -137,12 +176,35 @@ describe('無音の失敗ガード', () => {
     expect(offenders).toEqual([]);
   });
 
+  it('Firestore の購読・取得に「何もしないエラーハンドラ」を付けない（Day115）', () => {
+    // これまでの判定は全部「ハンドラが何かをしている」前提だったので、空ハンドラだけが
+    // 5 判定すべてをすり抜けていた（招待一覧の握り潰し・予約の既定料金フォールバック）。
+    // 例外は「失敗しても利用者が困らない」ものだけ。理由を必ず添えること
+    // （増やすときは、その画面で本当に実害が無いかを確認してから）
+    const ALLOWED = new Map<string, string>([
+      // 取得できなくても**通す**方向の失敗（ハンドル未設定の誘導）。塞ぐ側に倒すと締め出しになる
+      ['src/components/AccountShell.tsx', 'handle 取得失敗時はオンボーディングへ誘導せず素通しする（fail-open が正）'],
+      // 名前が引けないときは uid 先頭8桁を表示する＝**劣化が画面に見えている**
+      ['src/components/modules/attendance/AttendanceClient.tsx', '名前解決の失敗は uid 表示に劣化して見える'],
+      // 連携候補が無くても席回しは成立する（任意機能）
+      ['src/components/modules/seating/SeatingClient.tsx', 'メンバー連携は任意機能で、候補なし表示でも運用できる'],
+    ]);
+    const offenders = ALL_FILES
+      .map((f) => ({ path: f.path, count: emptyFirestoreHandlers(f.src) }))
+      .filter((r) => r.count > 0 && !ALLOWED.has(r.path))
+      .map((r) => `${r.path}（${r.count}件）`);
+    expect(offenders).toEqual([]);
+  });
+
   it('購読（onSnapshot）の失敗を console.warn だけで終わらせない（空表示と区別できなくなる）', () => {
     // 在庫・送迎は購読エラーを console.warn するだけで、権限エラーでも
     // 「1件も無い」と同じ空表示になっていた（Day107 で state に載せて画面へ出した）。
     // console.warn の直後（同じハンドラ内）で state を更新しているかを見る。
     const offenders: string[] = [];
-    for (const { path, src } of FILES) {
+    // 開発時のみ動くエミュレータ接続（UI を持たない・本番では通らない）は対象外
+    const DEV_ONLY = new Set(['src/lib/firebase/config.ts']);
+    for (const { path, src } of ALL_FILES) {
+      if (DEV_ONLY.has(path)) continue;
       const lines = src.split('\n');
       lines.forEach((line, i) => {
         if (!line.includes('console.warn(')) return;
@@ -163,7 +225,7 @@ describe('無音の失敗ガード', () => {
     // 成功コールバック側の setReadError(null) を誤って拾わないよう、窓ではなく本体で判定する。
     const ERROR_STATE = /\bset\w*Error\w*\(/;
     const offenders: string[] = [];
-    for (const { path, src } of FILES) {
+    for (const { path, src } of ALL_FILES) {
       const lines = src.split('\n');
       lines.forEach((line, i) => {
         if (!/list:\s*\[\]/.test(line)) return;

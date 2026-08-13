@@ -176,7 +176,9 @@ export function useSeatingStore(user: User): UseSeatingStore {
         const data = snap.exists() ? (snap.data() as { rotationOrder?: string[]; assistMode?: string }) : undefined;
         setRotationOrderState(Array.isArray(data?.rotationOrder) ? data.rotationOrder : []);
         setAssistModeState(data?.assistMode === 'nomination' || data?.assistMode === 'rookie' ? data.assistMode : 'balanced');
-      }, (e) => { console.warn('[noxa:seating] meta購読エラー', e?.message ?? e); }),
+      // 回転順・アシストモードが読めないと「回し順が未設定」と同じ表示になり、
+      // 現場は設定し直そうとする（＝実際の回し順を上書きしかねない・Day115）
+      }, (e) => { setDataError(`回し順の取得に失敗（${e?.code ?? e?.message ?? e}）`); }),
       onSnapshot(collection(db, `shop_shops/${shopId}/seating_queue`), (snap) => {
         const list: QueueItem[] = [];
         snap.forEach((d) => list.push({ id: d.id, ...(d.data() as Omit<QueueItem, 'id'>) }));

@@ -170,15 +170,27 @@ function PayrollFinalize({ user }: { user: User }) {
   const [err, setErr] = useState<string | null>(null);
   // role ベース表示: オーナー(canManage) に加えて manager も確定可（API 側も owner/manager 許可）
   const [isManager, setIsManager] = useState(false);
+  // role の**取得失敗**（権限が無いことと区別する・Day115）
+  const [roleError, setRoleError] = useState<string | null>(null);
   useEffect(() => {
     if (!shop.shopId || shop.canManage) return;
     let alive = true;
     getDoc(doc(db, `shop_shops/${shop.shopId}/members/${user.uid}`))
-      .then((s) => { if (alive) setIsManager((s.data() as { role?: string } | undefined)?.role === 'manager'); })
-      .catch(() => { /* 権限なしは非表示のまま */ });
+      .then((s) => { if (alive) { setIsManager((s.data() as { role?: string } | undefined)?.role === 'manager'); setRoleError(null); } })
+      // 取得失敗を「権限なし」と同一視しない（Day108 と同型）。通信断で店長の給与確定 UI が
+      // 丸ごと消え、理由も出ないため「権限を剥奪された」ように見える
+      .catch((e) => { if (alive) setRoleError(describeFirestoreError(e, '権限の確認')); });
     return () => { alive = false; };
   }, [shop.shopId, shop.canManage, user.uid]);
 
+  // 権限を確認できなかったときは「非表示」で終わらせず理由を出す（Day115）
+  if (!shop.loading && shop.shopId && !shop.canManage && !isManager && roleError) {
+    return (
+      <p role="alert" style={{ margin: '0 0 12px', padding: '10px 12px', borderRadius: 10, fontSize: 13, color: 'var(--noxa-status-error)', background: 'rgba(229,115,115,0.08)', border: '1px solid var(--noxa-status-error)' }}>
+        {roleError} 権限を確認できないため、給与の確定操作を表示していません。画面を再読み込みしてください。
+      </p>
+    );
+  }
   if (shop.loading || !shop.shopId || (!shop.canManage && !isManager)) return null; // owner/manager 以外は非表示
 
   const [y, m] = ym.split('-').map(Number);

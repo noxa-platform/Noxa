@@ -13,6 +13,7 @@ import { useMenuStore } from '@/lib/menu/store';
 import { useShopConfig } from '@/lib/shopConfig';
 import { COLOR_HEX, COLOR_LABEL, COLOR_ORDER, type MenuColor, type MenuPanel } from '@/lib/menu/types';
 import { describeMissingShop } from '@/lib/shop-id-state';
+import { describeFirestoreError } from '@/lib/firestore-error';
 
 const mono = 'var(--noxa-font-mono)';
 
@@ -39,6 +40,9 @@ export function FirstVisitClient({ user }: { user: User }) {
   const [fsIndex, setFsIndex] = useState<number | null>(null);
   const [orderGroups, setOrderGroups] = useState<{ color: MenuColor; casts: { id: string; name: string; title: string }[]; seat: string; customerName: string; memo: string }[] | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  // 送信の失敗（旧実装は catch が無く、選択が消えないだけで理由が出なかった。
+  // 初回案内は接客中に触る画面なので「送れたのか」が分からないまま次の卓へ進んでしまう・Day115）
+  const [submitError, setSubmitError] = useState<string | null>(null);
   const touch = useRef<{ x: number; y: number } | null>(null);
 
   const colorsOf = (id: string) => checked[id] ?? [];
@@ -83,11 +87,14 @@ export function FirstVisitClient({ user }: { user: User }) {
 
   const doSubmit = async (groups: { color: MenuColor; casts: { id: string; name: string; title: string }[]; seat: string; customerName: string; memo: string }[]) => {
     if (submitting) return;
-    setSubmitting(true);
+    setSubmitting(true); setSubmitError(null);
     try {
       await store.submitOrders(groups, 'main');
       resetSelection();
       setOrderGroups(null);
+    } catch (e) {
+      // 失敗時は resetSelection に到達しない＝選択は残る。理由を出して再送できるようにする
+      setSubmitError(describeFirestoreError(e, 'オーダーの送信'));
     } finally { setSubmitting(false); }
   };
 
@@ -130,9 +137,20 @@ export function FirstVisitClient({ user }: { user: User }) {
         {store.canManage && <a href="/first-visit/settings" style={{ minHeight: 44, display: 'inline-flex', alignItems: 'center', padding: '0 14px', borderRadius: 12, background: 'transparent', color: 'var(--noxa-text-muted)', border: '1px solid var(--noxa-border)', fontSize: 14, textDecoration: 'none' }}>⚙ 設定</a>}
       </header>
 
+      {/* 送信の失敗（skipOrderInput ではオーバーレイを出さないので本体側にも必要）・購読の失敗 */}
+      {submitError && !orderGroups && (
+        <p role="alert" style={{ margin: '0 0 12px', padding: '10px 12px', borderRadius: 10, fontSize: 14, color: 'var(--noxa-status-error)', background: 'rgba(229,115,115,0.12)', border: '1px solid var(--noxa-status-error)' }}>
+          {submitError} 選択は残っているので、そのまま再送できます。
+        </p>
+      )}
+      {store.dataError && (
+        <p role="alert" style={{ margin: '0 0 12px', padding: '10px 12px', borderRadius: 10, fontSize: 14, color: 'var(--noxa-status-error)', background: 'rgba(229,115,115,0.08)', border: '1px solid var(--noxa-status-error)' }}>
+          {store.dataError} パネルが空に見えても「未設定」とは限りません。画面を再読み込みしてください。
+        </p>
+      )}
       {visiblePanels.length === 0 ? (
         <div style={{ padding: 40, textAlign: 'center', color: 'var(--noxa-text-muted)', fontSize: 14 }}>
-          パネルがありません。{store.canManage ? `「⚙ 設定」から${t('cast')}を追加してください。` : 'オーナーがメニューを設定すると表示されます。'}
+          {store.dataError ? '読み込みに失敗しているため、パネルを表示できません。' : <>パネルがありません。{store.canManage ? `「⚙ 設定」から${t('cast')}を追加してください。` : 'オーナーがメニューを設定すると表示されます。'}</>}
         </div>
       ) : (
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(clamp(120px,18vw,180px), 1fr))', gap: 'clamp(8px,1.5vw,14px)' }}>
@@ -259,6 +277,11 @@ export function FirstVisitClient({ user }: { user: User }) {
               </div>
             ))}
           </div>
+          {submitError && (
+            <p role="alert" style={{ margin: '12px 0 0', padding: '10px 12px', borderRadius: 10, fontSize: 13, color: 'var(--noxa-status-error)', background: 'rgba(229,115,115,0.12)', border: '1px solid var(--noxa-status-error)' }}>
+              {submitError} 選択は残っているので、そのまま再送できます。
+            </p>
+          )}
           <div style={{ display: 'flex', gap: 8, marginTop: 14 }}>
             <button type="button" onClick={() => doSubmit(orderGroups)} disabled={submitting} style={{ ...btnPrimary, flex: 1 }}>{submitting ? '送信中…' : '送信'}</button>
             <button type="button" onClick={() => setOrderGroups(null)} style={btnSecondary}>キャンセル</button>

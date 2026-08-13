@@ -17,6 +17,7 @@ import {
 } from 'firebase/firestore';
 import type { User } from 'firebase/auth';
 import { db } from '@/lib/firebase/config';
+import { describeFirestoreError } from '@/lib/firestore-error';
 import { useShopId } from '@/lib/useShopId';
 import {
   DEFAULT_MENU_CONFIG, type InfoCard, type MenuColor, type MenuConfig, type MenuOrder,
@@ -39,6 +40,8 @@ export type UseMenuStore = {
   isDevice: boolean;
   /** 店舗の確認に失敗した理由（useShopId から素通し。未所属と区別する・Day109） */
   shopError: string | null;
+  /** パネル/オーダー等の**購読**に失敗した理由（Day115）。空表示（＝未設定）と区別する */
+  dataError: string | null;
   panels: MenuPanel[];          // 表示順ソート済み（visible 含む全件）
   visiblePanels: MenuPanel[];   // visible のみ（タブレット用）
   tables: ShopTable[];
@@ -81,6 +84,8 @@ export function useMenuStore(user: User): UseMenuStore {
   const [castsSnap, setCastsSnap] = useState<{ shopId: string; list: RawCast[] } | null>(null);
   const [infoCards, setInfoCards] = useState<InfoCard[]>([]);
   const [images, setImages] = useState<Record<string, string>>({});
+  // 購読の失敗（旧実装は console.warn だけで、権限エラーでも「未設定」と同じ空表示になっていた）
+  const [dataError, setDataError] = useState<string | null>(null);
   const [orders, setOrders] = useState<MenuOrder[]>([]);
   const [tables, setTables] = useState<ShopTable[]>([]);
   // config も出所つきで保持し loading に到着を含める（Day26。後着中に既定値で表示/編集が
@@ -98,12 +103,15 @@ export function useMenuStore(user: User): UseMenuStore {
   useEffect(() => {
     if (shop.loading || !shopId) return;
     const base = `shop_shops/${shopId}`;
-    const onErr = (label: string) => (e: Error) => console.warn(`[noxa:menu] ${label} 購読エラー`, e?.message ?? e);
+    // 旧実装は全購読の失敗を console.warn だけで捨てていた（Day115）。
+    // 画面には「パネルが無い」「オーダーが無い」と同じ表示が出るため、権限エラーや通信断でも
+    // 現場は**設定し忘れ**だと解釈する（初回案内は開店前に一度しか見ない画面なので気づけない）。
+    const onErr = (label: string) => (e: Error) => setDataError(describeFirestoreError(e, `${label}の読み込み`));
     const unsubs = [
       onSnapshot(collection(db, `${base}/seating_casts`), (snap) => {
         const list: RawCast[] = []; snap.forEach((d) => list.push({ id: d.id, ...(d.data() as DocumentData) }));
         setCastsSnap({ shopId, list });
-      }, (e) => { console.warn('[noxa:menu] casts 購読エラー', e?.message ?? e); setCastsSnap({ shopId, list: [] }); }),
+      }, (e) => { setCastsSnap({ shopId, list: [] }); setDataError(describeFirestoreError(e, 'パネル一覧の読み込み')); }),
       onSnapshot(collection(db, `${base}/menu_info_cards`), (snap) => {
         const list: InfoCard[] = []; snap.forEach((d) => list.push({ id: d.id, ...(d.data() as Omit<InfoCard, 'id'>) }));
         setInfoCards(list);
@@ -266,7 +274,7 @@ export function useMenuStore(user: User): UseMenuStore {
 
   return {
     loading: shop.loading || (!!shopId && (castsSnap?.shopId !== shopId || cfgSnap?.shopId !== shopId)),
-    shopId, canManage: shop.canManage, isDevice: shop.isDevice, shopError: shop.shopError,
+    shopId, canManage: shop.canManage, isDevice: shop.isDevice, shopError: shop.shopError, dataError,
     panels, visiblePanels, tables, orders, config,
     addCastPanel, savePanelMeta, removePanel, setPanelImage, reorderPanel, addInfoCard,
     submitOrders, updateOrder, deleteOrder, clearOrders, saveConfig, setPanelPin,

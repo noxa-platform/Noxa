@@ -129,6 +129,13 @@ export function ReservationClient({ user }: { user: User }) {
   const [seatCasts, setSeatCasts] = useState<CheckinCast[]>([]);
   const [seatTables, setSeatTables] = useState<{ id: string; name: string }[]>([]);
   const [posCfg, setPosCfg] = useState<StoreConfig>(() => createDefaultStoreConfig('active'));
+  /**
+   * 料金設定を読めたか（Day115）。
+   * 来店処理は `createInitialState(posCfg)` を**卓の伝票として永続化**するため、
+   * 取得に失敗したまま開卓すると**既定料金の初期伝票**が作られ、そのまま会計→売上に流れる。
+   * Day110 で POS と伝票計算には同じ穴を塞いだが、**予約からの開卓だけ取り逃していた**。
+   */
+  const [posCfgError, setPosCfgError] = useState<string | null>(null);
   useEffect(() => {
     if (!shop.shopId) return;
     const sid = shop.shopId;
@@ -138,7 +145,8 @@ export function ReservationClient({ user }: { user: User }) {
         snap.forEach((d) => { const v = d.data() as DocumentData; list.push({ id: d.id, name: (v.name as string) ?? d.id, uid: (v.uid as string) ?? null }); });
         list.sort((a, b) => a.name.localeCompare(b.name, 'ja'));
         setSeatCasts(list);
-      }, () => { /* 読めないロールはセレクト非表示のまま */ }),
+      // 卓（下の購読）は Day108 で可視化済みなのに、担当だけ握り潰しが残っていた（Day115）
+      }, () => setReadError((prev) => prev ?? '担当（キャスト）の一覧を読み込めませんでした。担当の選択が空になります。')),
       onSnapshot(collection(db, `shop_shops/${sid}/seating_tables`), (snap) => {
         const list: { id: string; name: string }[] = [];
         snap.forEach((d) => { const v = d.data() as DocumentData; list.push({ id: d.id, name: (v.name as string) ?? d.id }); });
@@ -150,8 +158,14 @@ export function ReservationClient({ user }: { user: User }) {
       }),
     ];
     getDoc(doc(db, `shop_shops/${sid}/pos_config/active`))
-      .then((s) => { if (s.exists()) setPosCfg({ ...createDefaultStoreConfig('active'), ...(s.data() as Partial<StoreConfig>) } as StoreConfig); })
-      .catch(() => { /* 既定料金のまま */ });
+      .then((s) => {
+        if (s.exists()) { setPosCfg({ ...createDefaultStoreConfig('active'), ...(s.data() as Partial<StoreConfig>) } as StoreConfig); setPosCfgError(null); }
+        // doc 自体が無い店舗は「まだ料金未設定」＝既定でよい（POS 設定で作られる）
+        else setPosCfgError(null);
+      })
+      // 旧実装は失敗を握り潰しており、**読めなかったことを誰も知らない**まま
+      // 既定料金の初期伝票を卓に書き込んでいた（Day110 と同型。金額が下流の売上まで流れる）
+      .catch((e) => setPosCfgError(describeFirestoreError(e, '料金設定の読み込み')));
     return () => unsubs.forEach((u) => u());
   }, [shop.shopId]);
 
@@ -181,7 +195,7 @@ export function ReservationClient({ user }: { user: User }) {
       const out: VipGuest[] = [];
       snap.forEach((d) => out.push(mapVip(d.id, d.data())));
       setVips(out);
-    }, () => { /* skip */ });
+    }, () => setReadError((prev) => prev ?? 'VIP 情報を読み込めませんでした。VIP 表示が出ない場合があります。'));
     return () => unsub();
   }, [shop.loading, custPath]);
 
@@ -270,6 +284,12 @@ export function ReservationClient({ user }: { user: User }) {
   // （予約→来店→会計の一気通貫。卓未指定/不一致/使用中はステータスのみ更新して知らせる）
   const checkIn = async (r: Reservation) => {
     if (!resPath || !shop.shopId || busy) return;
+    // 料金が分からないまま開卓しない（既定料金の初期伝票が売上まで流れる・Day115）。
+    // ステータスだけは進められるよう、開卓のみを止める
+    if (posCfgError) {
+      setOpError(`${posCfgError} 料金が分からないため開卓できません（既定料金の伝票が作られ、実際と違う金額が売上に記録されます）。画面を再読み込みしてから来店処理をしてください。`);
+      return;
+    }
     const table = seatTables.find((t) => t.name === r.seat);
     if (!table) {
       await changeStatus(r.id, '来店済');

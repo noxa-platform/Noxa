@@ -113,6 +113,12 @@ export function PosClient({ user, focusTableId, embedded }: { user: User; focusT
 
   return (
     <Shell device={store.isDevice} configurable={store.canConfig} embedded={embedded}>
+      {/* 卓/担当/顧客の購読失敗（旧実装は空表示＝未設定と同じに見えていた・Day115） */}
+      {store.dataError && (
+        <p role="alert" style={{ margin: '0 0 12px', padding: '10px 12px', borderRadius: 10, fontSize: 13, color: 'var(--noxa-status-error)', background: 'rgba(229,115,115,0.08)', border: '1px solid var(--noxa-status-error)' }}>
+          {store.dataError} 卓・担当・顧客が空に見えても「未登録」とは限りません。画面を再読み込みしてください。
+        </p>
+      )}
       <div className={embedded ? 'grid grid-cols-1 lg:grid-cols-[1fr_340px]' : 'grid grid-cols-1 lg:grid-cols-[200px_1fr_340px]'} style={{ gap: 'clamp(12px, 1.6vw, 18px)', alignItems: 'start' }}>
         {/* 左：卓（席回しと共有）。埋め込み（席回しから単一卓）では非表示 */}
         {!embedded && (

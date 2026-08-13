@@ -33,6 +33,8 @@ export function MembersSection({ shopId, myUid }: { shopId: string; myUid: strin
   const [issuing, setIssuing] = useState(false);
   const [lastUrl, setLastUrl] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  /** 発行済み招待の購読失敗（空一覧と区別する。二重発行の原因になる） */
+  const [inviteError, setInviteError] = useState<string | null>(null);
 
   useEffect(() => {
     const unsubs = [
@@ -43,12 +45,19 @@ export function MembersSection({ shopId, myUid }: { shopId: string; myUid: strin
         const order = ['owner', 'manager', 'cast', 'accounting'];
         list.sort((a, b) => order.indexOf(a.role) - order.indexOf(b.role));
         setMembers(list);
-      }, (e) => setError(`メンバー一覧の取得に失敗: ${e.message}`)),
+      }, (e) => setError(describeFirestoreError(e, 'メンバー一覧の取得'))),
       onSnapshot(collection(db, `shop_shops/${shopId}/invites`), (snap) => {
         const list: Invite[] = [];
         snap.forEach((d) => list.push({ code: d.id, ...(d.data() as Omit<Invite, 'code'>) }));
         setInvites(list.filter((i) => !i.usedBy));
-      }, () => { /* 権限なし(非owner)は招待一覧非表示のまま */ }),
+        setInviteError(null);
+      }, (e) => {
+        // 旧実装は「権限なし(非owner)は非表示のまま」として**完全に握り潰して**いたが、
+        // このセクションは店舗設定（オーナー専用）にしか出ない＝ここに来る失敗は本物の失敗。
+        // 黙って空にすると、発行済みの招待が消えて見え、**同じ相手に何度も発行**する
+        // （＝使われないコードが増え、どれを送ったか分からなくなる）。
+        setInviteError(describeFirestoreError(e, '発行済み招待の取得'));
+      }),
     ];
     return () => unsubs.forEach((u) => u());
   }, [shopId]);
@@ -142,6 +151,11 @@ export function MembersSection({ shopId, myUid }: { shopId: string; myUid: strin
       )}
 
       {/* 発行済み（未使用）招待 */}
+      {inviteError && (
+        <p role="alert" style={{ color: 'var(--noxa-status-error)', fontSize: 12, margin: 0 }}>
+          {inviteError} 発行済みの招待を表示できていないため、重複して発行しないよう注意してください。
+        </p>
+      )}
       {invites.length > 0 && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
           <span style={{ fontSize: 12, color: 'var(--noxa-text-muted)' }}>未使用の招待（7日で失効）</span>

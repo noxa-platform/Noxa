@@ -41,23 +41,31 @@ function elapsedMin(start: number | null): number {
   return Math.floor((Date.now() - start) / 60000);
 }
 
-/** POS 料金設定の購読（席回し画面で伝票金額を出すため。読取専用・無ければ既定値） */
-function usePosConfigLite(shopId: string | null): StoreConfig {
+/**
+ * POS 料金設定の購読（席回し画面で伝票金額を出すため。読取専用・無ければ既定値）。
+ * 読めなかったことは呼び出し側へ返す（Day115）——旧実装は握り潰しており、
+ * **既定料金で計算した卓合計**が「自店の金額」として画面に出ていた（Day110 と同型）。
+ */
+function usePosConfigLite(shopId: string | null): { config: StoreConfig; error: string | null } {
   const [config, setConfig] = useState<StoreConfig>(() => createDefaultStoreConfig('active'));
+  const [error, setError] = useState<string | null>(null);
   useEffect(() => {
     if (!shopId) return;
     const unsub = onSnapshot(doc(db, `shop_shops/${shopId}/pos_config/active`), (snap) => {
       if (snap.exists()) setConfig({ ...createDefaultStoreConfig('active'), ...(snap.data() as Partial<StoreConfig>) } as StoreConfig);
-    }, () => { /* 権限なし等は既定のまま（金額は概算表示） */ });
+      setError(null);
+    }, (e) => setError(describeFirestoreError(e, '料金設定の読み込み')));
     return () => unsub();
   }, [shopId]);
-  return config;
+  return { config, error };
 }
 
 /** 新規案内（first-visit タブレット）の着信購読。指名確定が席回しへ流れてきたことを知らせる */
 type IncomingOrder = { id: string; seat: string; tableId: string | null; customerName: string; castNames: string[]; atMs: number };
-function useIncomingFirstVisit(shopId: string | null): IncomingOrder[] {
+function useIncomingFirstVisit(shopId: string | null): { items: IncomingOrder[]; error: string | null } {
   const [items, setItems] = useState<IncomingOrder[]>([]);
+  // 着信が読めないと「新規案内は来ていない」と同じ表示になり、フロアが客を待たせる（Day115）
+  const [err, setErr] = useState<string | null>(null);
   useEffect(() => {
     if (!shopId) return;
     // 購読開始時点から直近15分以降のオーダーのみ（全件購読は read 数と表示の両方で無駄）
@@ -73,10 +81,11 @@ function useIncomingFirstVisit(shopId: string | null): IncomingOrder[] {
       });
       list.sort((a, b) => b.atMs - a.atMs);
       setItems(list);
-    }, () => { /* menu_orders を読めないロールでは非表示 */ });
+      setErr(null);
+    }, (e) => setErr(describeFirestoreError(e, '新規案内の着信の読み込み')));
     return () => unsub();
   }, [shopId]);
-  return items;
+  return { items, error: err };
 }
 
 /** 卓の伝票サマリ（現在金額・伝票数・注文点数・担当/客名）。伝票が無ければ null */
@@ -127,9 +136,9 @@ export function SeatingClient({ user }: { user: User }) {
   const [side, setSide] = useState<'casts' | 'queue'>('casts');
   // 伝票・会計モーダル（卓カードからも直行できるよう親で管理）
   const [posFor, setPosFor] = useState<string | null>(null);
-  const posConfig = usePosConfigLite(store.shopId);
+  const { config: posConfig, error: posConfigError } = usePosConfigLite(store.shopId);
   // 新規案内（客用タブレット）の着信
-  const incoming = useIncomingFirstVisit(store.shopId);
+  const { items: incoming, error: incomingError } = useIncomingFirstVisit(store.shopId);
   const [seenOrders, setSeenOrders] = useState<Set<string>>(() => new Set());
   // AI 席回し（要望ベース・/api/ai/seating-suggest）
   const [aiOpen, setAiOpen] = useState(false);
@@ -273,6 +282,16 @@ export function SeatingClient({ user }: { user: User }) {
   return (
     <Shell device={store.isDevice}>
       {/* 購読エラーの可視化（権限/接続エラーで空表示のまま成功と区別がつかない問題） */}
+      {incomingError && (
+        <p role="alert" style={{ color: 'var(--noxa-status-error)', fontSize: 13, margin: '0 0 12px', padding: '10px 12px', borderRadius: 10, background: 'rgba(229,115,115,0.08)', border: '1px solid var(--noxa-status-error)' }}>
+          {incomingError} 新規案内の着信が届いていない可能性があります（「着信なし」とは限りません）。
+        </p>
+      )}
+      {posConfigError && (
+        <p role="alert" style={{ color: 'var(--noxa-status-error)', fontSize: 13, margin: '0 0 12px', padding: '10px 12px', borderRadius: 10, background: 'rgba(229,115,115,0.08)', border: '1px solid var(--noxa-status-error)' }}>
+          {posConfigError} 卓に表示している金額は**自店の料金ではなく既定料金**の概算です。会計は POS で料金を読み込めてから行ってください。
+        </p>
+      )}
       {store.dataError && (
         <p role="alert" style={{ color: 'var(--noxa-status-error)', fontSize: 13, margin: '0 0 12px', padding: '10px 12px', borderRadius: 10, background: 'rgba(229,115,115,0.08)', border: '1px solid var(--noxa-status-error)' }}>{store.dataError}</p>
       )}
@@ -972,7 +991,7 @@ function CastEditor({ cast, allCasts, store, onClose }: { cast: Cast; allCasts: 
         list.push({ uid: d.id, label: `${m.castDisplayName || d.id.slice(0, 8)}（${m.role ?? '?'}）` });
       });
       setMembers(list);
-    }, () => { /* 権限なしは連携候補なし表示 */ });
+    }, () => { /* 権限なしは連携候補なし表示（連携は任意機能で、候補が無くても席回しは成立する） */ });
     return () => unsub();
   }, [store.shopId]);
 

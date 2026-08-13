@@ -94,6 +94,8 @@ export type UsePosStore = {
   error: string | null;
   /** 料金設定（pos_config）の読み取り失敗。**既定料金で会計させない**ための理由・Day110 */
   configError: string | null;
+  /** 卓/担当/顧客の購読に失敗した理由（空表示＝未設定と区別する・Day115） */
+  dataError: string | null;
   config: StoreConfig;
   tables: FloorTable[];
   casts: Cast[];
@@ -115,6 +117,13 @@ export function usePosStore(user: User): UsePosStore {
   const [config, setConfig] = useState<StoreConfig>(() => createDefaultStoreConfig());
   // 料金設定の読み取り失敗（既定料金での会計を止めるための理由・Day110）
   const [configError, setConfigError] = useState<string | null>(null);
+  /**
+   * 卓/キャスト/顧客の**購読**に失敗した理由（Day115）。
+   * 旧実装は卓を空リスト確定、キャストを console.warn、顧客を完全握り潰しにしており、
+   * 権限エラーや通信断でも「卓が無い・担当が居ない・顧客が居ない」＝**未設定と同じ表示**になっていた
+   * （POS は会計中に触るので、担当を選べない理由が分からないまま会計が進む）。
+   */
+  const [dataError, setDataError] = useState<string | null>(null);
   // 卓は出所（shopId）つきで保持し loading を導出（Day17: set-state-in-effect 返済・seating store と同型）
   const [tablesSnap, setTablesSnap] = useState<{ shopId: string; list: FloorTable[] } | null>(null);
   const [casts, setCasts] = useState<Cast[]>([]);
@@ -134,7 +143,9 @@ export function usePosStore(user: User): UsePosStore {
     const unsub = onSnapshot(doc(db, `shop_shops/${shopId}/config/settings`), (snap) => {
       const a = snap.exists() ? (snap.data() as { salesAttribution?: string }).salesAttribution : undefined;
       attributionRef.current = a === 'operator' ? 'operator' : 'mainCast';
-    }, () => { /* 既定 mainCast */ });
+      // 売上の付け方（担当 or 記録者）が読めないまま既定 mainCast で会計すると、
+      // **誰の売上になるかが静かに変わる**（給与・成績まで波及する・Day115）
+    }, (e) => setDataError(describeFirestoreError(e, '売上の付け方（店舗設定）の読み込み')));
     return () => unsub();
   }, [shopId]);
 
@@ -174,7 +185,7 @@ export function usePosStore(user: User): UsePosStore {
       snap.forEach((d) => list.push({ ...createEmptyTable(d.id, d.id), ...(d.data() as Partial<FloorTable>), id: d.id } as FloorTable));
       list.sort((a, b) => a.name.localeCompare(b.name, 'ja'));
       setTablesSnap({ shopId, list });
-    }, () => setTablesSnap({ shopId, list: [] }));
+    }, (e) => { setTablesSnap({ shopId, list: [] }); setDataError(describeFirestoreError(e, '卓の読み込み')); });
     const unsubC = onSnapshot(collection(db, `shop_shops/${shopId}/seating_casts`), (snap) => {
       const list: Cast[] = [];
       snap.forEach((d) => {
@@ -182,7 +193,7 @@ export function usePosStore(user: User): UsePosStore {
         list.push({ id: d.id, name: (x.name as string) ?? '?', rank: (x.rank as Cast['rank']) ?? '非役職', hourlyWage: (x.hourlyWage as number) ?? 0, isLocked: !!x.isLocked, status: 'Free', currentTableId: null, uid: (x.uid as string) ?? null });
       });
       setCasts(list);
-    }, (e) => console.warn('[noxa:pos] キャスト購読エラー', e?.message ?? e));
+    }, (e) => setDataError(describeFirestoreError(e, '担当（キャスト）の読み込み')));
     const unsubCust = onSnapshot(collection(db, `shop_shops/${shopId}/customers`), (snap) => {
       const list: ShopCustomer[] = [];
       snap.forEach((d) => {
@@ -190,7 +201,7 @@ export function usePosStore(user: User): UsePosStore {
         list.push({ id: d.id, name: (x.name as string) ?? '（無名）', mainCastId: (x.mainCastId as string) ?? null, mainCastUid: (x.mainCastUid as string) ?? null });
       });
       setCustomers(list);
-    }, () => { /* 権限等で読めない場合は空 */ });
+    }, (e) => setDataError(describeFirestoreError(e, '顧客の読み込み')));
     return () => { unsubT(); unsubC(); unsubCust(); };
   }, [shopId]);
 
@@ -376,10 +387,10 @@ export function usePosStore(user: User): UsePosStore {
 
   return useMemo(() => ({
     loading: shop.loading || loadingData,
-    shopId, canConfig: shop.canConfig, isDevice: shop.isDevice, error: shop.error, configError,
+    shopId, canConfig: shop.canConfig, isDevice: shop.isDevice, error: shop.error, configError, dataError,
     config, tables, casts, customers, needsSeed,
     seedTables, addSlip, dispatchSlip, renameSlip, removeSlip, checkoutSlip, resultFor,
-  }), [shop.loading, loadingData, shopId, shop.canConfig, shop.isDevice, shop.error, configError, config, tables, casts, customers, needsSeed, seedTables, addSlip, dispatchSlip, renameSlip, removeSlip, checkoutSlip, resultFor]);
+  }), [shop.loading, loadingData, shopId, shop.canConfig, shop.isDevice, shop.error, configError, dataError, config, tables, casts, customers, needsSeed, seedTables, addSlip, dispatchSlip, renameSlip, removeSlip, checkoutSlip, resultFor]);
 }
 
 let __slipSeq = 0;
