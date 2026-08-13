@@ -13,6 +13,7 @@ import { useShopConfig, DEFAULT_MODULES } from '@/lib/shopConfig';
 import { WorkspaceSwitcher } from '@/components/WorkspaceSwitcher';
 import { BottomTabBar } from '@/components/BottomTabBar';
 import { describeFirestoreError } from '@/lib/firestore-error';
+import { resolveDeviceModules, resolveDeviceTabs, deviceGlyph, DEVICE_NO_MODULE_TEXT } from '@/lib/device-nav';
 
 // メニューのアイコン（href→絵文字）。非tech層に分かりやすいよう視覚記号を付与。
 const ICONS: Record<string, string> = {
@@ -98,8 +99,10 @@ export function AccountShell({ user, children }: { user: User; children: React.R
   const ownerNav = cfg.config.modules
     .filter((m) => m.enabled)
     .map((m) => ({ label: m.label?.trim() || (DEFAULT_MODULES.find((d) => d.key === m.key)?.label ?? m.key), href: `/${m.key}` }));
+  // 端末の許可モジュール（判定は device-nav.ts。未知キーを落とし正準順に並べる）
+  const deviceModules = resolveDeviceModules(device.allow);
   const storeNav = device.isDevice
-    ? NAV_STORE.filter((it) => device.allow.includes(it.href.slice(1)))
+    ? deviceModules
     : (cfg.loading ? NAV_STORE : ownerNav);
   // 「お店の運営」を出すのは店舗ワークスペース選択中（cfg.shopId あり）or 店舗端末。個人選択中は隠す
   const storeActive = device.isDevice || (!cfg.loading && !!cfg.shopId);
@@ -168,7 +171,10 @@ export function AccountShell({ user, children }: { user: User; children: React.R
           /* 店舗端末: 許可された店舗モジュールのみ */
           <div className="flex flex-col" style={{ gap: 2 }}>
             <SectionLabel easy={easy}>店舗の端末{device.label ? ` · ${device.label}` : ''}</SectionLabel>
-            {storeNav.map(navLink)}
+            {/* 許可が空のプロファイルは「メニューが真っ白」になり理由も出なかった（Day113） */}
+            {storeNav.length === 0
+              ? <p role="alert" style={{ margin: 0, padding: '10px 12px', borderRadius: 10, border: '1px solid var(--noxa-status-warning)', color: 'var(--noxa-text-muted)', fontSize: 12, lineHeight: 1.6 }}>{DEVICE_NO_MODULE_TEXT}</p>
+              : storeNav.map(navLink)}
           </div>
         ) : (
           <>
@@ -306,8 +312,13 @@ export function AccountShell({ user, children }: { user: User; children: React.R
         {children}
       </main>
 
-      {/* モバイル下部ナビ（スマホでメニューに到達できるように。端末kioskでは非表示） */}
-      {!device.isDevice && <BottomTabBar />}
+      {/* モバイル下部ナビ（スマホでメニューに到達できるように）。
+          端末kiosk も**出す**: サイドバーは `hidden md:flex` で消えるため、旧実装では
+          スマホ幅の店舗端末に許可モジュールへの導線が1つも無かった（Day113）。
+          タブは許可モジュールのみ・先頭はホーム（溢れた分は端末ホームから辿る）。 */}
+      {device.isDevice
+        ? <BottomTabBar tabs={resolveDeviceTabs(deviceModules).map((m) => ({ href: m.href, label: m.label, glyph: deviceGlyph(m.key), match: (p) => (m.href === '/account' ? p === '/account' : p.startsWith(m.href)) }))} />
+        : <BottomTabBar />}
     </div>
   );
 }

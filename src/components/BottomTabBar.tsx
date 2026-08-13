@@ -16,7 +16,7 @@ import { usePathname } from 'next/navigation';
  *  - hover でなく tap 前提
  */
 
-type Tab = {
+export type Tab = {
   href: string;
   label: string;
   glyph: string;             // ◇ ◈ ◆ シンプル形状（Noxa brand 規約）

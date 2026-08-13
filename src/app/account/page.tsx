@@ -4,8 +4,9 @@ import { useState, useEffect } from 'react';
 import { doc, getDoc } from 'firebase/firestore';
 import { AuthGuard } from '@/components/AuthGuard';
 import { AccountShell } from '@/components/AccountShell';
-import { useShopContext } from '@/lib/useShopContext';
+import { useShopContext, useDeviceClaims, type DeviceClaims } from '@/lib/useShopContext';
 import { useUiMode } from '@/lib/useUiMode';
+import { resolveDeviceModules, DEVICE_NO_MODULE_TEXT } from '@/lib/device-nav';
 import { db } from '@/lib/firebase/config';
 import type { User } from 'firebase/auth';
 
@@ -386,6 +387,59 @@ function AccountDashboard({ user }: { user: User }) {
   );
 }
 
+/**
+ * 店舗端末（共有タブレット）のホーム（Day113）。
+ *
+ * 旧実装はこのハブが端末を判定しておらず、端末に**個人機能・プラン/クレジット・
+ * 「＋自分のお店を登録する」・許可外の店舗モジュール全部**を並べていた。
+ * サイドバーで隠したものがハブで再露出し、しかもスマホ幅では
+ * （サイドバーが消えるため）ここが端末の唯一の入口だった。
+ * 端末には**許可されたモジュールだけ**を出す。
+ */
+function DeviceHome({ user, device }: { user: User; device: DeviceClaims }) {
+  const easy = useUiMode() === 'easy';
+  const modules = resolveDeviceModules(device.allow);
+  const tagOf = (href: string) => STORE_MODULES.find((m) => m.href === href)?.tag ?? '';
+
+  return (
+    <AccountShell user={user}>
+      <div className="noxa-eyebrow" style={{ marginBottom: 10 }}>店舗端末</div>
+      <h1 className="noxa-h1" style={{ margin: '0 0 8px' }}>
+        {device.label || 'この端末'}
+      </h1>
+      <p style={{ color: 'var(--noxa-text-muted)', fontSize: 13, lineHeight: 1.8, margin: '0 0 28px' }}>
+        この端末で使えるモジュールです。給与・売掛・リスク客共有などの機微な機能と個人機能は、端末では利用できません。
+      </p>
+
+      {modules.length === 0 ? (
+        <div role="alert" style={{ background: 'var(--noxa-surface-card)', border: '1px solid var(--noxa-status-warning)', borderRadius: 16, padding: 24, color: 'var(--noxa-text-muted)', fontSize: 13, lineHeight: 1.7 }}>
+          {DEVICE_NO_MODULE_TEXT}
+        </div>
+      ) : (
+        <div className="grid gap-3" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))' }}>
+          {modules.map((m) => (
+            <Link key={m.href} href={m.href} className="flex flex-col" style={{ background: 'var(--noxa-surface-card)', border: '1px solid var(--noxa-border)', borderRadius: 14, padding: easy ? 20 : 16, gap: 6, textDecoration: 'none' }}>
+              <span style={{ fontFamily: 'var(--noxa-font-display-jp)', fontSize: easy ? 20 : 16, fontWeight: easy ? 700 : 500, color: 'var(--noxa-text-primary)' }}>{m.label}</span>
+              <span style={{ color: 'var(--noxa-text-muted)', fontSize: easy ? 13 : 11 }}>{tagOf(m.href)}</span>
+              <span className={easy ? undefined : 'noxa-mono'} style={{ color: '#8B5CF6', fontSize: easy ? 15 : 11, fontWeight: easy ? 700 : 400, marginTop: 'auto' }}>{easy ? 'ひらく →' : '開く →'}</span>
+            </Link>
+          ))}
+        </div>
+      )}
+    </AccountShell>
+  );
+}
+
+/** 端末（kiosk）か個人かでハブを出し分ける */
+function AccountHome({ user }: { user: User }) {
+  const device = useDeviceClaims(user);
+  // 判定前に個人ダッシュボードを出すと、端末に個人機能が一瞬見えてから消える
+  if (device.loading) {
+    return <AccountShell user={user}><div className="noxa-eyebrow">読み込み中…</div></AccountShell>;
+  }
+  return device.isDevice ? <DeviceHome user={user} device={device} /> : <AccountDashboard user={user} />;
+}
+
 export default function AccountPage() {
-  return <AuthGuard>{(user) => <AccountDashboard user={user} />}</AuthGuard>;
+  return <AuthGuard>{(user) => <AccountHome user={user} />}</AuthGuard>;
 }

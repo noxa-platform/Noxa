@@ -74,6 +74,19 @@ export function PosConfigClient({ user }: { user: User }) {
 
   if (loading) return <Shell><div className="noxa-eyebrow" style={{ padding: '40px 0' }}>読み込み中…</div></Shell>;
   if (!shopId || !cfg) {
+    // 「確認できなかった」を「オーナーではない」と言い切らない（Day113・Day109 と同型）。
+    // 旧実装は所有クエリが落ちても err を描画せずこの分岐に落ち、**自分の店を持つオーナーに
+    // 「オーナー専用です。店舗を登録してください」**と表示していた（原因も出ない）。
+    if (err) {
+      return (
+        <Shell>
+          <Empty>
+            <span role="alert" style={{ color: 'var(--noxa-status-error)' }}>{err}</span>
+            <br />店舗と権限を確認できないため、料金設定を開けません。画面を再読み込みしてください。
+          </Empty>
+        </Shell>
+      );
+    }
     return <Shell><Empty>POS 設定はオーナー専用です。<Link href="/store/new" style={{ color: 'var(--noxa-accent-primary-ink)' }}>店舗を登録</Link>してください。</Empty></Shell>;
   }
 

@@ -8,6 +8,7 @@
  */
 
 import { useCallback, useEffect, useState } from 'react';
+import Link from 'next/link';
 import { FONT, WINE } from '@/lib/community/constants';
 import { fetchCommunityMe, redeemInvite, type CommunityMe } from '@/lib/community/api';
 
@@ -84,6 +85,11 @@ export function InviteGate({ children }: { children: (me: CommunityMe) => React.
         </button>
         <p style={{ fontFamily: fontJp, fontSize: 11, color: 'var(--noxa-text-faint)', margin: '14px 0 0', textAlign: 'center' }}>
           コードは1回のみ・発行から7日で失効します。
+        </p>
+        {/* 弾いたら戻り道を出す（Day113）。コードを持っていない利用者は全画面のこの入力欄で
+            手詰まりになり、Noxa の他の機能へ戻る手段がリンクとして存在しなかった。 */}
+        <p style={{ margin: '12px 0 0', textAlign: 'center' }}>
+          <Link href="/account" style={{ fontFamily: mono, fontSize: 12, color: 'var(--noxa-text-muted)' }}>← コードが無いときは Noxa OS へ戻る</Link>
         </p>
       </div>
     </Centered>
