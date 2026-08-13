@@ -1,5 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import crypto from 'crypto';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 
 // Google カレンダー連携の 4 route（start / callback / list / events）を消化する（Day111）。
 // 未カバー route の中で最大（253行）かつ外部 OAuth＝トークンを扱う面。
@@ -180,6 +182,66 @@ describe('saveTokenDoc（再連携で refresh_token を失わない）', () => {
     await callbackGET(req(`https://noxa.test/api/calendar/callback?code=c&state=${encodeURIComponent(signState('u1'))}`));
 
     expect(saved['account_google_tokens/u1']).toMatchObject({ accessToken: 'at4', refreshToken: 'new-rt' });
+  });
+});
+
+// 夕方レビューパス（Day111-PM）で見つけた穴。
+// 鍵が空文字でも HMAC は計算できるため、鍵未設定のデプロイでは「誰でも正しい署名を作れる」
+// ＝ CSRF 対策が無いのに素通りしていた（テストは常に鍵を設定していたので気づけなかった）。
+describe('署名鍵が未設定のときは fail-closed（Day111-PM）', () => {
+  beforeEach(() => {
+    delete process.env.CALENDAR_STATE_SECRET;
+    delete process.env.GOOGLE_CLIENT_SECRET;
+  });
+
+  it('★鍵が無ければ空鍵で鍛造した署名 state を受理しない', async () => {
+    const payload = Buffer.from(JSON.stringify({ uid: 'victim', exp: Date.now() + 60000, n: 'x' })).toString('base64url');
+    const forged = crypto.createHmac('sha256', '').update(payload).digest('base64url'); // 誰でも作れる署名
+    mocks.fetch.mockResolvedValue({ ok: true, json: async () => ({ access_token: 'at', refresh_token: 'rt', expires_in: 3600 }) });
+    const { db, saved } = makeDb();
+    mocks.getDb.mockReturnValue(db);
+
+    const res = await callbackGET(req(`https://noxa.test/api/calendar/callback?code=c&state=${payload}.${forged}`));
+
+    expect(new URL(res.headers.get('location') ?? '').searchParams.get('calendar')).toBe('invalid_state');
+    expect(saved).toEqual({});
+  });
+
+  it('★鍵が無ければ認可 URL も発行しない（500。CSRF 対策の効かない連携を始めさせない）', async () => {
+    const res = await startGET(req('https://noxa.test/api/calendar/start'));
+    expect(res.status).toBe(500);
+  });
+});
+
+describe('トークン交換の応答が壊れている場合（Day111-PM）', () => {
+  it('200 でも access_token が無ければ保存せず token_exchange として戻す', async () => {
+    // 旧: undefined を保存しようとして Admin SDK が例外 → 「不明なエラー」に化けていた
+    mocks.fetch.mockResolvedValue({ ok: true, json: async () => ({ error: 'invalid_grant' }) });
+    const { db, saved } = makeDb();
+    mocks.getDb.mockReturnValue(db);
+
+    const res = await callbackGET(req(`https://noxa.test/api/calendar/callback?code=c&state=${encodeURIComponent(signState('u1'))}`));
+
+    expect(new URL(res.headers.get('location') ?? '').searchParams.get('calendar')).toBe('token_exchange');
+    expect(saved).toEqual({});
+  });
+});
+
+// Day95-PM で潰した「クライアント入力でオブジェクトを索引する」パターンを、Day111 の
+// 連携結果バナーで**自分で持ち込んでいた**（`CALENDAR_RESULT[searchParams.get('calendar')]`）。
+// `?calendar=constructor` はプロトタイプ由来の関数を拾い、text が undefined の空バナーが出る。
+describe('連携結果バナー: クエリでオブジェクトを索引しない（Day111-PM）', () => {
+  const src = readFileSync(resolve(__dirname, '../../src/app/account/connections/page.tsx'), 'utf8');
+
+  it('結果表は Map で引く（素のオブジェクト索引に戻さない）', () => {
+    expect(src).toContain('CALENDAR_RESULT = new Map');
+    expect(src).toContain('CALENDAR_RESULT.get(');
+    expect(src).not.toMatch(/CALENDAR_RESULT\[/);
+  });
+
+  it('Map なのでプロトタイプ由来のキーは引けない（挙動そのものの確認）', () => {
+    const m = new Map(Object.entries({ connected: { kind: 'ok' } }));
+    for (const k of ['constructor', 'toString', '__proto__']) expect(m.get(k) ?? null).toBeNull();
   });
 });
 

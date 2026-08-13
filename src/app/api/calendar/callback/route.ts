@@ -33,6 +33,13 @@ export async function GET(request: NextRequest) {
     }
 
     const tokens = await tokenRes.json();
+    // 200 でも access_token が欠ける応答があり得る（Google 側のエラー表現）。
+    // そのまま保存すると Admin SDK が undefined で例外→「不明なエラー」に化けるので、
+    // 原因が伝わる token_exchange として扱う（Day111-PM）
+    if (!tokens?.access_token) {
+      console.error('トークン交換の応答に access_token がありません');
+      return NextResponse.redirect(new URL('/account/connections?calendar=token_exchange', request.url));
+    }
 
     // state から uid を取得（CSRF対策）。
     //   1) /api/calendar/start が発行した HMAC 署名 state を検証（正規経路）

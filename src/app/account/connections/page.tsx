@@ -12,13 +12,15 @@ import { linkedProviderIds, linkGoogle, linkApple, linkEmailPassword, unlinkProv
  * Google カレンダー連携（/api/calendar/callback）の結果表示・Day111。
  * 旧実装は存在しない `/calendar` `/calendar/connect` へ戻しており、連携の成否にかかわらず 404 だった。
  */
-const CALENDAR_RESULT: Record<string, { kind: 'ok' | 'err'; text: string }> = {
+// クエリ文字列でそのまま索引しない（`?calendar=constructor` 等がプロトタイプ由来の値を拾い、
+// 中身が undefined のまま空バナーが出る＝Day95 と同型）。Map なら自前のキーだけが引ける。
+const CALENDAR_RESULT = new Map<string, { kind: 'ok' | 'err'; text: string }>(Object.entries({
   connected: { kind: 'ok', text: 'Google カレンダーと連携しました。' },
   no_code: { kind: 'err', text: 'Google カレンダーの連携が中断されました（認可コードがありません）。もう一度お試しください。' },
   token_exchange: { kind: 'err', text: 'Google カレンダーの連携に失敗しました（トークンの取得エラー）。時間をおいてもう一度お試しください。' },
   invalid_state: { kind: 'err', text: 'Google カレンダーの連携リンクが無効か期限切れです（10分で失効します）。最初からやり直してください。' },
   unknown: { kind: 'err', text: 'Google カレンダーの連携に失敗しました。時間をおいてもう一度お試しください。' },
-};
+}));
 
 const PROVIDERS: { id: string; label: string; hint: string }[] = [
   { id: 'google.com', label: 'Google', hint: 'Google アカウントでログイン' },
@@ -27,7 +29,7 @@ const PROVIDERS: { id: string; label: string; hint: string }[] = [
 ];
 
 function ConnectionsClient({ user }: { user: User }) {
-  const calendarResult = CALENDAR_RESULT[useSearchParams().get('calendar') ?? ''] ?? null;
+  const calendarResult = CALENDAR_RESULT.get(useSearchParams().get('calendar') ?? '') ?? null;
   const [, setTick] = useState(0);
   const [busy, setBusy] = useState<string | null>(null);
   const [msg, setMsg] = useState<{ kind: 'ok' | 'err'; text: string } | null>(null);

@@ -10,13 +10,25 @@ const STATE_TTL_MS = 10 * 60 * 1000; // 10分
 function stateSecret(): string {
   return process.env.CALENDAR_STATE_SECRET || process.env.GOOGLE_CLIENT_SECRET || '';
 }
+/**
+ * 秘密鍵が無いときは**署名も検証もしない**（Day111-PM）。
+ * 旧実装は鍵が空文字でも HMAC を計算していたため、鍵未設定のデプロイでは
+ * 「誰でも正しい署名を作れる」＝ CSRF 対策が実質無効な状態で**通ってしまう**
+ * （攻撃者が任意 uid の署名 state を鍛造でき、被害者のトークン doc を上書きできる）。
+ * 発行側は例外にして 500 で気づかせ、検証側は fail-closed（null）にする。
+ */
+export class CalendarStateSecretMissing extends Error {
+  constructor() { super('CALENDAR_STATE_SECRET (or GOOGLE_CLIENT_SECRET) is not configured'); }
+}
 export function signState(uid: string): string {
+  if (!stateSecret()) throw new CalendarStateSecretMissing();
   const payload = Buffer.from(JSON.stringify({ uid, exp: Date.now() + STATE_TTL_MS, n: crypto.randomBytes(8).toString('hex') })).toString('base64url');
   const sig = crypto.createHmac('sha256', stateSecret()).update(payload).digest('base64url');
   return `${payload}.${sig}`;
 }
 /** 署名 state を検証して uid を返す（不正/失効は null） */
 export function verifyState(state: string): string | null {
+  if (!stateSecret()) return null; // 鍵が無い＝誰でも鍛造できるので一切受理しない
   const i = state.lastIndexOf('.');
   if (i <= 0) return null;
   const payload = state.slice(0, i);

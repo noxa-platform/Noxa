@@ -4,7 +4,7 @@
 // GET -> { url }
 import { NextRequest, NextResponse } from 'next/server';
 import { verifyRequest, AuthError } from '../../lib/firebase-admin';
-import { signState } from '../lib';
+import { signState, CalendarStateSecretMissing } from '../lib';
 
 const SCOPE = 'https://www.googleapis.com/auth/calendar';
 
@@ -26,6 +26,11 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ url: url.toString() });
   } catch (e) {
     if (e instanceof AuthError) return NextResponse.json({ error: '認証が必要です' }, { status: 401 });
+    // 署名鍵が無い＝CSRF 対策が効かない状態なので、認可 URL を発行せずに落とす（Day111-PM）
+    if (e instanceof CalendarStateSecretMissing) {
+      console.error('[api/calendar/start] CALENDAR_STATE_SECRET 未設定のため連携を開始できません');
+      return NextResponse.json({ error: 'Google 連携が未設定です' }, { status: 500 });
+    }
     console.error('[api/calendar/start] error:', e);
     return NextResponse.json({ error: '連携の開始に失敗しました' }, { status: 500 });
   }
