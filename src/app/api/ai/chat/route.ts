@@ -383,7 +383,10 @@ export async function POST(request: NextRequest) {
       const overrideStr = formData.get('overrideModel') as string | null;
       if (overrideStr && overrideStr.startsWith('openrouter:')) overrideModel = overrideStr.slice('openrouter:'.length);
       const historyStr = formData.get('history') as string;
-      try { history = historyStr ? JSON.parse(historyStr) : undefined; } catch { history = undefined; }
+      // 会話履歴が読めないと AI は**文脈なしで**答えるのに、利用者にはスレッドが続いて見える。
+      // 応答を止めるほどではないので続行するが、無言では原因が追えない（Day116-PM2）
+      try { history = historyStr ? JSON.parse(historyStr) : undefined; }
+      catch (e) { console.error('[api/ai/chat] history の JSON パースに失敗（文脈なしで続行）:', e); history = undefined; }
 
       // 画像をbase64に変換
       // File 以外のエントリ（文字列など）が混じっても落ちないよう絞る。

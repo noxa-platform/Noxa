@@ -285,6 +285,23 @@ describe('calendar/list', () => {
     } finally { spy.mockRestore(); }
   });
 
+  // Day116-PM2: 連携 doc はあるのに再取得に失敗する（Google 側で連携解除＝invalid_grant 等）と、
+  // 旧実装は理由をどこにも残さず null を返し、画面は「連携されていません」とだけ言っていた。
+  it('★リフレッシュ失敗（連携が切れている）は 401 で返し、理由をログに残す', async () => {
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      const PAST = new Date(Date.now() - 60 * 1000).toISOString();
+      mocks.getDb.mockReturnValue(makeDb({ 'account_google_tokens/u1': { accessToken: 'at', refreshToken: 'rt', expiresAt: PAST } }).db);
+      mocks.fetch.mockResolvedValue({ ok: false, status: 400, text: async () => 'invalid_grant', json: async () => ({}) });
+
+      const res = await listGET(req('https://noxa.test/api/calendar/list'));
+
+      expect(res.status).toBe(401);
+      expect((await res.json()).error).toContain('再連携'); // 「未連携」で片付けず、切れている可能性を伝える
+      expect(spy).toHaveBeenCalled();
+    } finally { spy.mockRestore(); }
+  });
+
   it('有効トークンがあれば id/summary だけに絞って返す', async () => {
     mocks.getDb.mockReturnValue(makeDb({ 'account_google_tokens/u1': { accessToken: 'at', refreshToken: 'rt', expiresAt: FUTURE() } }).db);
     mocks.fetch.mockResolvedValue({ ok: true, json: async () => ({ items: [{ id: 'c1', summary: '仕事', description: '内部メモ' }] }) });

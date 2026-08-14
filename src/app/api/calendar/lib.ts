@@ -97,7 +97,12 @@ export async function getValidToken(uid: string): Promise<string | null> {
     return tokenDoc.accessToken;
   }
 
-  if (!tokenDoc.refreshToken) return null;
+  if (!tokenDoc.refreshToken) {
+    // 連携 doc はあるのに更新できない＝**連携済みの表示のまま予定が出ない**状態。
+    // 呼び出し元には null しか渡らないので、ここで残さないと誰も気づけない（Day116-PM2）
+    console.error('[calendar/lib] refreshToken が無く再取得できません（要・再連携）:', uid);
+    return null;
+  }
 
   try {
     const res = await fetch('https://oauth2.googleapis.com/token', {
@@ -111,7 +116,12 @@ export async function getValidToken(uid: string): Promise<string | null> {
       }),
     });
 
-    if (!res.ok) return null;
+    if (!res.ok) {
+      // invalid_grant（利用者が Google 側で連携を取り消した）等。無言だと
+      // 「連携済みなのに予定が空」の問い合わせに対して手掛かりがゼロになる（Day116-PM2）
+      console.error('[calendar/lib] リフレッシュトークンでの再取得に失敗:', uid, res.status, await res.text().catch(() => ''));
+      return null;
+    }
 
     const tokens = await res.json();
     await saveTokenDoc(uid, {

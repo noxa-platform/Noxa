@@ -80,14 +80,21 @@ export async function POST(request: NextRequest) {
       await refundAiCredit(uid, suggestCost, reserved);
       throw err;
     }
-    void logAiLedger(uid, 'suggest', suggestCost);
-
     let suggestion;
     try {
       suggestion = JSON.parse(content);
-    } catch {
-      suggestion = { nextAction: 'フォロー連絡', timing: '3日後', reason: '関係維持のため' };
+    } catch (e) {
+      // 生成物が読めないときに**固定の日本語文言**を AI の提案として返していた（Day116-PM2）。
+      // 「フォロー連絡 / 3日後 / 関係維持のため」はモデルが一度も言っていない**捏造**で、
+      // しかもクレジットは消費済み＝利用者は課金されたうえで、当たり障りのない偽の提案を
+      // 本物として受け取り、それを根拠に接客判断をしてしまう。
+      // sibling（briefing / seating-suggest / insights-narrative）と同じく失敗として扱い、返金する。
+      console.error('[api/ai/suggest] 生成物が JSON として読めず 500。raw head:', (content ?? '').slice(0, 200), e);
+      await refundAiCredit(uid, suggestCost, reserved);
+      return NextResponse.json({ error: '提案の生成に失敗しました' }, { status: 500 });
     }
+    // 消費の記録は生成が成立してから（失敗時は上で返金している）
+    void logAiLedger(uid, 'suggest', suggestCost);
 
     return NextResponse.json({
       suggestion,

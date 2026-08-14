@@ -125,6 +125,28 @@ describe('API route の無音の失敗ガード', () => {
     expect(offenders).toEqual([]);
   });
 
+  it('AI route は生成に失敗したとき、固定の日本語文言を「AI の出力」として返さない（Day116-PM2 で追加）', () => {
+    // `ai/suggest` は生成物が JSON として読めないとき
+    // `{ nextAction: 'フォロー連絡', timing: '3日後', reason: '関係維持のため' }` を **200 で** 返していた。
+    // モデルが一度も言っていない提案が本物として画面に出て、しかもクレジットは消費済み。
+    // 「失敗を成功に見せる」中でも最も悪い形なので、catch で日本語の固定文言を組み立てたら赤にする。
+    const JP = /[ぁ-んァ-ヶ一-龠]/;
+    const offenders: string[] = [];
+    for (const { path, src } of ROUTES) {
+      if (!path.startsWith('src/app/api/ai/')) continue;
+      for (const { body, line } of catchBodies(src)) {
+        // catch の中で「オブジェクトリテラルに日本語の文字列を入れて代入する」形だけを見る。
+        // 生の生成物を詰め直す復旧（`{ notes: raw }` 等）や kind:'unknown' は対象外。
+        for (const lit of body.matchAll(/=\s*\{[^{}]*\}/g)) {
+          if (!/['"][^'"]*['"]/.test(lit[0])) continue;
+          const strings = [...lit[0].matchAll(/['"]([^'"]*)['"]/g)].map((s) => s[1]);
+          if (strings.some((s) => JP.test(s))) offenders.push(`${path}:${line}`);
+        }
+      }
+    }
+    expect(offenders).toEqual([]);
+  });
+
   it('エラー応答を「空配列」で返さない（成功と同じ形＝0件と区別できない・Day116-PM で追加）', () => {
     // `NextResponse.json([], { status: 401 })` は本文だけ見ると成功時の「0件」と同一。
     // 呼び出し側が status を見落とすと**静かに「予定なし／カレンダーなし」**として表示される。

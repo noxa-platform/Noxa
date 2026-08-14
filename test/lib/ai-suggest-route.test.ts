@@ -104,9 +104,23 @@ describe('ai/suggest POST（次アクション提案）', () => {
     expect(mocks.ledger).not.toHaveBeenCalled();
   });
 
-  it('非 JSON 応答は既定 suggestion にフォールバック', async () => {
-    mocks.gen.mockResolvedValue('提案できません');
-    const body = await (await POST(req(okBody))).json();
-    expect(body.suggestion).toEqual({ nextAction: 'フォロー連絡', timing: '3日後', reason: '関係維持のため' });
+  // Day116-PM2: 旧実装は非 JSON 応答のとき「フォロー連絡 / 3日後 / 関係維持のため」という
+  // **固定文言を AI の提案として 200 で返し**、しかもクレジットは消費したままだった。
+  // モデルが一度も言っていない提案を本物として受け取り、それを根拠に接客判断してしまう。
+  it('★非 JSON 応答は捏造した提案を返さず、返金して 500（課金したまま偽の提案を見せない）', async () => {
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      mocks.gen.mockResolvedValue('提案できません');
+
+      const res = await POST(req(okBody));
+      const body = await res.json();
+
+      expect(res.status).toBe(500);
+      expect(body.suggestion).toBeUndefined();
+      expect(JSON.stringify(body)).not.toContain('フォロー連絡'); // 固定文言を復活させない
+      expect(mocks.refund).toHaveBeenCalledTimes(1);             // 生成できていないので返金する
+      expect(mocks.ledger).not.toHaveBeenCalled();               // 消費の記録もしない
+      expect(spy).toHaveBeenCalled();                            // 生成物をログに残す
+    } finally { spy.mockRestore(); }
   });
 });

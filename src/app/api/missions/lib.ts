@@ -64,7 +64,11 @@ export async function tryClaimMission(uid: string, missionId: MissionId | string
     await ref.set(
       { claimed: { [missionId]: FieldValue.delete() }, updatedAt: FieldValue.serverTimestamp() },
       { merge: true },
-    ).catch(() => { /* 巻き戻しも失敗＝claimed は残るが、二重付与よりは安全側 */ });
+    ).catch((rollbackErr) => {
+      // 巻き戻しも失敗＝claimed が残り、**報酬が永久に受け取れない**（本人は受領済みに見える）。
+      // 二重付与よりは安全側だが、無言だと問い合わせが来ても手当てできない（Day116-PM2）
+      console.error('[missions] 付与失敗後の claimed 巻き戻しにも失敗（要手当て）:', uid, missionId, rollbackErr);
+    });
     throw e;
   }
   return { granted: def.rewardCredits, alreadyClaimed: false, missionId };

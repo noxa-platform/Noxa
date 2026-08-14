@@ -356,6 +356,15 @@ describe('成績画面が incomplete を受け取って警告する（Day116-PM�
     expect(src).toMatch(/setWarn\(data\.incomplete/);   // 警告として表示する
   });
 
+  // Day116-PM2: 同じ画面の「担当顧客」展開は、取得失敗を空配列にして
+  // 「担当顧客はまだいません。」と表示していた（担当0人と区別が付かない）。
+  it('担当顧客の展開も、取得失敗を「担当なし」と同じ表示にしない', () => {
+    expect(src).toMatch(/setSelErr\(/);
+    expect(src).toMatch(/selErr \? <span role="alert"/);
+    // 失敗時に空配列を入れない（null のままにして「まだいません」を出させない）
+    expect(src).not.toMatch(/catch \{ setSelCustomers\(\[\]\); \}/);
+  });
+
   it('警告は致命的エラー（err）と混ぜない', () => {
     // 同じ state に入れると ①一覧が出ているのにエラー表示になる
     // ②「キャストがいません」の空案内（!err 条件）が消える

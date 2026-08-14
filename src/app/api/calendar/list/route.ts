@@ -14,7 +14,7 @@ export async function GET(request: NextRequest) {
   }
 
   const token = await getValidToken(uid);
-  if (!token) return NextResponse.json({ error: 'Google カレンダーと連携されていません' }, { status: 401 });
+  if (!token) return NextResponse.json({ error: 'Google カレンダーと連携されていません（連携済みの場合は連携が切れています。再連携してください）' }, { status: 401 });
 
   try {
     const res = await fetch('https://www.googleapis.com/calendar/v3/users/me/calendarList', {

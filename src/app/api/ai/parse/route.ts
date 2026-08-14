@@ -81,7 +81,10 @@ export async function POST(request: NextRequest) {
       try {
         const cleaned = raw.trim().replace(/^```json\s*/i, '').replace(/```$/i, '').trim();
         parsed = JSON.parse(cleaned);
-      } catch {
+      } catch (e) {
+        // kind:'unknown' は UI が「判別できませんでした」と扱う正規の状態なので応答はこのまま。
+        // ただしクレジットは消費済みなので、**なぜ読めなかったのか**は残す（Day116-PM2）
+        console.error('[api/ai/parse] 生成物が JSON として読めず unknown 扱い。raw head:', (raw ?? '').slice(0, 200), e);
         parsed = { kind: 'unknown', customerName: '', amount: 0, groupCount: 0, withDouhan: false, withAfter: false, whenText: '', place: '', memo: '' };
       }
 

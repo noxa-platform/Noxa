@@ -264,6 +264,7 @@ function TeamStatsPanel({ shopId, user }: { shopId: string; user: User }) {
   const [busy, setBusy] = useState(false);
   const [sel, setSel] = useState<string | null>(null); // 展開中のキャスト uid
   const [selCustomers, setSelCustomers] = useState<CastCustomer[] | null>(null);
+  const [selErr, setSelErr] = useState<string | null>(null); // 展開先の読み込み失敗（Day116-PM2）
   const [selBusy, setSelBusy] = useState(false);
 
   useEffect(() => {
@@ -297,7 +298,7 @@ function TeamStatsPanel({ shopId, user }: { shopId: string; user: User }) {
 
   const toggleCast = async (uid: string) => {
     if (sel === uid) { setSel(null); setSelCustomers(null); return; }
-    setSel(uid); setSelCustomers(null); setSelBusy(true);
+    setSel(uid); setSelCustomers(null); setSelErr(null); setSelBusy(true);
     try {
       const token = await user.getIdToken();
       const res = await fetch('/api/team/cast-customers', {
@@ -305,9 +306,20 @@ function TeamStatsPanel({ shopId, user }: { shopId: string; user: User }) {
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
         body: JSON.stringify({ shopId, castUid: uid }),
       });
-      const data = (await res.json().catch(() => ({}))) as { customers?: CastCustomer[] };
-      setSelCustomers(res.ok && Array.isArray(data.customers) ? data.customers : []);
-    } catch { setSelCustomers([]); }
+      const data = (await res.json().catch(() => ({}))) as { customers?: CastCustomer[]; error?: string };
+      if (!res.ok || !Array.isArray(data.customers)) {
+        // 取得できなかったのに空配列を入れると「担当顧客はまだいません。」と表示され、
+        // **担当が1人もいない**のと区別が付かない（Day116-PM2。朝に直した成績表示の受け手側）
+        setSelCustomers(null);
+        setSelErr(data.error ?? `担当顧客を読み込めませんでした（${res.status}）`);
+      } else {
+        setSelCustomers(data.customers);
+        setSelErr(null);
+      }
+    } catch (e) {
+      setSelCustomers(null);
+      setSelErr(describeFirestoreError(e, '担当顧客の読み込み'));
+    }
     finally { setSelBusy(false); }
   };
 
@@ -342,6 +354,7 @@ function TeamStatsPanel({ shopId, user }: { shopId: string; user: User }) {
             {sel === m.uid && (
               <div style={{ borderTop: '1px solid var(--noxa-divider)', padding: '10px 14px', display: 'flex', flexDirection: 'column', gap: 6 }}>
                 {selBusy ? <span style={{ fontSize: 12, color: 'var(--noxa-text-faint)' }}>読み込み中…</span>
+                  : selErr ? <span role="alert" style={{ fontSize: 12, color: 'var(--noxa-status-error)' }}>{selErr}</span>
                   : (selCustomers ?? []).length === 0 ? <span style={{ fontSize: 12, color: 'var(--noxa-text-faint)' }}>担当顧客はまだいません。</span>
                   : (selCustomers ?? []).slice(0, 30).map((c) => (
                     <div key={c.id} style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: 13 }}>
