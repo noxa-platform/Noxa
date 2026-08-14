@@ -257,6 +257,10 @@ function TeamStatsPanel({ shopId, user }: { shopId: string; user: User }) {
   const [ym, setYm] = useState(() => { const d = new Date(); return { y: d.getFullYear(), m: d.getMonth() + 1 }; });
   const [rows, setRows] = useState<MemberStat[] | null>(null);
   const [err, setErr] = useState<string | null>(null);
+  // 「取れたが一部欠けている」警告は err と分ける（Day116-PM）。
+  // 同じ state に入れると ①一覧が出ているのに致命的エラーの見た目になる
+  // ②「キャストがいません」の空案内（!err 条件）が消える、の 2 つが起きる
+  const [warn, setWarn] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [sel, setSel] = useState<string | null>(null); // 展開中のキャスト uid
   const [selCustomers, setSelCustomers] = useState<CastCustomer[] | null>(null);
@@ -265,7 +269,7 @@ function TeamStatsPanel({ shopId, user }: { shopId: string; user: User }) {
   useEffect(() => {
     let alive = true;
     (async () => {
-      setBusy(true); setErr(null);
+      setBusy(true); setErr(null); setWarn(null);
       try {
         const token = await user.getIdToken();
         const res = await fetch('/api/team/member-stats', {
@@ -280,7 +284,7 @@ function TeamStatsPanel({ shopId, user }: { shopId: string; user: User }) {
           setRows(Array.isArray(data.members) ? data.members : []);
           // サーバ側で一部を読めていない場合（200 でも数字は欠けている）。
           // 「今月0」と本物の0を区別できないと、成績や給与の判断を誤る（Day116）
-          setErr(data.incomplete?.length
+          setWarn(data.incomplete?.length
             ? `${data.incomplete.join('・')}を読み込めませんでした。表示中の数字は実際より少ない可能性があります（0 でも「実績なし」とは限りません）。`
             : null);
         }
@@ -318,6 +322,7 @@ function TeamStatsPanel({ shopId, user }: { shopId: string; user: User }) {
         {busy && <span style={{ fontSize: 12, color: 'var(--noxa-text-faint)' }}>集計中…</span>}
       </div>
       {err && <p role="alert" style={{ margin: 0, fontSize: 12, color: 'var(--noxa-status-error)' }}>{err}</p>}
+      {warn && <p role="status" style={{ margin: 0, fontSize: 12, color: 'var(--noxa-status-warning)' }}>{warn}</p>}
       {rows && rows.length === 0 && !busy && !err && (
         <p style={{ margin: 0, fontSize: 13, color: 'var(--noxa-text-muted)' }}>キャスト（cast ロールのメンバー）がいません。店舗設定の「メンバーと招待」から招待できます。</p>
       )}

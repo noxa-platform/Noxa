@@ -305,6 +305,8 @@ JSON配列で3つのメッセージを出力:
 
     // 空の場合はエラー（クレジットは返却）
     if (messages.length === 0) {
+      // 生成物を残さないと「なぜ空になったのか」が追えない（Day116-PM・ai/briefing と同型）
+      console.error('[api/ai/message] 生成物からメッセージを取り出せず 500。raw head:', (result ?? '').slice(0, 200));
       await refundAiCredit(uid, messageCost, reserved);
       return NextResponse.json({ error: 'メッセージ生成に失敗しました' }, { status: 500 });
     }

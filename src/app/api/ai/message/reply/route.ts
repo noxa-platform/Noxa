@@ -375,6 +375,8 @@ JSON配列で3つの返信案:
     }
 
     if (replies.length === 0) {
+      // 生成物を残さないと「なぜ空になったのか」が追えない（Day116-PM・ai/briefing と同型）
+      console.error('[api/ai/message/reply] 生成物から返信案を取り出せず 500。raw head:', (result ?? '').slice(0, 200));
       await refundAiCredit(uid, replyCost, reserved);
       return NextResponse.json({ error: '返信案の生成に失敗しました' }, { status: 500 });
     }

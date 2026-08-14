@@ -115,6 +115,9 @@ export async function POST(request: NextRequest) {
     }
 
     if (drafts.length === 0) {
+      // Day116 で ai/briefing にだけ入れた「生成物を残す」を同型のここにも適用（Day116-PM）。
+      // 500 だけ返しても、モデルが何を返したのかが消えるので再現も改善もできない
+      console.error('[api/ai/sales-message] 生成物から下書きを取り出せず 500。raw head:', (result ?? '').slice(0, 200));
       await refundAiCredit(uid, cost, reserved);
       return NextResponse.json({ error: 'メッセージ生成に失敗しました' }, { status: 500 });
     }

@@ -8,11 +8,13 @@ export async function GET(request: NextRequest) {
   try {
     uid = await verifyRequest(request);
   } catch {
-    return NextResponse.json([], { status: 401 });
+    // 空配列は「カレンダーが1つも無い」と同じ形。Day116 でエラー経路だけ直したが、
+    // 認証・未連携の 2 経路が空配列のまま残っていた（Day116-PM）
+    return NextResponse.json({ error: '未認証' }, { status: 401 });
   }
 
   const token = await getValidToken(uid);
-  if (!token) return NextResponse.json([], { status: 401 });
+  if (!token) return NextResponse.json({ error: 'Google カレンダーと連携されていません' }, { status: 401 });
 
   try {
     const res = await fetch('https://www.googleapis.com/calendar/v3/users/me/calendarList', {

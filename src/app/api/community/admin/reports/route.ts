@@ -62,8 +62,6 @@ export async function POST(request: NextRequest) {
         exists: !!td,
         /** 対象の取得自体に失敗したか（true のとき exists:false は「削除済み」を意味しない） */
         fetchFailed,
-        /** 対象の取得自体に失敗したか（true のとき exists:false は「削除済み」を意味しない） */
-        /** 対象の取得自体に失敗したか（true のとき exists:false は「削除済み」を意味しない） */
         hidden: td?.hidden === true,
         reportCount: td?.reportCount ?? t.reporters.size,
         reporters: t.reporters.size,

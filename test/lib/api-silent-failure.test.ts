@@ -36,9 +36,9 @@ const ROUTES = routeFiles(API_ROOT).map((p) => ({
   src: readFileSync(p, 'utf8'),
 }));
 
-/** catch 節の本体を（波括弧の対応で）切り出す */
-function catchBodies(src: string): { body: string; line: number }[] {
-  const out: { body: string; line: number }[] = [];
+/** catch 節の本体の範囲（開始/終了インデックス）を波括弧の対応で切り出す */
+function catchSpans(src: string): [number, number][] {
+  const out: [number, number][] = [];
   const HEAD = /\bcatch\s*(\([^)]*\))?\s*\{/g;
   let m: RegExpExecArray | null;
   while ((m = HEAD.exec(src)) !== null) {
@@ -50,9 +50,14 @@ function catchBodies(src: string): { body: string; line: number }[] {
       else if (c === '}') depth -= 1;
       i += 1;
     }
-    out.push({ body: src.slice(HEAD.lastIndex, i - 1), line: src.slice(0, m.index).split('\n').length });
+    out.push([HEAD.lastIndex, i - 1]);
   }
   return out;
+}
+
+/** catch 節の本体を切り出す */
+function catchBodies(src: string): { body: string; line: number }[] {
+  return catchSpans(src).map(([a, b]) => ({ body: src.slice(a, b), line: src.slice(0, a).split('\n').length }));
 }
 
 const LOGGED = /console\.(error|warn)|logger\./;
@@ -74,6 +79,33 @@ describe('API route の無音の失敗ガード', () => {
     expect(offenders).toEqual([]);
   });
 
+  it('catch の外で返す 5xx も理由をログに残す（Day116-PM で追加）', () => {
+    // Day116 のルール①は **catch 節の中だけ** を見ていた。実際には
+    // 「モデルの生成物が読めない」「全カレンダーが取れない」「環境変数が無い」のように
+    // catch の外で 5xx を組み立てる経路が 11 箇所あり、その 10 箇所が完全に無言だった
+    // （＝本番で 500 が出ても、何が起きたのか運用者が一切追えない）。
+    const ALLOW: { path: string; needle: string; why: string }[] = [
+      { path: 'src/app/api/ai/benchmark/route.ts', needle: 'OPENROUTER_API_KEY が未設定', why: '開発者向けの検証 route。応答本文が理由そのもの' },
+      { path: 'src/app/api/ai/benchmark/route.ts', needle: 'OpenRouter ${res.status}', why: '上流の本文を detail として応答に載せている（呼び出した本人が読める）' },
+    ];
+    const offenders: string[] = [];
+    for (const { path, src } of ROUTES) {
+      const spans = catchSpans(src);
+      const lines = src.split('\n');
+      for (const m of src.matchAll(/status:\s*5\d\d/g)) {
+        const idx = m.index ?? 0;
+        if (spans.some(([a, b]) => idx >= a && idx < b)) continue; // ルール① の担当
+        const line = src.slice(0, idx).split('\n').length;
+        // 応答を組み立てる直前（6行）にログがあるかを見る。ログは 5xx を返すより前に置く
+        const around = lines.slice(Math.max(0, line - 6), line + 1).join('\n');
+        if (LOGGED.test(around)) continue;
+        if (ALLOW.some((a) => a.path === path && around.includes(a.needle))) continue;
+        offenders.push(`${path}:${line}`);
+      }
+    }
+    expect(offenders).toEqual([]);
+  });
+
   it('取得の失敗を既定値へ倒すときは、ログか応答のどちらかで必ず知らせる', () => {
     // `.catch(() => null)` のように**何も言わずに**既定値へ倒すと、呼び出し側からは
     // 「データが無い」と同じに見える。ログに残すか、応答（incomplete 等）に載せること。
@@ -88,6 +120,19 @@ describe('API route の無音の失敗ガード', () => {
         if (/uid\.slice|displayName|castDisplayName/.test(around)) continue; // 画面に劣化が見える
         if (/request\.json\(\)/.test(m[0]) || /json\(\)\s*\.catch/.test(around)) continue; // body パースの既定 {}
         offenders.push(`${path}:${line}`);
+      }
+    }
+    expect(offenders).toEqual([]);
+  });
+
+  it('エラー応答を「空配列」で返さない（成功と同じ形＝0件と区別できない・Day116-PM で追加）', () => {
+    // `NextResponse.json([], { status: 401 })` は本文だけ見ると成功時の「0件」と同一。
+    // 呼び出し側が status を見落とすと**静かに「予定なし／カレンダーなし」**として表示される。
+    // Day116 は calendar/list の 500 経路だけ直しており、401 の 2 経路が空配列のまま残っていた。
+    const offenders: string[] = [];
+    for (const { path, src } of ROUTES) {
+      for (const m of src.matchAll(/NextResponse\.json\(\s*\[\s*\]\s*,\s*\{\s*status:/g)) {
+        offenders.push(`${path}:${src.slice(0, m.index ?? 0).split('\n').length}`);
       }
     }
     expect(offenders).toEqual([]);

@@ -259,6 +259,32 @@ describe('calendar/list', () => {
     expect(mocks.fetch).not.toHaveBeenCalled(); // 無駄な外部呼び出しをしない
   });
 
+  // Day116 は 500 経路だけ `{error}` に直し、401 の 2 経路が空配列のまま残っていた（Day116-PM）。
+  it('★401 も空配列で返さない（成功時の「カレンダー0件」と同じ形にしない）', async () => {
+    mocks.verify.mockRejectedValue(new AuthError('no'));
+    expect(Array.isArray(await (await listGET(req('https://noxa.test/api/calendar/list'))).json())).toBe(false);
+
+    mocks.verify.mockResolvedValue('u1');
+    mocks.getDb.mockReturnValue(makeDb().db); // トークン doc 無し＝未連携
+    const notLinked = await listGET(req('https://noxa.test/api/calendar/list'));
+    expect(notLinked.status).toBe(401);
+    expect((await notLinked.json()).error).toContain('連携');
+  });
+
+  it('★Google 側が失敗したら空配列 200 ではなく理由つきで返す（「予定表が無い」と混ぜない）', async () => {
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      mocks.getDb.mockReturnValue(makeDb({ 'account_google_tokens/u1': { accessToken: 'at', refreshToken: 'rt', expiresAt: FUTURE() } }).db);
+      mocks.fetch.mockResolvedValue({ ok: false, status: 403, json: async () => ({}), text: async () => 'forbidden' });
+
+      const res = await listGET(req('https://noxa.test/api/calendar/list'));
+
+      expect(res.status).toBe(403);
+      expect(Array.isArray(await res.json())).toBe(false);
+      expect(spy).toHaveBeenCalled(); // 運用者が原因を追える
+    } finally { spy.mockRestore(); }
+  });
+
   it('有効トークンがあれば id/summary だけに絞って返す', async () => {
     mocks.getDb.mockReturnValue(makeDb({ 'account_google_tokens/u1': { accessToken: 'at', refreshToken: 'rt', expiresAt: FUTURE() } }).db);
     mocks.fetch.mockResolvedValue({ ok: true, json: async () => ({ items: [{ id: 'c1', summary: '仕事', description: '内部メモ' }] }) });
@@ -282,7 +308,7 @@ describe('calendar/events（取得失敗を「予定なし」と混ぜない）'
 
   it('★全カレンダーの取得に失敗したら 502（空配列 200 で「予定なし」を装わない）', async () => {
     withToken();
-    mocks.fetch.mockResolvedValue({ ok: false, json: async () => ({}) });
+    mocks.fetch.mockResolvedValue({ ok: false, status: 403, json: async () => ({}), text: async () => 'insufficientPermissions' });
 
     const res = await eventsGET(req('https://noxa.test/api/calendar/events?calendarId=c1&calendarId=c2'));
 
@@ -295,7 +321,7 @@ describe('calendar/events（取得失敗を「予定なし」と混ぜない）'
     withToken();
     mocks.fetch
       .mockResolvedValueOnce({ ok: true, json: async () => ({ items: [{ id: 'e1', summary: '出勤', start: { dateTime: '2026-08-14T19:00:00+09:00' }, end: { dateTime: '2026-08-15T01:00:00+09:00' } }] }) })
-      .mockResolvedValueOnce({ ok: false, json: async () => ({}) });
+      .mockResolvedValueOnce({ ok: false, status: 403, json: async () => ({}), text: async () => 'insufficientPermissions' });
 
     const res = await eventsGET(req('https://noxa.test/api/calendar/events?calendarId=ok&calendarId=ng'));
 
@@ -312,6 +338,20 @@ describe('calendar/events（取得失敗を「予定なし」と混ぜない）'
 
     expect(res.status).toBe(200);
     expect(res.headers.get('X-Calendar-Failed')).toBeNull();
+  });
+
+  // Day116-PM: 認証/未連携の応答が **成功と同じ空配列** だった（status を見落とすと「予定なし」に化ける）。
+  it('★未認証・未連携は空配列ではなく理由つきのオブジェクトで返す', async () => {
+    mocks.verify.mockRejectedValue(new AuthError('no'));
+    const unauth = await eventsGET(req('https://noxa.test/api/calendar/events?calendarId=c1'));
+    expect(unauth.status).toBe(401);
+    expect(Array.isArray(await unauth.json())).toBe(false);
+
+    mocks.verify.mockResolvedValue('u1');
+    mocks.getDb.mockReturnValue(makeDb().db); // トークン doc 無し＝未連携
+    const notLinked = await eventsGET(req('https://noxa.test/api/calendar/events?calendarId=c1'));
+    expect(notLinked.status).toBe(401);
+    expect((await notLinked.json()).error).toContain('連携');
   });
 
   it('タイトル無しの予定は「(タイトルなし)」で返し、顧客/WS の紐付けを素通しする', async () => {

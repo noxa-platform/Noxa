@@ -12,7 +12,11 @@ export async function GET(request: NextRequest) {
   try {
     const uid = await verifyRequest(request);
     const clientId = process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID || '';
-    if (!clientId) return NextResponse.json({ error: 'Google 連携が未設定です' }, { status: 500 });
+    if (!clientId) {
+      // 同ファイルの CALENDAR_STATE_SECRET 未設定はログを残しているのに、ここだけ無言だった（Day116-PM）
+      console.error('[api/calendar/start] NEXT_PUBLIC_GOOGLE_CLIENT_ID 未設定のため連携を開始できません');
+      return NextResponse.json({ error: 'Google 連携が未設定です' }, { status: 500 });
+    }
 
     const url = new URL('https://accounts.google.com/o/oauth2/v2/auth');
     url.searchParams.set('client_id', clientId);

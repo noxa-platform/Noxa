@@ -24,15 +24,24 @@ function makeDb(opts: {
   account?: Record<string, Record<string, unknown>>;
   docs?: Record<string, Record<string, unknown>>;
   reports?: Array<Record<string, unknown> & { id: string }>;
+  /** get() が失敗するパス（インデックス欠落・タイムアウト・一時障害の再現・Day116-PM） */
+  failDocs?: string[];
 } = {}) {
   const store: Record<string, Record<string, unknown> | undefined> = { ...opts.account, ...opts.docs };
+  const failing = new Set(opts.failDocs ?? []);
   const snap = (p: string) => ({ exists: store[p] !== undefined, data: () => store[p] });
   const reportDocs = (opts.reports ?? []).map((r) => {
     const { id, ...rest } = r;
     return { id, data: () => rest };
   });
   const db = {
-    doc: (p: string) => ({ path: p, get: async () => snap(p) }),
+    doc: (p: string) => ({
+      path: p,
+      get: async () => {
+        if (failing.has(p)) throw new Error(`unavailable: ${p}`);
+        return snap(p);
+      },
+    }),
     collection: (name: string) => {
       const chain = {
         orderBy: () => chain,
@@ -46,7 +55,7 @@ function makeDb(opts: {
 }
 const req = (body: unknown = {}) => ({ json: async () => body }) as never;
 const ADMIN = { 'account_users/admin1': { platformRole: 'admin' } };
-type Item = { targetType: string; targetId: string; postId: string; preview: string; exists: boolean; hidden: boolean; reportCount: number; reporters: number; reportIds: string[]; open: boolean };
+type Item = { targetType: string; targetId: string; postId: string; preview: string; exists: boolean; fetchFailed?: boolean; hidden: boolean; reportCount: number; reporters: number; reportIds: string[]; open: boolean };
 const items = async (r: Awaited<ReturnType<typeof POST>>) => (await r.json()).items as Item[];
 
 describe('community/admin/reports POST（通報一覧の集約と admin 境界）', () => {
@@ -151,6 +160,46 @@ describe('community/admin/reports POST（通報一覧の集約と admin 境界�
     expect(list.map((i) => i.targetId)).toEqual(['high', 'low']); // 通報者数の多い順
     expect(list.find((i) => i.targetId === 'high')!.postId).toBe('high'); // postId 欠落→targetId
     expect(list.some((i) => i.reportIds.includes('bad'))).toBe(false); // 不正 doc は無視
+  });
+
+  // Day116 は「取得失敗を削除済みと同一視しない」を実装したが、固定は静的な正規表現だけだった。
+  // 実際に読み取りを落として、応答が区別できることを確かめる（Day116-PM）。
+  it('★対象の取得に失敗したら fetchFailed=true・「削除済み」と別の文言で返す', async () => {
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      mocks.getDb.mockReturnValue(makeDb({
+        account: ADMIN,
+        docs: { 'noxa_posts/ok1': { body: '残っている投稿' } },
+        failDocs: ['noxa_posts/ng1'],
+        reports: [
+          { id: 'r1', targetType: 'thread', targetId: 'ng1', reporterUid: 'u1', status: 'open' },
+          { id: 'r2', targetType: 'thread', targetId: 'ok1', reporterUid: 'u2', status: 'open' },
+        ],
+      }).db);
+
+      const list = await items(await POST(req()));
+      const ng = list.find((i) => i.targetId === 'ng1')!;
+      expect(ng.fetchFailed).toBe(true);
+      expect(ng.exists).toBe(false);              // 読めていないので中身は無い
+      expect(ng.preview).toBe('(本文を取得できませんでした)'); // ここが '(削除済み)' だと運営が通報を閉じてしまう
+      expect(ng.reportCount).toBe(1);             // 通報者数へフォールバック
+
+      // 1件落ちても他の対象は通常どおり返る（Promise.all を巻き添えで落とさない）
+      const ok = list.find((i) => i.targetId === 'ok1')!;
+      expect(ok.fetchFailed).toBe(false);
+      expect(ok.preview).toBe('残っている投稿');
+      expect(spy).toHaveBeenCalled();             // 運用者が追える
+    } finally { spy.mockRestore(); }
+  });
+
+  it('★本当に削除済みの対象は fetchFailed=false のまま（警告を出しっぱなしにしない）', async () => {
+    mocks.getDb.mockReturnValue(makeDb({
+      account: ADMIN,
+      reports: [{ id: 'r1', targetType: 'thread', targetId: 'gone', reporterUid: 'u1', status: 'open' }],
+    }).db);
+    const [it0] = await items(await POST(req()));
+    expect(it0.fetchFailed).toBe(false);
+    expect(it0.preview).toBe('(削除済み)');
   });
 
   it('hidden な対象は hidden=true を返す', async () => {

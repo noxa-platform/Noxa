@@ -5,6 +5,8 @@ import * as crypto from 'crypto';
 export async function GET(request: NextRequest) {
   const channelId = process.env.LINE_LOGIN_CHANNEL_ID;
   if (!channelId) {
+    // 設定漏れは本番でしか起きない＝ログが無いと「LINE でログインできない」の原因に辿り着けない（Day116-PM）
+    console.error('[api/auth/line] LINE_LOGIN_CHANNEL_ID 未設定のため LINE ログインを開始できません');
     return NextResponse.json({ error: 'LINE Login未設定' }, { status: 500 });
   }
 

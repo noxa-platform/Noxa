@@ -120,6 +120,9 @@ export async function POST(request: NextRequest) {
         if (m) { try { parsed = JSON.parse(m[0]); } catch { /* noop */ } }
       }
       if (!parsed || typeof parsed !== 'object') {
+        // 生成物を残す（Day116-PM）。旧実装は 500 だけ返してモデルの応答を捨てており、
+        // 「なぜ JSON にならなかったのか」を後から調べる手掛かりが無かった
+        console.error('[api/ai/seating-suggest] 生成物が JSON として読めず 500。raw head:', (raw ?? '').slice(0, 200));
         // 生成物が不正 JSON で提案が取り出せない＝生成失敗。ack せず return し
         // withReservedCredits に予約分を返金させる（insights/briefing/message と同じ Day67 refund 契約）。
         // 旧実装はこの経路でも ack して 200＋空 proposals を返し、失敗を成功に見せかけつつ課金していた。

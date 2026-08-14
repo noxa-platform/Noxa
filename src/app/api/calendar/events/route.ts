@@ -14,13 +14,14 @@ export async function GET(request: NextRequest) {
   try {
     uid = await verifyRequest(request);
   } catch {
-    return NextResponse.json([], { status: 401 });
+    // 空配列は「予定なし」と同じ形。認証/未連携は理由の分かる形で返す（Day116-PM。POST 側は元からこの形）
+    return NextResponse.json({ error: '未認証' }, { status: 401 });
   }
   const calendarIds = request.nextUrl.searchParams.getAll('calendarId');
   if (calendarIds.length === 0) return NextResponse.json([]);
 
   const token = await getValidToken(uid);
-  if (!token) return NextResponse.json([], { status: 401 });
+  if (!token) return NextResponse.json({ error: 'Google カレンダーと連携されていません' }, { status: 401 });
 
   const explicitMin = request.nextUrl.searchParams.get('timeMin');
   const explicitMax = request.nextUrl.searchParams.get('timeMax');
@@ -50,7 +51,12 @@ export async function GET(request: NextRequest) {
         { headers: { Authorization: `Bearer ${token}` } }
       );
 
-      if (!res.ok) { failed.push(calendarId); continue; }
+      if (!res.ok) {
+        // 理由を残さないと「権限剥奪なのか一時障害なのか」を運用者が切り分けられない（Day116-PM）
+        console.error('[api/calendar/events] events fetch failed:', calendarId, res.status, await res.text().catch(() => ''));
+        failed.push(calendarId);
+        continue;
+      }
 
       const data = await res.json();
       for (const item of data.items || []) {
@@ -67,6 +73,7 @@ export async function GET(request: NextRequest) {
 
     if (failed.length === calendarIds.length) {
       // 1件も読めていない。空配列＋200 は「予定が無い」と区別できないので成功を装わない
+      console.error('[api/calendar/events] 全カレンダーの取得に失敗（502）:', failed.join(','));
       return NextResponse.json(
         { error: 'カレンダーを取得できませんでした', failedCalendarIds: failed },
         { status: 502, headers: { 'X-Calendar-Failed': failed.join(',') } },

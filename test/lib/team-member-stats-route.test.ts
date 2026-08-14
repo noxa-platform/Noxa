@@ -1,4 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 
 // team/member-stats の POST を Admin SDK モック＋フェイク Firestore で検証する（Day102）。
 // owner/manager が全キャストの当月成績を俯瞰するルート。Admin SDK で各キャストの
@@ -341,5 +343,23 @@ describe('team/member-stats POST（キャスト別 当月成績）', () => {
       mocks.getDb.mockReturnValue(makeDb(BASE).db);
       expect((await (await POST(req(body))).json()).incomplete).toBeUndefined();
     });
+  });
+});
+
+// サーバが `incomplete` を返しても、画面が読まなければ利用者にとっては無音のまま（Day116-PM）。
+// 受け手側の契約もここで固定する。
+describe('成績画面が incomplete を受け取って警告する（Day116-PM）', () => {
+  const src = readFileSync(resolve(__dirname, '../../src/components/modules/customers/CustomersClient.tsx'), 'utf8');
+
+  it('応答の incomplete を読み、専用の警告 state へ入れる', () => {
+    expect(src).toMatch(/incomplete\?: string\[\]/);   // 型に載っている
+    expect(src).toMatch(/setWarn\(data\.incomplete/);   // 警告として表示する
+  });
+
+  it('警告は致命的エラー（err）と混ぜない', () => {
+    // 同じ state に入れると ①一覧が出ているのにエラー表示になる
+    // ②「キャストがいません」の空案内（!err 条件）が消える
+    expect(src).toMatch(/\{warn && </);
+    expect(src).not.toMatch(/setErr\(data\.incomplete/);
   });
 });
