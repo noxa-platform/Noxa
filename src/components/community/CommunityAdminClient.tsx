@@ -20,6 +20,8 @@ interface ReportItem {
   postId: string;
   preview: string;
   exists: boolean;
+  /** 対象の取得自体に失敗した（true のとき exists:false は「削除済み」ではない・Day116） */
+  fetchFailed?: boolean;
   hidden: boolean;
   reportCount: number;
   reporters: number;
@@ -109,7 +111,9 @@ export function CommunityAdminClient({ user }: { user: User }) {
                       <span style={{ fontFamily: mono, fontSize: 10.5, color: 'var(--noxa-text-faint)' }}>{it.targetType === 'thread' ? 'スレッド' : 'レス'}</span>
                       <span style={{ fontFamily: mono, fontSize: 10.5, color: 'var(--noxa-accent-primary-ink)' }}>通報 {it.reporters}人</span>
                       {it.hidden && <span style={{ fontFamily: mono, fontSize: 10, color: '#fff', background: WINE, borderRadius: 6, padding: '1px 7px' }}>非表示中</span>}
-                      {!it.exists && <span style={{ fontFamily: mono, fontSize: 10, color: 'var(--noxa-text-faint)' }}>削除済み</span>}
+                      {!it.exists && (it.fetchFailed
+                        ? <span role="alert" style={{ fontFamily: mono, fontSize: 10, color: 'var(--noxa-status-error)' }}>取得失敗（削除済みとは限りません）</span>
+                        : <span style={{ fontFamily: mono, fontSize: 10, color: 'var(--noxa-text-faint)' }}>削除済み</span>)}
                     </div>
                     <p style={{ fontFamily: fontJp, fontSize: 13.5, lineHeight: 1.7, color: 'var(--noxa-text-primary)', margin: '0 0 10px', whiteSpace: 'pre-wrap' }}>{it.preview || '(本文なし)'}</p>
                     <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>

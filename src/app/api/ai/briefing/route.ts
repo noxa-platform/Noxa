@@ -126,7 +126,9 @@ export async function POST(request: NextRequest) {
       let parsed: Record<string, unknown>;
       try {
         parsed = JSON.parse(raw);
-      } catch {
+      } catch (e) {
+        // 生成物が壊れた原因（モデルの応答）を残さないと再現も改善もできない（Day116）
+        console.error('[api/ai/briefing] JSON parse failed:', e, 'raw head:', raw.slice(0, 200));
         return NextResponse.json({ error: 'ブリーフィング生成に失敗しました' }, { status: 500 });
       }
 

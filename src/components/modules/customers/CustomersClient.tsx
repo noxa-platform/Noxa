@@ -273,10 +273,17 @@ function TeamStatsPanel({ shopId, user }: { shopId: string; user: User }) {
           headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
           body: JSON.stringify({ shopId, year: ym.y, month: ym.m }),
         });
-        const data = (await res.json().catch(() => ({}))) as { members?: MemberStat[]; error?: string };
+        const data = (await res.json().catch(() => ({}))) as { members?: MemberStat[]; error?: string; incomplete?: string[] };
         if (!alive) return;
         if (!res.ok) { setErr(data.error ?? `成績の取得に失敗しました（${res.status}）`); setRows([]); }
-        else setRows(Array.isArray(data.members) ? data.members : []);
+        else {
+          setRows(Array.isArray(data.members) ? data.members : []);
+          // サーバ側で一部を読めていない場合（200 でも数字は欠けている）。
+          // 「今月0」と本物の0を区別できないと、成績や給与の判断を誤る（Day116）
+          setErr(data.incomplete?.length
+            ? `${data.incomplete.join('・')}を読み込めませんでした。表示中の数字は実際より少ない可能性があります（0 でも「実績なし」とは限りません）。`
+            : null);
+        }
       } catch (e) {
         if (alive) { setErr(describeFirestoreError(e, 'キャスト別成績の読み込み')); setRows([]); }
       } finally { if (alive) setBusy(false); }

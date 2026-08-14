@@ -289,4 +289,57 @@ describe('team/member-stats POST（キャスト別 当月成績）', () => {
       expect(await dailyOf(await POST(req(body)))).toEqual([]);
     });
   });
+
+  // 部分的に読めなかったときに **0 を実績として返さない**（Day116）。
+  // 旧実装は来店ログ・個人売上・顧客数の失敗をすべて null/0 に倒したうえで 200 を返しており、
+  // 画面は「今月の売上0・顧客0」と表示していた（本物の 0 と区別が付かない＝評価と給与を誤らせる）。
+  describe('部分的な読み取り失敗（Day116）', () => {
+    /** `.where()` を何回繋いでも最後の get() が失敗するクエリ（実際の呼び出しは where×2） */
+    const failingQuery = (reason: string): { where: () => unknown; get: () => Promise<never>; count: () => { get: () => Promise<never> } } => {
+      const q = {
+        where: () => q,
+        get: async () => { throw new Error(reason); },
+        count: () => ({ get: async () => { throw new Error(reason); } }),
+      };
+      return q;
+    };
+
+    it('来店ログが読めなければ incomplete に載る（成功応答のまま黙らない）', async () => {
+      const { db } = makeDb(BASE);
+      db.collectionGroup = (() => failingQuery('index missing')) as unknown as typeof db.collectionGroup;
+      mocks.getDb.mockReturnValue(db);
+      const res = await POST(req(body));
+      expect(res.status).toBe(200);
+      expect((await res.json()).incomplete).toContain('来店ログ');
+    });
+
+    it('個人売上が読めなければ incomplete に載る', async () => {
+      const { db } = makeDb(BASE);
+      const orig = db.collection;
+      db.collection = ((cp: string) => (cp.startsWith('personal_sales/')
+        ? failingQuery('unavailable')
+        : orig(cp))) as unknown as typeof db.collection;
+      mocks.getDb.mockReturnValue(db);
+      expect((await (await POST(req(body))).json()).incomplete).toContain('個人売上');
+    });
+
+    it('顧客数の集計が失敗すれば incomplete に載る（customerCount 0 と区別する）', async () => {
+      const { db } = makeDb(BASE);
+      const orig = db.collection;
+      db.collection = ((cp: string) => {
+        const q = orig(cp);
+        if (!cp.startsWith('personal_customers/')) return q;
+        return { ...q, count: () => ({ get: async () => { throw new Error('count failed'); } }) };
+      }) as typeof db.collection;
+      mocks.getDb.mockReturnValue(db);
+      const json = await (await POST(req(body))).json();
+      expect(json.incomplete).toContain('顧客数');
+      expect((json.members as Member[]).every((m) => m.customerCount === 0)).toBe(true); // 0 だが「実績なし」ではない
+    });
+
+    it('すべて読めていれば incomplete は付かない（常時警告にしない）', async () => {
+      mocks.getDb.mockReturnValue(makeDb(BASE).db);
+      expect((await (await POST(req(body))).json()).incomplete).toBeUndefined();
+    });
+  });
 });

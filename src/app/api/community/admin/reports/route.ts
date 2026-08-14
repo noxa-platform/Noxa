@@ -41,15 +41,29 @@ export async function POST(request: NextRequest) {
     // 対象本文プレビュー・非表示状態を付与
     const items = await Promise.all([...byTarget.values()].map(async (t) => {
       const ref = db.doc(t.targetType === 'thread' ? `noxa_posts/${t.targetId}` : `noxa_comments/${t.targetId}`);
-      const tSnap = await ref.get().catch(() => null);
+      // 取得失敗を「削除済み」と同一視しない（Day116）。
+      // 旧実装は読めなかった対象も `(削除済み)` / `exists:false` として返しており、
+      // 運営は**もう消えている**と判断して通報を閉じてしまう（実際は投稿が残っている）。
+      let fetchFailed = false;
+      const tSnap = await ref.get().catch((e) => {
+        console.error('[api/community/admin/reports] target fetch failed:', t.targetId, e);
+        fetchFailed = true;
+        return null;
+      });
       const td = tSnap?.exists ? (tSnap.data() as { body?: string; title?: string; hidden?: boolean; reportCount?: number }) : null;
-      const preview = td ? `${td.title ? `【${td.title}】` : ''}${(td.body ?? '').slice(0, 80)}` : '(削除済み)';
+      const preview = td
+        ? `${td.title ? `【${td.title}】` : ''}${(td.body ?? '').slice(0, 80)}`
+        : (fetchFailed ? '(本文を取得できませんでした)' : '(削除済み)');
       return {
         targetType: t.targetType,
         targetId: t.targetId,
         postId: t.postId,
         preview,
         exists: !!td,
+        /** 対象の取得自体に失敗したか（true のとき exists:false は「削除済み」を意味しない） */
+        fetchFailed,
+        /** 対象の取得自体に失敗したか（true のとき exists:false は「削除済み」を意味しない） */
+        /** 対象の取得自体に失敗したか（true のとき exists:false は「削除済み」を意味しない） */
         hidden: td?.hidden === true,
         reportCount: td?.reportCount ?? t.reporters.size,
         reporters: t.reporters.size,

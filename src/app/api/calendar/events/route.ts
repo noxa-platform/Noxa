@@ -74,7 +74,8 @@ export async function GET(request: NextRequest) {
     }
     // 部分失敗は取得できた分を返しつつ、欠けている事実をヘッダで伝える（既存の配列レスポンス互換）
     return NextResponse.json(allEvents, failed.length ? { headers: { 'X-Calendar-Failed': failed.join(',') } } : undefined);
-  } catch {
+  } catch (e) {
+    console.error('[api/calendar/events] GET error:', e);
     return NextResponse.json({ error: 'カレンダーを取得できませんでした' }, { status: 500 });
   }
 }
@@ -134,7 +135,8 @@ export async function POST(request: NextRequest) {
 
     const created = await res.json();
     return NextResponse.json({ id: created.id });
-  } catch {
+  } catch (e) {
+    console.error('[api/calendar/events] POST error:', e);
     return NextResponse.json({ error: 'サーバーエラー' }, { status: 500 });
   }
 }

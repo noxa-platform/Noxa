@@ -29,6 +29,16 @@ function jstDateKey(ts: Timestamp | undefined | null): string | null {
 export async function POST(request: NextRequest) {
   try {
     const uid = await verifyRequest(request);
+    /**
+     * 集計の途中で**読めなかった**ものを記録する（Day116）。
+     *
+     * この route は売上ログ・個人売上・顧客数の取得失敗をすべて null/0 に倒したうえで
+     * **200 を返して**いた。クライアントから見ると「今月の売上 0 / 顧客 0」と区別が付かず、
+     * 成績画面が静かに全員ゼロになる（給与や評価の判断材料になる数字）。
+     * サーバ側は rules を通らない Admin SDK なので、権限エラーではなく
+     * インデックス欠落・タイムアウト・一時障害でここに落ちる。
+     */
+    const incomplete: string[] = [];
     const body = await request.json().catch(() => ({}));
     const shopId: string | undefined = body?.shopId;
     if (!shopId || typeof shopId !== 'string') {
@@ -108,6 +118,7 @@ export async function POST(request: NextRequest) {
       .get()
       .catch((e) => {
         console.error('[api/team/member-stats] collectionGroup(logs) failed:', e);
+        incomplete.push('来店ログ');
         return null;
       });
     for (const l of logsSnap?.docs ?? []) {
@@ -132,6 +143,7 @@ export async function POST(request: NextRequest) {
       // 表示名: members の castDisplayName → account_users.displayName → uid 先頭
       let name = info.name;
       if (!name) {
+        // 表示名だけは uid 先頭へ劣化させる（画面に劣化が見えるので incomplete には数えない）
         const acc = await db.doc(`account_users/${castUid}`).get().catch(() => null);
         name = (acc?.data() as { displayName?: string } | undefined)?.displayName || castUid.slice(0, 8);
       }
@@ -141,8 +153,10 @@ export async function POST(request: NextRequest) {
       try {
         const cnt = await db.collection(`personal_customers/${castUid}/items`).count().get();
         customerCount = cnt.data().count;
-      } catch {
-        // 集計失敗時は 0（致命的でない）
+      } catch (e) {
+        // 0 と「数えられなかった」を混ぜない（画面には「顧客0人」と出てしまう）
+        console.error('[api/team/member-stats] customer count failed:', castUid, e);
+        incomplete.push('顧客数');
       }
 
       const base = logsAgg.get(castUid) ?? { s: 0, g: 0 };
@@ -155,7 +169,11 @@ export async function POST(request: NextRequest) {
         .where('datetime', '>=', monthStart)
         .where('datetime', '<', monthEnd)
         .get()
-        .catch(() => null);
+        .catch((e) => {
+          console.error('[api/team/member-stats] personal_sales failed:', castUid, e);
+          incomplete.push('個人売上');
+          return null;
+        });
       for (const s of ssSnap?.docs ?? []) {
         const d = s.data() as { salesAmount?: number; groupCount?: number; datetime?: Timestamp };
         const amount = d.salesAmount || 0;
@@ -176,7 +194,12 @@ export async function POST(request: NextRequest) {
       .map(([dateKey, v]) => ({ dateKey, amount: v.amount, count: v.count }))
       .sort((a, b) => a.dateKey.localeCompare(b.dateKey));
 
-    return NextResponse.json({ members, dailyTotals, period: { year, month } });
+    // 欠けたまま「0」を成績として見せない。クライアントは incomplete があれば警告を出す
+    const uniqueIncomplete = [...new Set(incomplete)];
+    return NextResponse.json({
+      members, dailyTotals, period: { year, month },
+      ...(uniqueIncomplete.length > 0 ? { incomplete: uniqueIncomplete } : {}),
+    });
   } catch (e) {
     if (e instanceof AuthError) {
       return NextResponse.json({ error: e.message }, { status: 401 });

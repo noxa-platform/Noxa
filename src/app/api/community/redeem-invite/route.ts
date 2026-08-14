@@ -65,7 +65,10 @@ export async function POST(request: NextRequest) {
         body: 'あなたの招待からコミュニティに新しいメンバーが参加しました。',
         read: false,
         createdAt: FieldValue.serverTimestamp(),
-      }).catch(() => undefined);
+      // 通知が飛ばなくても引き換え自体は成立させる（ここで 500 にすると参加できなくなる）。
+      // ただし**ログには必ず残す**——旧実装は完全握り潰しで、招待通知が届かない苦情が来ても
+      // 送信を試みたのかどうかすら追えなかった（Day116）
+      }).catch((e) => console.error('[api/community/redeem-invite] invite_used notification failed:', issuedBy, e));
     }
 
     return NextResponse.json({ ok: true, alreadyMember });

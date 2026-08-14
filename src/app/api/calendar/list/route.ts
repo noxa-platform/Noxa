@@ -19,7 +19,11 @@ export async function GET(request: NextRequest) {
       headers: { Authorization: `Bearer ${token}` },
     });
 
-    if (!res.ok) return NextResponse.json([], { status: res.status });
+    if (!res.ok) {
+      // 空配列を返すと「カレンダーが1つも無い」と区別できない（Day116）
+      console.error('[api/calendar/list] calendarList failed:', res.status, await res.text().catch(() => ''));
+      return NextResponse.json({ error: 'カレンダー一覧を取得できませんでした' }, { status: res.status });
+    }
 
     const data = await res.json();
     const calendars = (data.items || []).map((item: { id: string; summary: string }) => ({
@@ -28,7 +32,9 @@ export async function GET(request: NextRequest) {
     }));
 
     return NextResponse.json(calendars);
-  } catch {
-    return NextResponse.json([], { status: 500 });
+  } catch (e) {
+    // 旧実装は理由をログにも残さず空配列を返しており、500 なのに「予定なし」に見えた
+    console.error('[api/calendar/list] error:', e);
+    return NextResponse.json({ error: 'カレンダー一覧を取得できませんでした' }, { status: 500 });
   }
 }
