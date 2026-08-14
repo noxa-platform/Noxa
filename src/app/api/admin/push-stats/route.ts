@@ -19,7 +19,9 @@ interface PushStatsRow {
   sent: number;
   failed: number;
   invalidTokenDeleted: number;
-  byFn?: Record<string, { sent?: number; failed?: number; invalidTokenDeleted?: number }>;
+  /** 通知対象だが端末未登録で送れなかった数（Day119）。sent/failed のどちらにも出ない分 */
+  noToken: number;
+  byFn?: Record<string, { sent?: number; failed?: number; invalidTokenDeleted?: number; noToken?: number }>;
 }
 
 function jstDateKeys(days: number): string[] {
@@ -70,7 +72,7 @@ export async function GET(request: Request): Promise<Response> {
   for (const date of dates) {
     const snap = await db.doc(`notification_push_stats/${date}`).get();
     if (!snap.exists) {
-      rows.push({ date, sent: 0, failed: 0, invalidTokenDeleted: 0 });
+      rows.push({ date, sent: 0, failed: 0, invalidTokenDeleted: 0, noToken: 0 });
       continue;
     }
     const data = snap.data() ?? {};
@@ -79,6 +81,7 @@ export async function GET(request: Request): Promise<Response> {
       sent: (data.sent as number | undefined) ?? 0,
       failed: (data.failed as number | undefined) ?? 0,
       invalidTokenDeleted: (data.invalidTokenDeleted as number | undefined) ?? 0,
+      noToken: (data.noToken as number | undefined) ?? 0,
       byFn: (data.byFn as PushStatsRow['byFn']) ?? undefined,
     });
   }

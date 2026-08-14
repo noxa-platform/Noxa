@@ -30,10 +30,14 @@ export async function sendToUser(
   fnName: string,
 ): Promise<SendOutcome> {
   const snap = await db().doc(`notification_push_tokens/${uid}`).get();
-  if (!snap.exists) return 'no-token';
-  const tokenDoc = snap.data() as PushTokenDoc | undefined;
+  const tokenDoc = snap.exists ? (snap.data() as PushTokenDoc | undefined) : undefined;
   const token = tokenDoc?.token;
-  if (!token) return 'no-token';
+  if (!token) {
+    // 「送る相手が居たのに端末が未登録」は失敗ではないが、**届いていない**事実。
+    // 集計に出さないと「通知が来ない」の相談に対して手掛かりがゼロになる（Day119）
+    await incrementStat(fnName, 'noToken');
+    return 'no-token';
+  }
 
   try {
     await messaging().send({

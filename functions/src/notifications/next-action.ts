@@ -26,6 +26,7 @@ export async function runNextActionReminder(): Promise<RunResult> {
     notifyCount: 0,
     sentCount: 0,
     failedCount: 0,
+    noTokenCount: 0,
     errorCount: 0,
   };
 
@@ -68,6 +69,8 @@ export async function runNextActionReminder(): Promise<RunResult> {
       );
       if (outcome === 'sent') result.sentCount += 1;
       else if (outcome === 'failed') result.failedCount += 1;
+      // 端末未登録は「送れなかった」事実。集計に出さないと届いていないことに誰も気づけない（Day119）
+      else if (outcome === 'no-token') result.noTokenCount += 1;
     } catch (err) {
       result.errorCount += 1;
       logger.error('[next-action] uid failed', {

@@ -13,6 +13,7 @@ export default defineConfig({
       // Cloud Functions（functions/）は依存を自分の package.json に持つため、ルートからは
       // firebase-functions を解決できない。CF の中身をルートの vitest で検証するための最小スタブ（Day118）
       'firebase-functions/v2/firestore': path.resolve(__dirname, 'test/stubs/firebase-functions-v2-firestore.ts'),
+      'firebase-functions/logger': path.resolve(__dirname, 'test/stubs/firebase-functions-logger.ts'),
       'firebase-functions/v2': path.resolve(__dirname, 'test/stubs/firebase-functions-v2.ts'),
       'firebase-functions': path.resolve(__dirname, 'test/stubs/firebase-functions.ts'),
     },

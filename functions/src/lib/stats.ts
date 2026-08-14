@@ -5,6 +5,7 @@
  *   - sent              : 送信成功数（種別不問）
  *   - failed            : 送信失敗数（無効トークン以外のエラー）
  *   - invalidTokenDeleted: 無効トークン検知で token doc を削除した数
+ *   - noToken           : 通知対象だが端末未登録で送れなかった数（Day119）
  *   - byFn.{fnName}.sent / .failed : function 別内訳
  *
  * 失敗詳細は notification_push_failures/{YYYY-MM-DD}/items/{autoId} にも個別記録。
@@ -13,7 +14,7 @@
 import { FieldValue } from 'firebase-admin/firestore';
 import { db } from '../admin';
 
-export type StatField = 'sent' | 'failed' | 'invalidTokenDeleted';
+export type StatField = 'sent' | 'failed' | 'invalidTokenDeleted' | 'noToken';
 
 /** JST の YYYY-MM-DD を返す（cron が JST 9:00 起動なので JST 日付で集計） */
 function jstDateKey(): string {

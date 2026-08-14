@@ -22,6 +22,8 @@ export interface RunResult {
   notifyCount: number;   // 通知対象（hits > 0）の uid 数
   sentCount: number;     // 送信成功数
   failedCount: number;   // 送信失敗数
+  /** 通知対象だが端末未登録で送れなかった数（Day119） */
+  noTokenCount: number;
   errorCount: number;    // ループ内例外数（uid 単位）
 }
 
@@ -37,6 +39,7 @@ export async function runBirthdayReminder(): Promise<RunResult> {
     notifyCount: 0,
     sentCount: 0,
     failedCount: 0,
+    noTokenCount: 0,
     errorCount: 0,
   };
 
@@ -58,6 +61,8 @@ export async function runBirthdayReminder(): Promise<RunResult> {
       const outcome = await notify(uid, hits);
       if (outcome === 'sent') result.sentCount += 1;
       else if (outcome === 'failed') result.failedCount += 1;
+      // 端末未登録は「送れなかった」事実。集計に出さないと届いていないことに誰も気づけない（Day119）
+      else if (outcome === 'no-token') result.noTokenCount += 1;
     } catch (err) {
       result.errorCount += 1;
       logger.error('[birthday] uid failed', {

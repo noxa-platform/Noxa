@@ -5,7 +5,8 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 // 固定する境界:
 //   - 認証失敗=401、email 逆引き失敗=500、非管理者=403（いずれも DB を読まない/漏らさない）
 //   - days クランプ [1,30]（未指定/NaN/0 は 7・負値は 1・超過は 30）→ rows 件数
-//   - doc 非存在=ゼロ行、存在時は sent/failed/invalidTokenDeleted を ?? 0 で防御・byFn 透過
+//   - doc 非存在=ゼロ行、存在時は sent/failed/invalidTokenDeleted/noToken を ?? 0 で防御・byFn 透過
+//   - noToken は「通知対象だが端末未登録で送れなかった数」（Day119 で追加。sent/failed のどちらにも出ない分）
 //
 // 実バグは発見されず（管理者ゲート default-deny・クランプ健全）。本テストは executable spec。
 
@@ -56,7 +57,7 @@ describe('admin/push-stats GET（管理者・Push 配信統計）', () => {
   it('days 未指定は 7 行・全ゼロ（doc 非存在）', async () => {
     const body = await (await GET(req())).json();
     expect(body.rows).toHaveLength(7);
-    expect(body.rows[0]).toEqual({ date: expect.stringMatching(/^\d{4}-\d{2}-\d{2}$/), sent: 0, failed: 0, invalidTokenDeleted: 0 });
+    expect(body.rows[0]).toEqual({ date: expect.stringMatching(/^\d{4}-\d{2}-\d{2}$/), sent: 0, failed: 0, invalidTokenDeleted: 0, noToken: 0 });
   });
 
   it('days クランプ: 3→3行 / 100→30行 / 0→7行 / 負値→1行 / NaN→7行', async () => {
@@ -67,13 +68,13 @@ describe('admin/push-stats GET（管理者・Push 配信統計）', () => {
     expect((await (await GET(req('?days=abc'))).json()).rows).toHaveLength(7);
   });
 
-  it('doc 存在時は sent/failed/invalidTokenDeleted をマップし byFn を透過', async () => {
-    mocks.getDb.mockReturnValue(makeDb({ sent: 12, failed: 3, invalidTokenDeleted: 1, byFn: { push_daily: { sent: 12 } } }));
+  it('doc 存在時は sent/failed/invalidTokenDeleted/noToken をマップし byFn を透過', async () => {
+    mocks.getDb.mockReturnValue(makeDb({ sent: 12, failed: 3, invalidTokenDeleted: 1, noToken: 4, byFn: { push_daily: { sent: 12 } } }));
     const body = await (await GET(req('?days=1'))).json();
     expect(body.rows).toHaveLength(1);
     expect(body.rows[0]).toEqual({
       date: expect.stringMatching(/^\d{4}-\d{2}-\d{2}$/),
-      sent: 12, failed: 3, invalidTokenDeleted: 1, byFn: { push_daily: { sent: 12 } },
+      sent: 12, failed: 3, invalidTokenDeleted: 1, noToken: 4, byFn: { push_daily: { sent: 12 } },
     });
   });
 
