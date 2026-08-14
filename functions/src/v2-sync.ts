@@ -9,6 +9,7 @@
  *    「自分が所属する全 shop」を 1 クエリで引けるようにする非正規化。
  */
 import { onDocumentWritten } from 'firebase-functions/v2/firestore';
+import { logger } from 'firebase-functions';
 import { setGlobalOptions } from 'firebase-functions/v2';
 import { FieldValue } from 'firebase-admin/firestore';
 import { db } from './admin';
@@ -36,8 +37,14 @@ export const syncShopPublicProfile = onDocumentWritten(
     const publicRef = db().doc(`shop_public_profiles/${shopId}`);
 
     if (!after) {
-      // 削除
-      await publicRef.delete().catch(() => undefined);
+      // 削除。ここが黙って失敗すると**閉店・削除した店舗の公開ページが残り続ける**
+      // （shop_public_profiles は誰でも読める）。失敗は記録して再試行させる（Day118）
+      try {
+        await publicRef.delete();
+      } catch (e) {
+        logger.error('[syncShopPublicProfile] 公開プロフィールの削除に失敗（公開されたまま残る）', { shopId, error: String(e) });
+        throw e;
+      }
       return;
     }
 
@@ -74,7 +81,14 @@ export const syncMembershipIndex = onDocumentWritten(
     const indexRef = db().doc(`account_users/${uid}/memberships/${shopId}`);
 
     if (!after) {
-      await indexRef.delete().catch(() => undefined);
+      // ここが黙って失敗すると**退店したスタッフの所属が逆引きに残り続ける**
+      // （ホームの店舗一覧・端末の許可モジュール判定がこの index を見る）。記録して再試行させる（Day118）
+      try {
+        await indexRef.delete();
+      } catch (e) {
+        logger.error('[syncMembershipIndex] 逆引き index の削除に失敗（退店者の所属が残る）', { shopId, uid, error: String(e) });
+        throw e;
+      }
       return;
     }
 
@@ -83,7 +97,10 @@ export const syncMembershipIndex = onDocumentWritten(
     try {
       const shopSnap = await db().doc(`shop_shops/${shopId}`).get();
       shopName = (shopSnap.data()?.name as string | undefined) ?? null;
-    } catch { /* ignore */ }
+    } catch (e) {
+      // 名前が引けないだけなら index は作る（表示が shopId になるだけ）。ただし無言にしない（Day118）
+      logger.warn('[syncMembershipIndex] 店舗名の取得に失敗（shopName なしで続行）', { shopId, uid, error: String(e) });
+    }
 
     await indexRef.set({
       shopId,

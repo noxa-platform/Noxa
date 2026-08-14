@@ -15,6 +15,7 @@
  *   - 既に hidden の対象は再計算不要（早期 return）。
  */
 import { onDocumentCreated } from 'firebase-functions/v2/firestore';
+import { logger } from 'firebase-functions';
 import { FieldValue } from 'firebase-admin/firestore';
 import { db } from './admin';
 
@@ -45,8 +46,13 @@ export const hideReportedContent = onDocumentCreated(
       .where('targetId', '==', targetId)
       .where('targetType', '==', targetType)
       .get()
-      .catch(() => null);
-    if (!reportsSnap) return;
+      .catch((e) => {
+        // 読めなかったのを「通報ゼロ」と同じ扱い（何もせず return）にすると、
+        // **閾値を超えた投稿が自動非表示にならないまま残る**（運営は気づけない）。
+        // 記録して throw し、関数の失敗として再試行させる（Day118）
+        logger.error('[community-moderation] 通報の集計に失敗したため自動非表示を保留する', { targetId, targetType, error: String(e) });
+        throw e;
+      });
 
     // 「未解決」の通報のみカウントする。admin が unhide + resolve した通報を数え続けると、
     // 一度閾値を超えたコンテンツは新規通報 1 件で即再非表示になり管理者の unhide が無力化される。

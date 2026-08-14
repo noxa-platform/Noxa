@@ -27,17 +27,27 @@
  *   本トリガーは店舗 sales のみ監視し personal_* へ書く（逆方向は監視しない）ため再発火しない。
  */
 import { onDocumentWritten } from 'firebase-functions/v2/firestore';
+import { logger } from 'firebase-functions';
 import { FieldValue } from 'firebase-admin/firestore';
 import { db } from './admin';
 
 const REGION = 'asia-northeast1';
 
-/** account_users/{uid} が実在するか（端末/operator-only uid を投影対象から除外）。 */
+/**
+ * account_users/{uid} が実在するか（端末/operator-only uid を投影対象から除外）。
+ *
+ * 読み取りに失敗したときに false を返してはいけない（Day118）。呼び出し側は false を
+ * 「投影対象外の uid」と解釈して**売上の投影を丸ごと飛ばしたうえで正常終了**するため、
+ * 一時障害・タイムアウトのたびに**キャストの個人売上と担当台帳が静かに欠ける**
+ * （成績・給与の材料が欠けるのに、ログにも実行結果にも何も残らない）。
+ * 確認できなかったときは throw して**関数の失敗として記録・再試行**させる。
+ */
 async function isRealAccount(uid: string): Promise<boolean> {
   try {
     return (await db().doc(`account_users/${uid}`).get()).exists;
-  } catch {
-    return false;
+  } catch (e) {
+    logger.error('[syncShopSaleToPersonal] 投影対象の確認に失敗したため投影を保留する', { uid, error: String(e) });
+    throw e;
   }
 }
 
@@ -120,8 +130,16 @@ async function writeCustomerLog(shopId: string, cast: string, customerId: string
     }, { merge: true });
   });
 
-  // 移行クリーンアップ: 同 saleId の personal_sales 控えが残っていれば除去（顧客あり↔なし切替/旧仕様分）
-  await personalSaleRef(cast, saleId).delete().catch(() => undefined);
+  // 移行クリーンアップ: 同 saleId の personal_sales 控えが残っていれば除去（顧客あり↔なし切替/旧仕様分）。
+  // ここが黙って失敗すると顧客ログと personal_sales の**両方**が残り、member-stats が
+  // 二重計上する（このファイルが冒頭で「排他にして二重計上を防ぐ」と書いている前提が崩れる）。
+  // 投影自体は冪等なので、throw して再試行させるのが安全（Day118）。
+  try {
+    await personalSaleRef(cast, saleId).delete();
+  } catch (e) {
+    logger.error('[syncShopSaleToPersonal] 旧 personal_sales 控えの除去に失敗（二重計上の恐れ）', { cast, saleId, error: String(e) });
+    throw e;
+  }
 }
 
 // ── 顧客あり: 担当台帳のログを除去（差額減算・冪等） ──
@@ -145,7 +163,13 @@ async function removeCustomerLog(cast: string, customerId: string, saleId: strin
 async function writePersonalSale(shopId: string, cast: string, saleId: string, after: SaleData) {
   const ref = personalSaleRef(cast, saleId);
   let isNew = true;
-  try { isNew = !(await ref.get()).exists; } catch { isNew = true; }
+  try {
+    isNew = !(await ref.get()).exists;
+  } catch (e) {
+    // 読めなくても控えの upsert 自体は続ける（このあとの set が本命）。ただし無言にしない（Day118）
+    logger.warn('[syncShopSaleToPersonal] 既存控えの確認に失敗（新規として続行）', { cast, saleId, error: String(e) });
+    isNew = true;
+  }
   const data: Record<string, unknown> = {
     shopId,
     shopSaleId: saleId,
@@ -174,9 +198,19 @@ async function writePersonalSale(shopId: string, cast: string, saleId: string, a
 async function removeProjection(cast: string, customerId: string | null, saleId: string) {
   if (customerId) {
     await removeCustomerLog(cast, customerId, saleId);
-    await personalSaleRef(cast, saleId).delete().catch(() => undefined); // 念のため
+    // 念のための掃除。失敗しても本体（顧客ログ）の除去は済んでいるので続行するが、無言にはしない
+    await personalSaleRef(cast, saleId).delete().catch((e) => {
+      logger.warn('[syncShopSaleToPersonal] 予備の personal_sales 控えの除去に失敗', { cast, saleId, error: String(e) });
+    });
   } else {
-    await personalSaleRef(cast, saleId).delete().catch(() => undefined);
+    // 顧客なし売上の投影本体。ここが黙って失敗すると**取消・担当変更した売上が個人売上に残り続ける**
+    // （本人の売上画面と member-stats に幻の売上が計上される）。throw して再試行させる（Day118）。
+    try {
+      await personalSaleRef(cast, saleId).delete();
+    } catch (e) {
+      logger.error('[syncShopSaleToPersonal] personal_sales 控えの除去に失敗（幻の売上が残る恐れ）', { cast, saleId, error: String(e) });
+      throw e;
+    }
   }
 }
 
