@@ -34,6 +34,7 @@ import { DEFAULT_TABLE_NAMES } from './tables';
 import { getActiveShop } from '@/lib/workspace';
 import { resolveShopIdState, SHOP_UNRESOLVED_TEXT } from '@/lib/shop-id-state';
 import { describeFirestoreError } from '@/lib/firestore-error';
+import { useOperationError } from '@/lib/operation-error';
 import { businessDayKey } from '@/lib/datetime';
 import {
   computeCasts, rotateOrder, nextDailySequence, canStartSet,
@@ -90,47 +91,59 @@ export type UseSeatingStore = {
   error: string | null;
   /** 購読(データ取得)のエラー。権限/接続エラーで空表示のまま成功と区別がつかない問題の可視化用 */
   dataError: string | null;
+  /**
+   * 直近の**操作（書き込み）**の失敗（Day117）。
+   * 卓の操作は JSX から投げっぱなしで呼ばれるため、失敗をここに集約して画面のバナーで出す。
+   */
+  opError: string | null;
+  clearOpError: () => void;
   casts: Cast[];
   tables: FloorTable[];
   queue: QueueItem[];
   /** 回す順番（初回ローテの采配順・seating_meta/state.rotationOrder） */
   rotationOrder: string[];
-  setRotationOrder: (order: string[]) => Promise<void>;
+  setRotationOrder: (order: string[]) => Promise<boolean>;
   /** 采配モード（計算エンジンの重み付け・seating_meta/state.assistMode・店舗共有） */
   assistMode: AssistMode;
-  setAssistMode: (mode: AssistMode) => Promise<void>;
+  setAssistMode: (mode: AssistMode) => Promise<boolean>;
   // cast
-  addCast: (c: { name: string; rank: Rank; hourlyWage: number; uid?: string | null }) => Promise<void>;
-  updateCast: (id: string, updates: Partial<StoredCast>) => Promise<void>;
-  removeCast: (id: string) => Promise<void>;
-  toggleLock: (id: string) => Promise<void>;
-  setCastBaseStatus: (id: string, status: StoredCast['baseStatus']) => Promise<void>;
+  addCast: (c: { name: string; rank: Rank; hourlyWage: number; uid?: string | null }) => Promise<boolean>;
+  updateCast: (id: string, updates: Partial<StoredCast>) => Promise<boolean>;
+  removeCast: (id: string) => Promise<boolean>;
+  toggleLock: (id: string) => Promise<boolean>;
+  setCastBaseStatus: (id: string, status: StoredCast['baseStatus']) => Promise<boolean>;
   // table
-  seedTables: () => Promise<void>;
+  seedTables: () => Promise<boolean>;
   // テスト用：キャスト＋キャスト別顧客データを投入（owner のみ想定）
-  seedTestData: () => Promise<void>;
-  assignCast: (tableId: string, castId: string) => Promise<void>;
-  removeCastFromTable: (tableId: string, castId: string) => Promise<void>;
-  toggleMainHost: (tableId: string, castId: string) => Promise<void>;
-  toggleRequested: (tableId: string, castId: string) => Promise<void>;
-  rotateHosts: (tableId: string) => Promise<void>;
-  startSet: (tableId: string, customers: Customer[]) => Promise<void>;
-  setTableType: (tableId: string, type: TableType) => Promise<void>;
-  checkTable: (tableId: string) => Promise<void>;
-  extendTime: (tableId: string, minutes: number) => Promise<void>;
-  toggleInnerRotation: (tableId: string) => Promise<void>;
-  updateTableSettings: (tableId: string, patch: { setTimeLength?: number; rotationTimeLength?: number }) => Promise<void>;
-  setCastExcluded: (tableId: string, castId: string, excluded: boolean) => Promise<void>;
-  clearSeedData: () => Promise<void>;
+  seedTestData: () => Promise<boolean>;
+  assignCast: (tableId: string, castId: string) => Promise<boolean>;
+  removeCastFromTable: (tableId: string, castId: string) => Promise<boolean>;
+  toggleMainHost: (tableId: string, castId: string) => Promise<boolean>;
+  toggleRequested: (tableId: string, castId: string) => Promise<boolean>;
+  rotateHosts: (tableId: string) => Promise<boolean>;
+  startSet: (tableId: string, customers: Customer[]) => Promise<boolean>;
+  setTableType: (tableId: string, type: TableType) => Promise<boolean>;
+  checkTable: (tableId: string) => Promise<boolean>;
+  extendTime: (tableId: string, minutes: number) => Promise<boolean>;
+  toggleInnerRotation: (tableId: string) => Promise<boolean>;
+  updateTableSettings: (tableId: string, patch: { setTimeLength?: number; rotationTimeLength?: number }) => Promise<boolean>;
+  setCastExcluded: (tableId: string, castId: string, excluded: boolean) => Promise<boolean>;
+  clearSeedData: () => Promise<boolean>;
   /** 退店処理。アンドゥ用にリセット直前の卓データを返す（卓が無ければ null） */
   resetTable: (tableId: string) => Promise<Partial<FloorTable> | null>;
   /** 退店アンドゥ。卓が空席のままのときだけスナップショットを書き戻す */
-  restoreTable: (tableId: string, snapshot: Partial<FloorTable>) => Promise<void>;
+  restoreTable: (tableId: string, snapshot: Partial<FloorTable>) => Promise<boolean>;
   // queue
-  addToQueue: (item: { name: string; groupSize: number; type: TableType; notes?: string }) => Promise<void>;
-  removeFromQueue: (id: string) => Promise<void>;
-  seatQueueGroup: (tableId: string, item: QueueItem) => Promise<void>;
+  addToQueue: (item: { name: string; groupSize: number; type: TableType; notes?: string }) => Promise<boolean>;
+  removeFromQueue: (id: string) => Promise<boolean>;
+  seatQueueGroup: (tableId: string, item: QueueItem) => Promise<boolean>;
 };
+
+/**
+ * 包む前の生の実装の型（Day117）。公開 API は `guard()` で包んで
+ * 「成功したか」を boolean で返すが、実装側は**失敗を throw する**素の関数のまま書く。
+ */
+type Raw<T> = T extends (...args: infer A) => Promise<unknown> ? (...args: A) => Promise<void> : never;
 
 /** Firestore ドキュメント → FloorTable（欠損フィールドは空卓の既定値で補完） */
 function toFloorTable(id: string, data: Partial<FloorTable> | undefined): FloorTable {
@@ -140,6 +153,8 @@ function toFloorTable(id: string, data: Partial<FloorTable> | undefined): FloorT
 export function useSeatingStore(user: User): UseSeatingStore {
   const shop = useShopTarget(user);
   const shopId = shop.shopId;
+  // 書き込みの失敗を1本にまとめて画面へ渡す（Day117）
+  const { opError, clearOpError, run } = useOperationError();
 
   const [stored, setStored] = useState<StoredCast[]>([]);
   // 卓は「どの shopId のスナップショットか」ごと保持し、loading を導出する
@@ -218,18 +233,18 @@ export function useSeatingStore(user: User): UseSeatingStore {
   }, [shopId, tableRef]);
 
   // ── cast ops
-  const addCast = useCallback<UseSeatingStore['addCast']>(async (c) => {
+  const addCast = useCallback<Raw<UseSeatingStore['addCast']>>(async (c) => {
     if (!shopId) return;
     await addDoc(collection(db, `shop_shops/${shopId}/seating_casts`), {
       name: c.name, rank: c.rank, hourlyWage: c.hourlyWage, isLocked: false, baseStatus: 'Free',
       uid: c.uid ?? null, createdAt: serverTimestamp(),
     });
   }, [shopId]);
-  const updateCast = useCallback<UseSeatingStore['updateCast']>(async (id, updates) => {
+  const updateCast = useCallback<Raw<UseSeatingStore['updateCast']>>(async (id, updates) => {
     if (!shopId) return;
     await setDoc(castRef(id), updates, { merge: true });
   }, [shopId, castRef]);
-  const removeCast = useCallback<UseSeatingStore['removeCast']>(async (id) => {
+  const removeCast = useCallback<Raw<UseSeatingStore['removeCast']>>(async (id) => {
     if (!shopId) return;
     // 名簿削除と同時に全卓の配置からも除去（幽霊配置＝卓に「?」が残るのを防ぐ）。
     // 卓は tx 内で最新を読み直し、必要な卓だけ変更フィールドを書く。
@@ -247,16 +262,16 @@ export function useSeatingStore(user: User): UseSeatingStore {
       tx.delete(castRef(id));
     });
   }, [shopId, tables, tableRef, castRef]);
-  const toggleLock = useCallback<UseSeatingStore['toggleLock']>(async (id) => {
+  const toggleLock = useCallback<Raw<UseSeatingStore['toggleLock']>>(async (id) => {
     const c = stored.find((x) => x.id === id);
     await updateCast(id, { isLocked: !(c?.isLocked ?? false) });
   }, [stored, updateCast]);
-  const setCastBaseStatus = useCallback<UseSeatingStore['setCastBaseStatus']>(async (id, status) => {
+  const setCastBaseStatus = useCallback<Raw<UseSeatingStore['setCastBaseStatus']>>(async (id, status) => {
     await updateCast(id, { baseStatus: status });
   }, [updateCast]);
 
   // ── table ops
-  const seedTables = useCallback<UseSeatingStore['seedTables']>(async () => {
+  const seedTables = useCallback<Raw<UseSeatingStore['seedTables']>>(async () => {
     if (!shopId) return;
     // POS の卓名があれば流用、無ければ既定
     let names = DEFAULT_TABLE_NAMES;
@@ -287,7 +302,7 @@ export function useSeatingStore(user: User): UseSeatingStore {
     if (created > 0) await batch.commit();
   }, [shopId]);
 
-  const seedTestData = useCallback<UseSeatingStore['seedTestData']>(async () => {
+  const seedTestData = useCallback<Raw<UseSeatingStore['seedTestData']>>(async () => {
     if (!shopId) return;
     // 架空名のみ（実在キャスト名をテストデータに使わない・Day10 差し替え）
     const SEED_CASTS: { name: string; rank: Rank; hourlyWage: number }[] = [
@@ -329,7 +344,7 @@ export function useSeatingStore(user: User): UseSeatingStore {
     await b2.commit();
   }, [shopId]);
 
-  const assignCast = useCallback<UseSeatingStore['assignCast']>(async (tableId, castId) => {
+  const assignCast = useCallback<Raw<UseSeatingStore['assignCast']>>(async (tableId, castId) => {
     if (!shopId) return;
     // ローカル state ではなく、トランザクション内で全卓を読み直してから配置を計算する。
     // （2端末が同時に同キャストを別卓へ配置しても「1キャスト=1卓」を保つ）
@@ -355,37 +370,37 @@ export function useSeatingStore(user: User): UseSeatingStore {
     });
   }, [shopId, tables, tableRef]);
 
-  const removeCastFromTable = useCallback<UseSeatingStore['removeCastFromTable']>(async (tableId, castId) => {
+  const removeCastFromTable = useCallback<Raw<UseSeatingStore['removeCastFromTable']>>(async (tableId, castId) => {
     const now = Date.now();
     await txUpdateTable(tableId, (t) => removeCastPatch(t, castId, now)); // now 付き＝回し履歴に記録
   }, [txUpdateTable]);
 
-  const setRotationOrder = useCallback<UseSeatingStore['setRotationOrder']>(async (order) => {
+  const setRotationOrder = useCallback<Raw<UseSeatingStore['setRotationOrder']>>(async (order) => {
     if (!shopId) return;
     await setDoc(doc(db, `shop_shops/${shopId}/seating_meta/state`), { rotationOrder: order, updatedAt: serverTimestamp() }, { merge: true });
   }, [shopId]);
 
-  const setAssistMode = useCallback<UseSeatingStore['setAssistMode']>(async (mode) => {
+  const setAssistMode = useCallback<Raw<UseSeatingStore['setAssistMode']>>(async (mode) => {
     if (!shopId) return;
     await setDoc(doc(db, `shop_shops/${shopId}/seating_meta/state`), { assistMode: mode, updatedAt: serverTimestamp() }, { merge: true });
   }, [shopId]);
 
-  const toggleMainHost = useCallback<UseSeatingStore['toggleMainHost']>(async (tableId, castId) => {
+  const toggleMainHost = useCallback<Raw<UseSeatingStore['toggleMainHost']>>(async (tableId, castId) => {
     await txUpdateTable(tableId, (t) => ({ mainHostIds: toggleInArray(t.mainHostIds, castId) }));
   }, [txUpdateTable]);
 
-  const toggleRequested = useCallback<UseSeatingStore['toggleRequested']>(async (tableId, castId) => {
+  const toggleRequested = useCallback<Raw<UseSeatingStore['toggleRequested']>>(async (tableId, castId) => {
     await txUpdateTable(tableId, (t) => ({ requestedHostIds: toggleInArray(t.requestedHostIds, castId) }));
   }, [txUpdateTable]);
 
-  const rotateHosts = useCallback<UseSeatingStore['rotateHosts']>(async (tableId) => {
+  const rotateHosts = useCallback<Raw<UseSeatingStore['rotateHosts']>>(async (tableId) => {
     await txUpdateTable(tableId, (t) => {
       if ((t.currentHostIds ?? []).length < 2) return null;
       return { currentHostIds: rotateOrder(t.currentHostIds) };
     });
   }, [txUpdateTable]);
 
-  const startSet = useCallback<UseSeatingStore['startSet']>(async (tableId, customers) => {
+  const startSet = useCallback<Raw<UseSeatingStore['startSet']>>(async (tableId, customers) => {
     if (!shopId) return;
     const now = Date.now();
     const todayKey = businessDayKey();
@@ -413,7 +428,7 @@ export function useSeatingStore(user: User): UseSeatingStore {
     });
   }, [shopId, tableRef]);
 
-  const updateTableSettings = useCallback<UseSeatingStore['updateTableSettings']>(async (tableId, patch) => {
+  const updateTableSettings = useCallback<Raw<UseSeatingStore['updateTableSettings']>>(async (tableId, patch) => {
     if (!shopId) return;
     const clean: Record<string, number> = {};
     if (typeof patch.setTimeLength === 'number' && patch.setTimeLength > 0) clean.setTimeLength = patch.setTimeLength;
@@ -422,7 +437,7 @@ export function useSeatingStore(user: User): UseSeatingStore {
     await setDoc(doc(db, `shop_shops/${shopId}/seating_tables/${tableId}`), { ...clean, updatedAt: serverTimestamp() }, { merge: true });
   }, [shopId]);
 
-  const setCastExcluded = useCallback<UseSeatingStore['setCastExcluded']>(async (tableId, castId, excluded) => {
+  const setCastExcluded = useCallback<Raw<UseSeatingStore['setCastExcluded']>>(async (tableId, castId, excluded) => {
     await txUpdateTable(tableId, (t) => {
       const ex = new Set(t.excludedHostIds ?? []);
       if (excluded) ex.add(castId); else ex.delete(castId);
@@ -433,7 +448,7 @@ export function useSeatingStore(user: User): UseSeatingStore {
   // テストデータ整理: seed キャスト削除＋seed 顧客削除＋卓リセット（owner 想定）。
   // 稼働中(ACTIVE/CHECK)の卓は白紙化せず seed キャストの配置だけ除去する
   // （旧実装は全卓リセットで、営業中の実データ卓・POS伝票まで巻き込む破壊操作だった）。
-  const clearSeedData = useCallback<UseSeatingStore['clearSeedData']>(async () => {
+  const clearSeedData = useCallback<Raw<UseSeatingStore['clearSeedData']>>(async () => {
     if (!shopId) return;
     const [cs, ts, cu] = await Promise.all([
       getDocs(collection(db, `shop_shops/${shopId}/seating_casts`)),
@@ -463,11 +478,11 @@ export function useSeatingStore(user: User): UseSeatingStore {
     await batch.commit();
   }, [shopId]);
 
-  const setTableType = useCallback<UseSeatingStore['setTableType']>(async (tableId, type) => {
+  const setTableType = useCallback<Raw<UseSeatingStore['setTableType']>>(async (tableId, type) => {
     await txUpdateTable(tableId, () => ({ type }));
   }, [txUpdateTable]);
 
-  const checkTable = useCallback<UseSeatingStore['checkTable']>(async (tableId) => {
+  const checkTable = useCallback<Raw<UseSeatingStore['checkTable']>>(async (tableId) => {
     // ACTIVE⇄CHECK のトグル（誤タップの会計を解除できる。空卓は不変）
     await txUpdateTable(tableId, (t) => {
       if (t.status === 'ACTIVE') return { status: 'CHECK' };
@@ -476,13 +491,13 @@ export function useSeatingStore(user: User): UseSeatingStore {
     });
   }, [txUpdateTable]);
 
-  const extendTime = useCallback<UseSeatingStore['extendTime']>(async (tableId, minutes) => {
+  const extendTime = useCallback<Raw<UseSeatingStore['extendTime']>>(async (tableId, minutes) => {
     // 延長はセット長(setTimeLength)を変えず extraMinutes に積む。
     // 旧実装は setTimeLength 本体を加算→以降の全セットが恒久的に伸び料金/セット数がずれるバグだった。
     await txUpdateTable(tableId, (t) => ({ extraMinutes: Math.max(0, t.extraMinutes ?? 0) + minutes }));
   }, [txUpdateTable]);
 
-  const toggleInnerRotation = useCallback<UseSeatingStore['toggleInnerRotation']>(async (tableId) => {
+  const toggleInnerRotation = useCallback<Raw<UseSeatingStore['toggleInnerRotation']>>(async (tableId) => {
     await txUpdateTable(tableId, (t) => ({ innerRotationEnabled: !t.innerRotationEnabled }));
   }, [txUpdateTable]);
 
@@ -510,7 +525,7 @@ export function useSeatingStore(user: User): UseSeatingStore {
     return snapshot;
   }, [shopId, tableRef]);
 
-  const restoreTable = useCallback<UseSeatingStore['restoreTable']>(async (tableId, snapshot) => {
+  const restoreTable = useCallback<Raw<UseSeatingStore['restoreTable']>>(async (tableId, snapshot) => {
     if (!shopId) return;
     // アンドゥは「まだ空席のまま」のときだけ（次の来店が始まった卓を巻き戻さない）
     await runTransaction(db, async (tx) => {
@@ -526,15 +541,15 @@ export function useSeatingStore(user: User): UseSeatingStore {
   }, [shopId, tableRef]);
 
   // ── queue ops
-  const addToQueue = useCallback<UseSeatingStore['addToQueue']>(async (item) => {
+  const addToQueue = useCallback<Raw<UseSeatingStore['addToQueue']>>(async (item) => {
     if (!shopId) return;
     await addDoc(collection(db, `shop_shops/${shopId}/seating_queue`), { ...item, joinedAt: Date.now(), createdAt: serverTimestamp() });
   }, [shopId]);
-  const removeFromQueue = useCallback<UseSeatingStore['removeFromQueue']>(async (id) => {
+  const removeFromQueue = useCallback<Raw<UseSeatingStore['removeFromQueue']>>(async (id) => {
     if (!shopId) return;
     await deleteDoc(doc(db, `shop_shops/${shopId}/seating_queue/${id}`));
   }, [shopId]);
-  const seatQueueGroup = useCallback<UseSeatingStore['seatQueueGroup']>(async (tableId, item) => {
+  const seatQueueGroup = useCallback<Raw<UseSeatingStore['seatQueueGroup']>>(async (tableId, item) => {
     if (!shopId) return;
     // 案内＋待ち組削除を単一トランザクションに。
     // （2端末が同じ待ち組を同時に案内しても、先勝ちで後手は no-op＝二重案内を防ぐ）
@@ -577,12 +592,40 @@ export function useSeatingStore(user: User): UseSeatingStore {
     loading: shop.loading || loadingData,
     shopId, canManage: shop.canManage, isDevice: shop.isDevice, error: shop.error,
     dataError,
-    casts, tables, queue, rotationOrder, setRotationOrder, assistMode, setAssistMode,
-    addCast, updateCast, removeCast, toggleLock, setCastBaseStatus,
-    seedTables, seedTestData, assignCast, removeCastFromTable, toggleMainHost, toggleRequested, rotateHosts,
-    startSet, setTableType, checkTable, extendTime, toggleInnerRotation, updateTableSettings, setCastExcluded, clearSeedData, resetTable, restoreTable,
-    addToQueue, removeFromQueue, seatQueueGroup,
+    opError, clearOpError,
+    casts, tables, queue, rotationOrder,
+    // 以降の書き込みメソッドは guard で包む（Day117）。失敗しても throw せず、
+    // 理由を opError に載せて false を返す＝JSX から投げっぱなしで呼んでも画面に必ず出る
+    setRotationOrder: (order) => run('回す順番の保存', () => setRotationOrder(order)),
+    assistMode,
+    setAssistMode: (mode) => run('采配モードの変更', () => setAssistMode(mode)),
+    addCast: (c) => run('キャストの追加', () => addCast(c)),
+    updateCast: (id, updates) => run('キャスト情報の保存', () => updateCast(id, updates)),
+    removeCast: (id) => run('キャストの削除', () => removeCast(id)),
+    toggleLock: (id) => run('キャストのロック', () => toggleLock(id)),
+    setCastBaseStatus: (id, status) => run('キャストの状態変更', () => setCastBaseStatus(id, status)),
+    seedTables: () => run('卓の初期作成', () => seedTables()),
+    seedTestData: () => run('テストデータの投入', () => seedTestData()),
+    assignCast: (tableId, castId) => run('キャストの着席', () => assignCast(tableId, castId)),
+    removeCastFromTable: (tableId, castId) => run('キャストを卓から外す操作', () => removeCastFromTable(tableId, castId)),
+    toggleMainHost: (tableId, castId) => run('本指名の切り替え', () => toggleMainHost(tableId, castId)),
+    toggleRequested: (tableId, castId) => run('指名希望の切り替え', () => toggleRequested(tableId, castId)),
+    rotateHosts: (tableId) => run('キャストのローテーション', () => rotateHosts(tableId)),
+    startSet: (tableId, customers) => run('開卓', () => startSet(tableId, customers)),
+    setTableType: (tableId, type) => run('卓種別の変更', () => setTableType(tableId, type)),
+    checkTable: (tableId) => run('会計状態の切り替え', () => checkTable(tableId)),
+    extendTime: (tableId, minutes) => run('セット延長', () => extendTime(tableId, minutes)),
+    toggleInnerRotation: (tableId) => run('卓内ローテの切り替え', () => toggleInnerRotation(tableId)),
+    updateTableSettings: (tableId, patch) => run('卓設定の保存', () => updateTableSettings(tableId, patch)),
+    setCastExcluded: (tableId, castId, excluded) => run('卓からの除外設定', () => setCastExcluded(tableId, castId, excluded)),
+    clearSeedData: () => run('テストデータの削除', () => clearSeedData()),
+    resetTable,
+    restoreTable: (tableId, snapshot) => run('退店の取り消し', () => restoreTable(tableId, snapshot)),
+    addToQueue: (item) => run('待ち組の追加', () => addToQueue(item)),
+    removeFromQueue: (id) => run('待ち組の削除', () => removeFromQueue(id)),
+    seatQueueGroup: (tableId, item) => run('卓への案内', () => seatQueueGroup(tableId, item)),
   }), [
+    opError, clearOpError, run,
     shop.loading, loadingData, shopId, shop.canManage, shop.isDevice, shop.error, dataError, casts, tables, queue, rotationOrder, setRotationOrder, assistMode, setAssistMode,
     addCast, updateCast, removeCast, toggleLock, setCastBaseStatus,
     seedTables, seedTestData, assignCast, removeCastFromTable, toggleMainHost, toggleRequested, rotateHosts,

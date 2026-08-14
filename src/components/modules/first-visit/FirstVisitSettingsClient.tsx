@@ -95,8 +95,14 @@ export function FirstVisitSettingsClient({ user }: { user: User }) {
           {store.dataError} 一覧が空に見えても「未設定」とは限りません。画面を再読み込みしてください。
         </p>
       )}
-      {opError && (
-        <p role="alert" style={{ margin: '0 0 12px', padding: '10px 12px', borderRadius: 10, fontSize: 13, color: 'var(--noxa-status-error)', background: 'rgba(229,115,115,0.08)', border: '1px solid var(--noxa-status-error)' }}>{opError}</p>
+      {/* 画面内ハンドラの失敗（この画面の state）と、ストア経由の投げっぱなし操作の失敗（Day117）。
+          後者は並べ替え・表示切替・履歴削除のように JSX から直接呼ぶもので、
+          ここに出さないと「押しても何も起きない」だけになる */}
+      {(opError ?? store.opError) && (
+        <div role="alert" style={{ display: 'flex', alignItems: 'center', gap: 10, margin: '0 0 12px', padding: '10px 12px', borderRadius: 10, fontSize: 13, color: 'var(--noxa-status-error)', background: 'rgba(229,115,115,0.08)', border: '1px solid var(--noxa-status-error)' }}>
+          <span style={{ flex: 1 }}>{opError ?? store.opError}</span>
+          <button type="button" onClick={() => { setOpError(null); store.clearOpError(); }} aria-label="閉じる" style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'inherit', fontSize: 14, lineHeight: 1 }}>×</button>
+        </div>
       )}
       {/* パネル管理 */}
       <Section label={`パネル（${store.panels.length}）`}>

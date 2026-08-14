@@ -18,6 +18,7 @@ import {
 import type { User } from 'firebase/auth';
 import { db } from '@/lib/firebase/config';
 import { describeFirestoreError } from '@/lib/firestore-error';
+import { useOperationError } from '@/lib/operation-error';
 import { useShopId } from '@/lib/useShopId';
 import {
   DEFAULT_MENU_CONFIG, type InfoCard, type MenuColor, type MenuConfig, type MenuOrder,
@@ -42,6 +43,12 @@ export type UseMenuStore = {
   shopError: string | null;
   /** パネル/オーダー等の**購読**に失敗した理由（Day115）。空表示（＝未設定）と区別する */
   dataError: string | null;
+  /**
+   * 直近の**操作（書き込み）**の失敗（Day117）。設定画面のパネル並べ替え・表示切替・
+   * オーダー削除は JSX から投げっぱなしで呼ばれるため、ここへ集約して画面に出す。
+   */
+  opError: string | null;
+  clearOpError: () => void;
   panels: MenuPanel[];          // 表示順ソート済み（visible 含む全件）
   visiblePanels: MenuPanel[];   // visible のみ（タブレット用）
   tables: ShopTable[];
@@ -49,21 +56,26 @@ export type UseMenuStore = {
   config: MenuConfig;
   // パネル（キャスト）操作
   addCastPanel: (v: { name: string; ruby?: string; title?: string }) => Promise<string>;
-  savePanelMeta: (id: string, patch: Record<string, unknown>) => Promise<void>;
-  removePanel: (id: string) => Promise<void>;
+  savePanelMeta: (id: string, patch: Record<string, unknown>) => Promise<boolean>;
+  removePanel: (id: string) => Promise<boolean>;
   setPanelImage: (id: string, dataUrl: string) => Promise<void>;
-  reorderPanel: (id: string, dir: -1 | 1) => Promise<void>;
+  reorderPanel: (id: string, dir: -1 | 1) => Promise<boolean>;
   // 情報カード
   addInfoCard: (label: string) => Promise<string>;
   // 指名オーダー
   submitOrders: (groups: { color: MenuColor; casts: MenuOrderCast[]; seat: string; customerName: string; memo: string }[], source: string) => Promise<void>;
   updateOrder: (id: string, patch: Partial<Pick<MenuOrder, 'seat' | 'customerName' | 'memo'>>) => Promise<void>;
-  deleteOrder: (id: string) => Promise<void>;
-  clearOrders: () => Promise<void>;
+  deleteOrder: (id: string) => Promise<boolean>;
+  clearOrders: () => Promise<boolean>;
   // 設定 / PIN
   saveConfig: (patch: Partial<MenuConfig>) => Promise<void>;
   setPanelPin: (pin: string) => Promise<void>;
 };
+
+/**
+ * 包む前の生の実装の型（Day117）。公開 API は `guard()` で包んで成功可否を boolean で返す。
+ */
+type RawMenuOp<T> = T extends (...args: infer A) => Promise<unknown> ? (...args: A) => Promise<void> : never;
 
 async function sha256Hex(shopId: string, pin: string): Promise<string> {
   const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(`${shopId}:${pin}`));
@@ -79,6 +91,8 @@ function toMs(v: unknown): number {
 export function useMenuStore(user: User): UseMenuStore {
   const shop = useShopId(user);
   const shopId = shop.shopId;
+  // 書き込みの失敗を1本にまとめて画面へ渡す（Day117）
+  const { opError, clearOpError, run } = useOperationError();
 
   // casts は出所（shopId）つきで保持し loading を導出（set-state-in-effect 返済・Day19。subsReady 廃止）
   const [castsSnap, setCastsSnap] = useState<{ shopId: string; list: RawCast[] } | null>(null);
@@ -179,14 +193,14 @@ export function useMenuStore(user: User): UseMenuStore {
     return ref.id;
   }, [shopId, panels, castCol]);
 
-  const savePanelMeta = useCallback<UseMenuStore['savePanelMeta']>(async (id, patch) => {
+  const savePanelMeta = useCallback<RawMenuOp<UseMenuStore['savePanelMeta']>>(async (id, patch) => {
     if (!shopId) return;
     const p = panels.find((x) => x.id === id);
     const col = p?.kind === 'info' ? 'menu_info_cards' : 'seating_casts';
     await updateDoc(doc(db, `shop_shops/${shopId}/${col}/${id}`), patch);
   }, [shopId, panels]);
 
-  const removePanel = useCallback<UseMenuStore['removePanel']>(async (id) => {
+  const removePanel = useCallback<RawMenuOp<UseMenuStore['removePanel']>>(async (id) => {
     if (!shopId) return;
     const p = panels.find((x) => x.id === id);
     const col = p?.kind === 'info' ? 'menu_info_cards' : 'seating_casts';
@@ -199,7 +213,7 @@ export function useMenuStore(user: User): UseMenuStore {
     await setDoc(doc(db, `shop_shops/${shopId}/menu_images/${id}`), { dataUrl, updatedAt: serverTimestamp() });
   }, [shopId]);
 
-  const reorderPanel = useCallback<UseMenuStore['reorderPanel']>(async (id, dir) => {
+  const reorderPanel = useCallback<RawMenuOp<UseMenuStore['reorderPanel']>>(async (id, dir) => {
     if (!shopId) return;
     const idx = panels.findIndex((p) => p.id === id);
     const swapIdx = idx + dir;
@@ -250,11 +264,11 @@ export function useMenuStore(user: User): UseMenuStore {
     if (!shopId) return;
     await updateDoc(doc(db, `shop_shops/${shopId}/menu_orders/${id}`), patch);
   }, [shopId]);
-  const deleteOrder = useCallback<UseMenuStore['deleteOrder']>(async (id) => {
+  const deleteOrder = useCallback<RawMenuOp<UseMenuStore['deleteOrder']>>(async (id) => {
     if (!shopId) return;
     await deleteDoc(doc(db, `shop_shops/${shopId}/menu_orders/${id}`));
   }, [shopId]);
-  const clearOrders = useCallback<UseMenuStore['clearOrders']>(async () => {
+  const clearOrders = useCallback<RawMenuOp<UseMenuStore['clearOrders']>>(async () => {
     if (!shopId) return;
     await Promise.all(orders.map((o) => deleteDoc(doc(db, `shop_shops/${shopId}/menu_orders/${o.id}`))));
   }, [shopId, orders]);
@@ -275,8 +289,15 @@ export function useMenuStore(user: User): UseMenuStore {
   return {
     loading: shop.loading || (!!shopId && (castsSnap?.shopId !== shopId || cfgSnap?.shopId !== shopId)),
     shopId, canManage: shop.canManage, isDevice: shop.isDevice, shopError: shop.shopError, dataError,
+    opError, clearOpError,
     panels, visiblePanels, tables, orders, config,
-    addCastPanel, savePanelMeta, removePanel, setPanelImage, reorderPanel, addInfoCard,
-    submitOrders, updateOrder, deleteOrder, clearOrders, saveConfig, setPanelPin,
+    addCastPanel, setPanelImage, addInfoCard,
+    // 設定画面から投げっぱなしで呼ばれる操作は guard で包む（失敗を opError に載せて false を返す・Day117）
+    savePanelMeta: (id, patch) => run('パネル設定の保存', () => savePanelMeta(id, patch)),
+    removePanel: (id) => run('パネルの削除', () => removePanel(id)),
+    reorderPanel: (id, dir) => run('パネルの並べ替え', () => reorderPanel(id, dir)),
+    deleteOrder: (id) => run('指名履歴の削除', () => deleteOrder(id)),
+    clearOrders: () => run('指名履歴の全削除', () => clearOrders()),
+    submitOrders, updateOrder, saveConfig, setPanelPin,
   };
 }

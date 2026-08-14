@@ -77,7 +77,11 @@ function bareWriteHandlers(src: string): number {
       i += 1;
     }
     const body = src.slice(HEAD.lastIndex, i);
-    if (WRITE.test(body) && !/\bcatch\b/.test(body) && /\bset[A-Z]\w*\(/.test(body)) n += 1;
+    // Day117: ストアの書き込みは失敗を opError に載せて **成功可否を boolean で返す**ようになった。
+    // `if (await store.x(...)) setY()` のように**結果で分岐している**なら catch は要らない
+    // （失敗の表示はストアの共通バナーが担当する）。結果を捨てた `await store.x(...);` だけを赤にする。
+    const discarded = new RegExp(String.raw`(^|[;{}\n]\s*)await\s+(` + WRITE_SRC + `)`).test(body);
+    if (WRITE.test(body) && discarded && !/\bcatch\b/.test(body) && /\bset[A-Z]\w*\(/.test(body)) n += 1;
   }
   return n;
 }
@@ -173,6 +177,38 @@ describe('無音の失敗ガード', () => {
       .map((f) => ({ path: f.path, count: bareWriteHandlers(f.src) }))
       .filter((r) => r.count > 0)
       .map((r) => `${r.path}（${r.count}件）`);
+    expect(offenders).toEqual([]);
+  });
+
+  it('JSX から投げっぱなしで呼ぶストア操作は、失敗を出す画面でしか使わない（Day117）', () => {
+    // これまでの書き込み判定は「名前の付いた関数」か「await された書き込み」しか見ていなかった。
+    //   onClick={() => store.checkTable(t.id)}
+    // のように **JSX へ直書きした投げっぱなしの呼び出し**は await も catch も関数名も無いので、
+    // 8 判定すべてをすり抜けていた（席回し 18・POS 10・初回案内 7 箇所）。接客中の画面で
+    // 権限エラー・オフライン・競合が起きても「押しても無反応」にしか見えない状態だった。
+    //
+    // 対処として、ストア側が失敗を `opError` に集約して boolean を返す契約にした（Day117）。
+    // ここでは受け手側を固定する: **投げっぱなしで呼ぶ画面は opError を表示していること**。
+    const READ_ONLY = new Set(['resultFor', 'clearOpError']);
+    const offenders: string[] = [];
+    for (const { path, src } of ALL_FILES) {
+      if (!path.endsWith('.tsx')) continue;
+      const fireAndForget = [...src.matchAll(/(await\s+)?\bstore\.(\w+)\(/g)]
+        .filter((m) => !m[1] && !READ_ONLY.has(m[2]));
+      if (fireAndForget.length === 0) continue;
+      if (/\bopError\b/.test(src)) continue; // 失敗を画面に出している
+      offenders.push(`${path}（${fireAndForget.length}件）`);
+    }
+    expect(offenders).toEqual([]);
+  });
+
+  it('書き込みを公開するストアは失敗の通知経路（useOperationError）を持つ（Day117）', () => {
+    // 画面側だけ直しても、次に作るストアが同じ穴を空ける。ストア側の契約も固定する。
+    const WRITE = /(addDoc|updateDoc|deleteDoc|setDoc|runTransaction|writeBatch)\s*\(/;
+    const offenders = ALL_FILES
+      .filter((f) => /^src\/lib\/[\w-]+\/store\.ts$/.test(f.path))
+      .filter((f) => WRITE.test(f.src) && !f.src.includes('useOperationError'))
+      .map((f) => f.path);
     expect(offenders).toEqual([]);
   });
 

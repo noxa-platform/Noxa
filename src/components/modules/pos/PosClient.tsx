@@ -119,6 +119,14 @@ export function PosClient({ user, focusTableId, embedded }: { user: User; focusT
           {store.dataError} 卓・担当・顧客が空に見えても「未登録」とは限りません。画面を再読み込みしてください。
         </p>
       )}
+      {/* 操作（書き込み）の失敗。注文追加や伝票操作は JSX から投げっぱなしで呼ばれるため、
+          ここに出さないと「押したのに商品が増えない」だけになる（Day117） */}
+      {store.opError && (
+        <div role="alert" style={{ display: 'flex', alignItems: 'center', gap: 10, margin: '0 0 12px', padding: '10px 12px', borderRadius: 10, fontSize: 13, color: 'var(--noxa-status-error)', background: 'rgba(229,115,115,0.08)', border: '1px solid var(--noxa-status-error)' }}>
+          <span style={{ flex: 1 }}>{store.opError}</span>
+          <button type="button" onClick={store.clearOpError} aria-label="閉じる" style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'inherit', fontSize: 14, lineHeight: 1 }}>×</button>
+        </div>
+      )}
       <div className={embedded ? 'grid grid-cols-1 lg:grid-cols-[1fr_340px]' : 'grid grid-cols-1 lg:grid-cols-[200px_1fr_340px]'} style={{ gap: 'clamp(12px, 1.6vw, 18px)', alignItems: 'start' }}>
         {/* 左：卓（席回しと共有）。埋め込み（席回しから単一卓）では非表示 */}
         {!embedded && (
@@ -237,8 +245,13 @@ export function PosClient({ user, focusTableId, embedded }: { user: User; focusT
               canUnpaid={canUnpaid}
               onDispatch={(a) => store.dispatchSlip(selectedTableId, selectedSlip.id, a)}
               onRename={(name) => store.renameSlip(selectedTableId, selectedSlip.id, name)}
-              onRemove={() => { if (window.confirm('この伝票を破棄しますか？（売上に計上されません）')) { store.removeSlip(selectedTableId, selectedSlip.id); setSelectedSlipId(null); } }}
-              onCheckout={async (opts) => { await store.checkoutSlip(selectedTableId, selectedSlip.id, opts); setSelectedSlipId(null); }}
+              onRemove={async () => { if (window.confirm('この伝票を破棄しますか？（売上に計上されません）') && await store.removeSlip(selectedTableId, selectedSlip.id)) setSelectedSlipId(null); }}
+              onCheckout={async (opts) => {
+                // 会計が通っていないのに伝票を閉じると「会計済み」に見え、二重会計や請求漏れになる（Day117）
+                const ok = await store.checkoutSlip(selectedTableId, selectedSlip.id, opts);
+                if (ok) setSelectedSlipId(null);
+                return ok;
+              }}
             />
           ) : (
             <div style={{ background: 'var(--noxa-surface-card)', border: '1px solid var(--noxa-border)', borderRadius: 16, padding: 20, color: 'var(--noxa-text-muted)', fontSize: 13 }}>伝票を選択すると会計伝票が表示されます。</div>
@@ -449,8 +462,9 @@ function SlipControls({ slip, initialSetPriceOptions, onDispatch }: { slip: PosS
 
 function BillPanel({ tableName, casts, slip, result, canUnpaid, onDispatch, onRename, onRemove, onCheckout }: {
   tableName: string; casts: string[]; slip: PosSlip; result: CalculationResult; canUnpaid: boolean;
-  onDispatch: (a: Action) => void; onRename: (name: string) => void; onRemove: () => void;
-  onCheckout: (opts: { amount: number; castName?: string; customerName?: string; guests?: number; unpaidAmount?: number }) => Promise<void>;
+  onDispatch: (a: Action) => void; onRename: (name: string) => void; onRemove: () => void | Promise<void>;
+  /** 会計。**成功したかどうか**を返す（false のとき伝票を閉じない・Day117） */
+  onCheckout: (opts: { amount: number; castName?: string; customerName?: string; guests?: number; unpaidAmount?: number }) => Promise<boolean>;
 }) {
   const activeOrders = slip.state.orders.filter((o) => o.count > 0);
   const [checkingOut, setCheckingOut] = useState(false);
@@ -544,7 +558,7 @@ function BillPanel({ tableName, casts, slip, result, canUnpaid, onDispatch, onRe
           )}
           <div style={{ display: 'flex', gap: 8 }}>
             <button type="button" disabled={busy || unpaidInvalid || amountInvalid} className="noxa-btn noxa-btn-primary" style={{ ...primaryBtn, flex: 1, opacity: busy || unpaidInvalid || amountInvalid ? 0.7 : 1 }}
-              onClick={async () => { setBusy(true); try { await onCheckout({ amount, castName: castName || undefined, customerName: customerName || undefined, guests, unpaidAmount: unpaidOn ? unpaidAmount : undefined }); setCheckingOut(false); } catch (e) { window.alert(describeFirestoreError(e, '会計')); } finally { setBusy(false); } }}>
+              onClick={async () => { setBusy(true); try { if (await onCheckout({ amount, castName: castName || undefined, customerName: customerName || undefined, guests, unpaidAmount: unpaidOn ? unpaidAmount : undefined })) setCheckingOut(false); } catch (e) { window.alert(describeFirestoreError(e, '会計')); } finally { setBusy(false); } }}>
               {busy ? '計上中…' : `${yen(amount)} で確定${unpaidOn && unpaidAmount > 0 ? `（うちツケ${yen(unpaidAmount)}）` : ''}`}
             </button>
             <button type="button" onClick={() => setCheckingOut(false)} className="noxa-btn noxa-btn-ghost" style={{ ...ghostBtn, width: 80 }}>戻る</button>

@@ -24,6 +24,7 @@ import { useDeviceClaims } from '@/lib/useShopContext';
 import { getActiveShop } from '@/lib/workspace';
 import { resolveShopIdState, SHOP_UNRESOLVED_TEXT } from '@/lib/shop-id-state';
 import { describeFirestoreError } from '@/lib/firestore-error';
+import { useOperationError } from '@/lib/operation-error';
 import type { StoreConfig } from './types';
 import { createDefaultStoreConfig } from './defaultConfig';
 import {
@@ -96,23 +97,37 @@ export type UsePosStore = {
   configError: string | null;
   /** 卓/担当/顧客の購読に失敗した理由（空表示＝未設定と区別する・Day115） */
   dataError: string | null;
+  /**
+   * 直近の**操作（書き込み）**の失敗（Day117）。
+   * 注文追加や伝票操作は JSX から投げっぱなしで呼ばれるため、ここへ集約して画面に出す。
+   */
+  opError: string | null;
+  clearOpError: () => void;
   config: StoreConfig;
   tables: FloorTable[];
   casts: Cast[];
   customers: ShopCustomer[];
   needsSeed: boolean;
-  seedTables: () => Promise<void>;
-  addSlip: (tableId: string, init?: { customerType?: CustomerType; initialSetPrice?: number; entryTime?: string; dohan?: boolean; castName?: string; castUid?: string; castId?: string; customerName?: string; customerId?: string }) => Promise<void>;
-  dispatchSlip: (tableId: string, slipId: string, action: Action) => Promise<void>;
-  renameSlip: (tableId: string, slipId: string, name: string) => Promise<void>;
-  removeSlip: (tableId: string, slipId: string) => Promise<void>;
-  checkoutSlip: (tableId: string, slipId: string, opts: { amount: number; castName?: string; customerName?: string; guests?: number; unpaidAmount?: number }) => Promise<void>;
+  seedTables: () => Promise<boolean>;
+  addSlip: (tableId: string, init?: { customerType?: CustomerType; initialSetPrice?: number; entryTime?: string; dohan?: boolean; castName?: string; castUid?: string; castId?: string; customerName?: string; customerId?: string }) => Promise<boolean>;
+  dispatchSlip: (tableId: string, slipId: string, action: Action) => Promise<boolean>;
+  renameSlip: (tableId: string, slipId: string, name: string) => Promise<boolean>;
+  removeSlip: (tableId: string, slipId: string) => Promise<boolean>;
+  checkoutSlip: (tableId: string, slipId: string, opts: { amount: number; castName?: string; customerName?: string; guests?: number; unpaidAmount?: number }) => Promise<boolean>;
   resultFor: (slip: PosSlip) => CalculationResult;
 };
+
+/**
+ * 包む前の生の実装の型（Day117）。公開 API は `guard()` で包んで成功可否を boolean で返すが、
+ * 実装側は失敗を throw する素の関数のまま書く。
+ */
+type RawPosOp<T> = T extends (...args: infer A) => Promise<unknown> ? (...args: A) => Promise<void> : never;
 
 export function usePosStore(user: User): UsePosStore {
   const shop = usePosShop(user);
   const shopId = shop.shopId;
+  // 書き込みの失敗を1本にまとめて画面へ渡す（Day117）
+  const { opError, clearOpError, run } = useOperationError();
 
   const [config, setConfig] = useState<StoreConfig>(() => createDefaultStoreConfig());
   // 料金設定の読み取り失敗（既定料金での会計を止めるための理由・Day110）
@@ -211,7 +226,7 @@ export function usePosStore(user: User): UsePosStore {
 
   const tableRef = useCallback((id: string) => doc(db, `shop_shops/${shopId}/seating_tables/${id}`), [shopId]);
 
-  const seedTables = useCallback<UsePosStore['seedTables']>(async () => {
+  const seedTables = useCallback<RawPosOp<UsePosStore['seedTables']>>(async () => {
     if (!shopId) return;
     let names = DEFAULT_TABLE_NAMES;
     try {
@@ -249,7 +264,7 @@ export function usePosStore(user: User): UsePosStore {
     });
   }, [shopId, tableRef]);
 
-  const addSlip = useCallback<UsePosStore['addSlip']>(async (tableId, init) => {
+  const addSlip = useCallback<RawPosOp<UsePosStore['addSlip']>>(async (tableId, init) => {
     const cfg = configRef.current;
     const base = createInitialState(cfg);
     const state: CalculatorState = init
@@ -289,19 +304,19 @@ export function usePosStore(user: User): UsePosStore {
     });
   }, [txSlips]);
 
-  const dispatchSlip = useCallback<UsePosStore['dispatchSlip']>(async (tableId, slipId, action) => {
+  const dispatchSlip = useCallback<RawPosOp<UsePosStore['dispatchSlip']>>(async (tableId, slipId, action) => {
     await mutateSlip(tableId, slipId, (s) => ({ ...s, state: calculatorReducer(s.state, action, configRef.current) }));
   }, [mutateSlip, configRef]);
 
-  const renameSlip = useCallback<UsePosStore['renameSlip']>(async (tableId, slipId, name) => {
+  const renameSlip = useCallback<RawPosOp<UsePosStore['renameSlip']>>(async (tableId, slipId, name) => {
     await mutateSlip(tableId, slipId, (s) => ({ ...s, name }));
   }, [mutateSlip]);
 
-  const removeSlip = useCallback<UsePosStore['removeSlip']>(async (tableId, slipId) => {
+  const removeSlip = useCallback<RawPosOp<UsePosStore['removeSlip']>>(async (tableId, slipId) => {
     await mutateSlip(tableId, slipId, () => null);
   }, [mutateSlip]);
 
-  const checkoutSlip = useCallback<UsePosStore['checkoutSlip']>(async (tableId, slipId, opts) => {
+  const checkoutSlip = useCallback<RawPosOp<UsePosStore['checkoutSlip']>>(async (tableId, slipId, opts) => {
     if (!shopId) return;
     // 金銭書込の入口ガード（UI 側でも拒否するが、負の売上→顧客累計減算まで波及するため二重防衛）
     if (!Number.isFinite(opts.amount) || opts.amount < 0) throw new Error('会計金額が不正です（0以上を指定してください）');
@@ -388,9 +403,17 @@ export function usePosStore(user: User): UsePosStore {
   return useMemo(() => ({
     loading: shop.loading || loadingData,
     shopId, canConfig: shop.canConfig, isDevice: shop.isDevice, error: shop.error, configError, dataError,
+    opError, clearOpError,
     config, tables, casts, customers, needsSeed,
-    seedTables, addSlip, dispatchSlip, renameSlip, removeSlip, checkoutSlip, resultFor,
-  }), [shop.loading, loadingData, shopId, shop.canConfig, shop.isDevice, shop.error, configError, dataError, config, tables, casts, customers, needsSeed, seedTables, addSlip, dispatchSlip, renameSlip, removeSlip, checkoutSlip, resultFor]);
+    // 書き込みは guard で包む（失敗は throw せず opError に載せて false を返す・Day117）
+    seedTables: () => run('卓の初期作成', () => seedTables()),
+    addSlip: (tableId, init) => run('伝票の作成', () => addSlip(tableId, init)),
+    dispatchSlip: (tableId, slipId, action) => run('伝票の更新', () => dispatchSlip(tableId, slipId, action)),
+    renameSlip: (tableId, slipId, name) => run('伝票名の変更', () => renameSlip(tableId, slipId, name)),
+    removeSlip: (tableId, slipId) => run('伝票の破棄', () => removeSlip(tableId, slipId)),
+    checkoutSlip: (tableId, slipId, opts) => run('会計', () => checkoutSlip(tableId, slipId, opts)),
+    resultFor,
+  }), [opError, clearOpError, run, shop.loading, loadingData, shopId, shop.canConfig, shop.isDevice, shop.error, configError, dataError, config, tables, casts, customers, needsSeed, seedTables, addSlip, dispatchSlip, renameSlip, removeSlip, checkoutSlip, resultFor]);
 }
 
 let __slipSeq = 0;

@@ -261,22 +261,16 @@ export function SeatingClient({ user }: { user: User }) {
   };
   const undoReset = async () => {
     if (!undo) return;
-    try {
-      await store.restoreTable(undo.tableId, undo.snapshot);
-      setUndo(null);
-    } catch (e) {
-      window.alert(describeFirestoreError(e, '退店の取り消し'));
-    }
+    // 書き戻しに失敗したらアンドゥの機会を消さない（理由はストアの opError バナーに出る・Day117）
+    if (await store.restoreTable(undo.tableId, undo.snapshot)) setUndo(null);
   };
 
   const applyAiPlanItem = async (p: AiPlanItem) => {
-    try {
-      if (p.action === 'rotate') await store.rotateHosts(p.tableId);
-      else for (const cid of p.castIds) await store.assignCast(p.tableId, cid);
-      setAiPlan((prev) => (prev ? prev.filter((x) => x !== p) : prev));
-    } catch (e) {
-      window.alert(describeFirestoreError(e, 'AI 提案の適用'));
-    }
+    // 適用できていない提案をカードから消さない（消えると「適用済み」に見える・Day117）
+    let ok = true;
+    if (p.action === 'rotate') ok = await store.rotateHosts(p.tableId);
+    else for (const cid of p.castIds) ok = (await store.assignCast(p.tableId, cid)) && ok;
+    if (ok) setAiPlan((prev) => (prev ? prev.filter((x) => x !== p) : prev));
   };
 
   return (
@@ -294,6 +288,14 @@ export function SeatingClient({ user }: { user: User }) {
       )}
       {store.dataError && (
         <p role="alert" style={{ color: 'var(--noxa-status-error)', fontSize: 13, margin: '0 0 12px', padding: '10px 12px', borderRadius: 10, background: 'rgba(229,115,115,0.08)', border: '1px solid var(--noxa-status-error)' }}>{store.dataError}</p>
+      )}
+      {/* 操作（書き込み）の失敗。卓の操作は JSX から投げっぱなしで呼ばれるため、
+          ここに出さないと権限エラーやオフラインが「押しても無反応」にしか見えない（Day117） */}
+      {store.opError && (
+        <div role="alert" style={{ display: 'flex', alignItems: 'center', gap: 10, color: 'var(--noxa-status-error)', fontSize: 13, margin: '0 0 12px', padding: '10px 12px', borderRadius: 10, background: 'rgba(229,115,115,0.08)', border: '1px solid var(--noxa-status-error)' }}>
+          <span style={{ flex: 1 }}>{store.opError}</span>
+          <button type="button" onClick={store.clearOpError} aria-label="閉じる" style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'inherit', fontSize: 14, lineHeight: 1 }}>×</button>
+        </div>
       )}
       {/* 新規案内の着信（客用タブレットのパネル指名 → リアルタイム反映） */}
       {(() => {
@@ -607,12 +609,8 @@ function TableDetail({ table, casts, tables, castById, store, onOpenPos, onReset
   const startSet = async () => {
     const now = Date.now();
     const customers: Customer[] = Array.from({ length: Math.max(1, openGuests) }, (_, i) => ({ id: `cust_${now}_${i}`, type: openType, entryTime: now }));
-    try {
-      await store.startSet(table.id, customers);
-    } catch (e) {
-      // 使用中卓への二重開卓ガード等を可視化（握りつぶすと「押しても無反応」に見える）
-      window.alert(describeFirestoreError(e, '開卓'));
-    }
+    // 使用中卓への二重開卓ガード等の失敗はストアの opError バナーに出る（Day117）
+    await store.startSet(table.id, customers);
   };
 
   return (
@@ -829,7 +827,7 @@ function CastRoster({ casts, store, wageFor, castLabel = 'キャスト', pickups
           </label>
           <div style={{ display: 'flex', gap: 8 }}>
             <button type="button" className="noxa-btn noxa-btn-primary" style={{ ...primaryBtn, flex: 1 }} disabled={!name.trim()}
-              onClick={async () => { await store.addCast({ name: name.trim(), rank, hourlyWage: wage }); setName(''); setAdding(false); }}>追加</button>
+              onClick={async () => { if (await store.addCast({ name: name.trim(), rank, hourlyWage: wage })) { setName(''); setAdding(false); } }}>追加</button>
             <button type="button" onClick={() => setAdding(false)} style={{ ...ghostBtn, width: 72 }}>戻る</button>
           </div>
         </div>
@@ -875,7 +873,7 @@ function QueuePanel({ queue, tables, store }: { queue: import('@/lib/seating/typ
               <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
                 {emptyTables.length === 0 && <span style={{ fontSize: 11, color: 'var(--noxa-status-warning)' }}>空卓なし</span>}
                 {emptyTables.map((t) => (
-                  <button key={t.id} type="button" onClick={() => { store.seatQueueGroup(t.id, q).catch((e) => window.alert(describeFirestoreError(e, '卓への案内'))); setSeatFor(null); }} style={chipStyle(false)}>{t.name}</button>
+                  <button key={t.id} type="button" onClick={async () => { if (await store.seatQueueGroup(t.id, q)) setSeatFor(null); }} style={chipStyle(false)}>{t.name}</button>
                 ))}
               </div>
             ) : (
@@ -894,7 +892,7 @@ function QueuePanel({ queue, tables, store }: { queue: import('@/lib/seating/typ
           <input type="number" min={1} value={size} onChange={(e) => setSize(Math.max(1, Number(e.target.value)))} style={{ ...fieldStyle, width: 64 }} inputMode="numeric" />
         </div>
         <button type="button" className="noxa-btn noxa-btn-primary" style={primaryBtn} disabled={!name.trim()}
-          onClick={async () => { await store.addToQueue({ name: name.trim(), groupSize: size, type }); setName(''); }}>待ち組に追加</button>
+          onClick={async () => { if (await store.addToQueue({ name: name.trim(), groupSize: size, type })) setName(''); }}>待ち組に追加</button>
       </div>
     </section>
   );
@@ -998,8 +996,7 @@ function CastEditor({ cast, allCasts, store, onClose }: { cast: Cast; allCasts: 
   const save = async () => {
     setBusy(true);
     try {
-      await store.updateCast(cast.id, { name: name.trim() || cast.name, rank, hourlyWage: Math.max(0, wage), uid: uid || null, ngCastIds: ngIds });
-      onClose();
+      if (await store.updateCast(cast.id, { name: name.trim() || cast.name, rank, hourlyWage: Math.max(0, wage), uid: uid || null, ngCastIds: ngIds })) onClose();
     } catch (e) {
       window.alert(describeFirestoreError(e, 'キャスト情報の保存'));
     } finally { setBusy(false); }
@@ -1009,7 +1006,7 @@ function CastEditor({ cast, allCasts, store, onClose }: { cast: Cast; allCasts: 
     setBusy(true);
     // catch が無いと権限エラーで「削除ボタンを押しても名簿から消えない」だけになり、
     // 壊れているのか権限が無いのか判断できなかった
-    try { await store.removeCast(cast.id); onClose(); }
+    try { if (await store.removeCast(cast.id)) onClose(); }
     catch (e) { window.alert(describeFirestoreError(e, 'キャストの削除')); }
     finally { setBusy(false); }
   };
