@@ -1,13 +1,15 @@
 /**
- * v2 schema 対応版 (旧 crm_workspaces → shop_shops + personal_*)
+ * 通知配信が見に行く「ワークスペース」と、その中の顧客・ログを引くヘルパー。
  *
- * Cloud Functions 通知配信向けに、ユーザーが扱う「顧客カルテ」を列挙する。
- * v2 では:
- *   - Shop モード: shop_shops/{shopId}/customers
- *   - Personal モード: personal_customers/{uid}/items
- * の 2 箇所に分かれる。本ヘルパーは uid を渡すと両方を統合して扱えるよう抽象化する。
+ * ワークスペースは 3 種類:
+ *   - 所有店舗   : shop_shops/{shopId}（ownerUid == uid）
+ *   - 所属店舗   : account_users/{uid}/memberships の逆引き index 由来（Day120）
+ *   - MyDeck     : personal_customers/{uid}/items（担当付き顧客の正本）
+ * 顧客コレクションは種別で決まる（`customersCollectionPath`）。存在確認から
+ * 種別を再導出しないこと（Day121 の実バグ）。
  */
 import { Timestamp } from 'firebase-admin/firestore';
+import * as logger from 'firebase-functions/logger';
 import { db } from '../admin';
 import type { CustomerLite, ContactLogLite, WorkspaceLite } from '../types';
 
@@ -55,6 +57,15 @@ export async function listUserWorkspaces(uid: string): Promise<WorkspaceLite[]> 
     const status = (data.status as string | undefined) ?? 'active';
     if (status !== 'active') continue; // 退店済みの残骸は対象外
     if (!MANAGING_ROLES.includes((data.role as string | undefined) ?? 'cast')) continue;
+    // 逆引き index は派生データで、店舗削除の掃除（cleanupMembershipIndexOnShopDelete）は
+    // **今後の削除にしか効かない**。既に消えた店舗のゴーストが残っている間、
+    // その店舗の通知が届き続けてしまうので、生存だけは確認する（Day121-PM）。
+    // ※ここで見るのは「店舗が在るか」だけ。read の失敗は「無い」と同一視せず投げる
+    //   （握り潰すと Day120 で直した「所属店舗が対象外」へ静かに戻る）。
+    if (!(await db().doc(`shop_shops/${shopId}`).get()).exists) {
+      logger.warn('[listUserWorkspaces] 逆引きに残った削除済み店舗を除外', { uid, shopId });
+      continue;
+    }
     seen.add(shopId);
     shops.push({
       id: shopId,

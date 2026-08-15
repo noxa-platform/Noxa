@@ -156,7 +156,14 @@ export const cleanupMembershipIndexOnShopDelete = onDocumentWritten(
   'shop_shops/{shopId}',
   async (event) => {
     const shopId = event.params.shopId;
-    if (event.data?.after.data()) return; // 削除以外は対象外
+    // ここだけは**削除だと確認できたときにしか**動かさない（消す側の判定は厳しく取る）。
+    // 他のトリガーは after が無ければ削除と見なすが、この関数は event.data 自体が
+    // 欠けている異常系でも同じ結論になり、生きている店舗の逆引きを消し得た（Day121-PM）。
+    if (!event.data) {
+      logger.warn('[cleanupMembershipIndexOnShopDelete] イベントに変更データが無い（削除と断定せず中断）', { shopId });
+      return;
+    }
+    if (event.data.after.data()) return; // 削除以外は対象外
 
     const membersSnap = await db().collection(`shop_shops/${shopId}/members`).get();
     if (membersSnap.empty) return;

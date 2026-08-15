@@ -39,9 +39,10 @@ const millis = (v: unknown): number =>
  */
 function makeDb(
   collections: Record<string, Record<string, Doc>>,
-  opts: { failCollections?: string[] } = {},
+  opts: { failCollections?: string[]; failDocs?: string[] } = {},
 ) {
   const fail = new Set(opts.failCollections ?? []);
+  const failDoc = new Set(opts.failDocs ?? []);
   const written: Record<string, Doc[]> = {};
   const rowsOf = (name: string) => Object.entries(collections[name] ?? {});
   const matches = (data: Doc, f: Filter) => {
@@ -62,10 +63,10 @@ function makeDb(
     const col = path.slice(0, idx);
     const id = path.slice(idx + 1);
     return {
-      get: async () => ({
-        exists: collections[col]?.[id] !== undefined,
-        data: () => collections[col]?.[id],
-      }),
+      get: async () => {
+        if (failDoc.has(path)) throw Object.assign(new Error('unavailable'), { code: 'unavailable' });
+        return { exists: collections[col]?.[id] !== undefined, data: () => collections[col]?.[id] };
+      },
       set: async (d: Doc) => { (written[path] ??= []).push(d); },
       delete: async () => { delete collections[col]?.[id]; },
     };
@@ -134,6 +135,40 @@ describe('listUserWorkspaces（通知が見に行くワークスペース）', (
     mocks.db.mockReturnValue(db);
 
     expect((await listUserWorkspaces('cast1')).map((w) => w.id)).toEqual(['cast1']);
+  });
+
+  it('MyDeck は必ず personal 種別で返す（顧客パスがこの type で決まる）', async () => {
+    const { db } = makeDb({ shop_shops: {}, 'account_users/u1/memberships': {} });
+    mocks.db.mockReturnValue(db);
+
+    const [myDeck] = await listUserWorkspaces('u1');
+    expect(myDeck).toMatchObject({ id: 'u1', type: 'personal' });
+    expect(customersCollectionPath(myDeck)).toBe('personal_customers/u1/items');
+  });
+
+  it('★逆引きに残った削除済み店舗は対象外（掃除トリガーが届かない既存ゴースト・Day121-PM）', async () => {
+    const { db } = makeDb({
+      shop_shops: {}, // 店舗 doc はもう無い（members だけが孤児として残っている状態）
+      'account_users/mgr1/memberships': {
+        ghost: { shopId: 'ghost', role: 'manager', status: 'active', shopName: '閉店した店' },
+      },
+    });
+    mocks.db.mockReturnValue(db);
+
+    expect((await listUserWorkspaces('mgr1')).map((w) => w.id)).toEqual(['mgr1']);
+  });
+
+  it('★店舗の生存確認に失敗したら投げる（「無い」に倒して所属を落とさない）', async () => {
+    const { db } = makeDb(
+      {
+        shop_shops: { s1: { ownerUid: 'own1' } },
+        'account_users/mgr1/memberships': { s1: { shopId: 's1', role: 'manager', status: 'active' } },
+      },
+      { failDocs: ['shop_shops/s1'] },
+    );
+    mocks.db.mockReturnValue(db);
+
+    await expect(listUserWorkspaces('mgr1')).rejects.toThrow();
   });
 
   it('★逆引き index の読み取り失敗は投げる（黙って「所有店舗だけ」に倒さない）', async () => {

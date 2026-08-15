@@ -22,7 +22,11 @@ vi.mock('firebase-admin/firestore', () => ({
 }));
 vi.mock('firebase-admin/auth', () => ({ getAuth: vi.fn() }));
 
-import { cleanupMembershipIndexOnShopDelete, syncShopNameToMemberships } from '../../functions/src/v2-sync';
+import {
+  cleanupMembershipIndexOnShopDelete,
+  syncShopNameToMemberships,
+  syncMembershipIndex,
+} from '../../functions/src/v2-sync';
 import { listMemberShopIds } from '../../functions/src/merge';
 
 type Doc = Record<string, unknown>;
@@ -30,8 +34,9 @@ type Doc = Record<string, unknown>;
 /** collection().get() / doc().get()/delete() / batch() / collectionGroup() を持つ最小フェイク */
 function makeDb(
   collections: Record<string, Record<string, Doc>>,
-  opts: { failCommit?: boolean; failCollectionGroup?: boolean } = {},
+  opts: { failCommit?: boolean; failCollectionGroup?: boolean; failDocs?: string[] } = {},
 ) {
+  const failDoc = new Set(opts.failDocs ?? []);
   const deleted: string[] = [];
   const commits: number[] = [];
   const rowsOf = (name: string) => Object.entries(collections[name] ?? {});
@@ -45,7 +50,10 @@ function makeDb(
     const id = path.slice(idx + 1);
     return {
       path,
-      get: async () => ({ exists: collections[col]?.[id] !== undefined, data: () => collections[col]?.[id] }),
+      get: async () => {
+        if (failDoc.has(path)) throw new Error('unavailable');
+        return { exists: collections[col]?.[id] !== undefined, data: () => collections[col]?.[id] };
+      },
       set: async (d: Doc) => { (collections[col] ??= {})[id] = { ...(collections[col]?.[id] ?? {}), ...d }; },
       delete: async () => { deleted.push(path); delete collections[col]?.[id]; },
     };
@@ -151,6 +159,21 @@ describe('cleanupMembershipIndexOnShopDelete（消した店舗を所属に残さ
     expect(deleted).toEqual([]);
   });
 
+  it('★変更データの無い異常イベントでは消さない（削除と断定しない・Day121-PM）', async () => {
+    const { db, deleted } = makeDb({
+      'shop_shops/s1/members': { mgr1: { role: 'manager' } },
+      'account_users/mgr1/memberships': { s1: { shopId: 's1' } },
+    });
+    mocks.db.mockReturnValue(db);
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    await run({ params: { shopId: 's1' }, data: undefined });
+
+    expect(deleted).toEqual([]);
+    expect(warn).toHaveBeenCalled();
+    warn.mockRestore();
+  });
+
   it('★掃除に失敗したら投げる（「消えた店が残っている」を無音にしない）', async () => {
     const { db } = makeDb(
       { 'shop_shops/s1/members': { mgr1: { role: 'manager' } } },
@@ -175,6 +198,85 @@ describe('cleanupMembershipIndexOnShopDelete（消した店舗を所属に残さ
 
     expect(commits).toEqual([400, 400, 100]);
     expect(deleted).toHaveLength(900);
+  });
+});
+
+// Day120 の引き継ぎ(a) の本丸。index を**書く**関数そのものは一度も動作で固めていなかった。
+// 読み手（Day120 の通知）は role と status で絞るため、ここが書き落とすと配信対象から消える。
+describe('syncMembershipIndex（逆引き index の作成・更新・削除）', () => {
+  beforeEach(() => { mocks.db.mockReset(); });
+
+  const memberEvent = (after: Doc | undefined) => ({
+    params: { shopId: 's1', uid: 'u1' },
+    data: { before: { data: () => undefined }, after: { data: () => after } },
+  });
+  const runMember = (e: unknown) =>
+    (syncMembershipIndex as unknown as (ev: unknown) => Promise<void>)(e);
+
+  it('★role と status を index に反映する（読み手がこの 2 つで絞る）', async () => {
+    const collections: Record<string, Record<string, Doc>> = {
+      shop_shops: { s1: { name: '店A' } },
+      'account_users/u1/memberships': {},
+    };
+    const { db } = makeDb(collections);
+    mocks.db.mockReturnValue(db);
+
+    await runMember(memberEvent({ role: 'manager', status: 'active', castDisplayName: 'たろう' }));
+
+    expect(collections['account_users/u1/memberships'].s1).toMatchObject({
+      shopId: 's1', uid: 'u1', role: 'manager', status: 'active', castDisplayName: 'たろう', shopName: '店A',
+    });
+  });
+
+  it('role 未設定は cast・status 未設定は active（既定を書き落とさない）', async () => {
+    const collections: Record<string, Record<string, Doc>> = {
+      shop_shops: { s1: {} },
+      'account_users/u1/memberships': {},
+    };
+    const { db } = makeDb(collections);
+    mocks.db.mockReturnValue(db);
+
+    await runMember(memberEvent({ joinedAt: '__ts__' }));
+
+    expect(collections['account_users/u1/memberships'].s1).toMatchObject({ role: 'cast', status: 'active' });
+  });
+
+  it('role 変更が index に伝わる（cast → manager で通知対象になる）', async () => {
+    const collections: Record<string, Record<string, Doc>> = {
+      shop_shops: { s1: { name: '店A' } },
+      'account_users/u1/memberships': { s1: { shopId: 's1', role: 'cast', status: 'active' } },
+    };
+    const { db } = makeDb(collections);
+    mocks.db.mockReturnValue(db);
+
+    await runMember(memberEvent({ role: 'manager' }));
+
+    expect(collections['account_users/u1/memberships'].s1).toMatchObject({ role: 'manager' });
+  });
+
+  it('★メンバー削除で index も消える（退店者の所属を残さない）', async () => {
+    const collections: Record<string, Record<string, Doc>> = {
+      'account_users/u1/memberships': { s1: { shopId: 's1', role: 'manager' } },
+    };
+    const { db, deleted } = makeDb(collections);
+    mocks.db.mockReturnValue(db);
+
+    await runMember(memberEvent(undefined));
+
+    expect(deleted).toEqual(['account_users/u1/memberships/s1']);
+  });
+
+  it('店舗名が引けなくても index は作る（表示名だけ欠ける・判定は落とさない）', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const collections: Record<string, Record<string, Doc>> = { 'account_users/u1/memberships': {} };
+    const { db } = makeDb(collections, { failDocs: ['shop_shops/s1'] });
+    mocks.db.mockReturnValue(db);
+
+    await runMember(memberEvent({ role: 'manager', status: 'active' }));
+
+    expect(collections['account_users/u1/memberships'].s1).toMatchObject({ role: 'manager', shopName: null });
+    expect(warn).toHaveBeenCalled();
+    warn.mockRestore();
   });
 });
 
