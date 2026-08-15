@@ -32,10 +32,11 @@ export interface PushTokenDoc {
   updatedAt?: string;
 }
 
-/** Workspace member doc（ownerUid 経由で workspace を引く用） */
+/** 通知判定の対象ワークスペース（所有店舗 / 所属店舗 / MyDeck） */
 export interface WorkspaceLite {
   id: string;
-  ownerUid: string;
+  /** 所有店舗・MyDeck のみ判明。所属店舗は逆引き index から作るため未取得（Day120） */
+  ownerUid?: string;
   name?: string;
   type?: string;
 }

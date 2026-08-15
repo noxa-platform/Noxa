@@ -11,22 +11,58 @@ import { Timestamp } from 'firebase-admin/firestore';
 import { db } from '../admin';
 import type { CustomerLite, ContactLogLite, WorkspaceLite } from '../types';
 
+/** 所属（招待で参加した側）で店舗運営の通知を受け取る role */
+const MANAGING_ROLES = ['owner', 'manager'];
+
 /**
- * uid が ownerUid の shop_shops + personal MyDeck を統合した一覧を返す。
- * - shop_shops で ownerUid == uid のもの
- * - 末尾に「MyDeck (personal)」として uid 自身を追加
+ * uid が通知の判定対象にできるワークスペースを返す（Day120）。
+ * - shop_shops で ownerUid == uid（所有店舗）
+ * - `account_users/{uid}/memberships` のうち role が owner/manager で在籍中のもの（所属店舗）
+ * - 末尾に「MyDeck (personal)」として uid 自身
+ *
+ * Day120 の実バグ: 旧実装は **ownerUid の店舗しか見ていなかった**。招待で参加した店長は
+ * rules 上その店舗の顧客カルテを read/write できる（`isShopMember` で全許可）のに、
+ * 誕生日・次回アクション・ご無沙汰の通知が一度も来なかった。さらに日次サマリは
+ * 無条件送信のため、店長には毎朝「前日: ¥0 / 0 組 / 今日の予定: 0 件」という
+ * **もっともらしい 0**（データが無いのではなく見ている場所が違う）が届いていた。
+ *
+ * キャスト・会計（レジ端末）は所属では含めない。担当付き顧客は
+ * `personal_customers/{castUid}/items`（＝MyDeck）が正本で従来どおり通知されるため、
+ * 店舗側の「未担当バケット」まで全キャストへ配ると通知が増えるだけになる
+ * （出す/出さないは product 判断＝LOG の要ユーザー項目）。
  */
-export async function listOwnedWorkspaces(uid: string): Promise<WorkspaceLite[]> {
-  const shopsSnap = await db()
-    .collection('shop_shops')
-    .where('ownerUid', '==', uid)
-    .get();
+export async function listUserWorkspaces(uid: string): Promise<WorkspaceLite[]> {
+  // どちらかの読み取りに失敗したら握り潰さずに投げる。ここを `.catch(() => [])` で
+  // 埋めると「所属店舗が無い人」と区別できず、店長には一生通知が来ない状態へ静かに戻る。
+  const [shopsSnap, membershipsSnap] = await Promise.all([
+    db().collection('shop_shops').where('ownerUid', '==', uid).get(),
+    db().collection(`account_users/${uid}/memberships`).get(),
+  ]);
+
   const shops: WorkspaceLite[] = shopsSnap.docs.map((d) => ({
     id: d.id,
     ownerUid: (d.data().ownerUid as string) ?? uid,
     name: d.data().name as string | undefined,
     type: 'business' as string | undefined,
   }));
+
+  // 所有店舗にはオーナー自身の members doc（＝逆引き index）も並ぶので id で重複排除する
+  const seen = new Set(shops.map((s) => s.id));
+  for (const d of membershipsSnap.docs) {
+    const data = d.data();
+    const shopId = (data.shopId as string | undefined) ?? d.id;
+    if (seen.has(shopId)) continue;
+    const status = (data.status as string | undefined) ?? 'active';
+    if (status !== 'active') continue; // 退店済みの残骸は対象外
+    if (!MANAGING_ROLES.includes((data.role as string | undefined) ?? 'cast')) continue;
+    seen.add(shopId);
+    shops.push({
+      id: shopId,
+      name: (data.shopName as string | null | undefined) ?? undefined,
+      type: 'business',
+    });
+  }
+
   // MyDeck (personal) を末尾に追加
   shops.push({
     id: uid,

@@ -4,7 +4,7 @@
  */
 import * as logger from 'firebase-functions/logger';
 import { listUidsWithPrefEnabled } from '../lib/prefs';
-import { listOwnedWorkspaces, listCustomers } from '../lib/workspaces';
+import { listUserWorkspaces, listCustomers } from '../lib/workspaces';
 import { sendToUser } from '../lib/push';
 import { extractMonthDay, jstMonthDayDaysAhead } from '../lib/datetime';
 import type { CustomerLite } from '../types';
@@ -14,6 +14,8 @@ const FN_NAME = 'birthday';
 interface Hit {
   customer: CustomerLite;
   daysAhead: 0 | 7;
+  /** 顧客が属するワークスペース（店舗 or MyDeck）。通知から開く先の特定に要る（Day120） */
+  workspaceId: string;
 }
 
 /** 配信結果サマリー（admin trigger / 統計表示用） */
@@ -45,15 +47,15 @@ export async function runBirthdayReminder(): Promise<RunResult> {
 
   for (const uid of uids) {
     try {
-      const workspaces = await listOwnedWorkspaces(uid);
+      const workspaces = await listUserWorkspaces(uid);
       const hits: Hit[] = [];
       for (const ws of workspaces) {
         const customers = await listCustomers(ws.id);
         for (const c of customers) {
           const md = extractMonthDay(c.birthday);
           if (!md) continue;
-          if (md === todayMd) hits.push({ customer: c, daysAhead: 0 });
-          else if (md === sevenMd) hits.push({ customer: c, daysAhead: 7 });
+          if (md === todayMd) hits.push({ customer: c, daysAhead: 0, workspaceId: ws.id });
+          else if (md === sevenMd) hits.push({ customer: c, daysAhead: 7, workspaceId: ws.id });
         }
       }
       if (hits.length === 0) continue;
@@ -95,8 +97,8 @@ async function notify(uid: string, hits: Hit[]) {
     body = soon.length > 1 ? `7 日後に誕生日: ${soon.length} 名` : '7 日後が誕生日です';
   }
 
-  const firstId =
-    today[0]?.customer.id ?? soon[0]?.customer.id ?? '';
+  const firstHit = today[0] ?? soon[0];
+  const firstId = firstHit?.customer.id ?? '';
 
   return sendToUser(
     uid,
@@ -106,6 +108,9 @@ async function notify(uid: string, hits: Hit[]) {
       data: {
         type: 'customer_birthday',
         customerId: firstId,
+        // 顧客 ID だけでは開けない（店舗の顧客と MyDeck の顧客は別コレクション）。
+        // 複数店舗を持つ人には「どの店の誰か」が受け手側で決まらない（Day120）
+        workspaceId: firstHit?.workspaceId ?? '',
       },
     },
     FN_NAME,

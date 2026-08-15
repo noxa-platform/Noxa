@@ -29,9 +29,49 @@ function tsFiles(dir: string): string[] {
   return out;
 }
 
+/**
+ * コメントを空白に潰す（行番号は保つ）。
+ *
+ * Day120 の**ガード自身の穴**: 判定を生ソースに当てていたため、
+ * 「ここを `.catch(() => [])` で埋めると〜」という**注意書きのコメント**を実装として摘発した。
+ * 逆向きの穴の方が重く、catch 本体が `// logger.error は不要` というコメント 1 行だけでも
+ * 「報告している」と見なして素通りしていた。判定はコードだけに当てる。
+ */
+function stripComments(src: string): string {
+  let out = '';
+  let i = 0;
+  type Mode = 'code' | 'line' | 'block' | 'single' | 'double' | 'template';
+  let mode: Mode = 'code';
+  while (i < src.length) {
+    const c = src[i];
+    const next = src[i + 1];
+    if (mode === 'code') {
+      if (c === '/' && next === '/') { mode = 'line'; out += '  '; i += 2; continue; }
+      if (c === '/' && next === '*') { mode = 'block'; out += '  '; i += 2; continue; }
+      if (c === "'") mode = 'single';
+      else if (c === '"') mode = 'double';
+      else if (c === '`') mode = 'template';
+      out += c; i += 1; continue;
+    }
+    if (mode === 'line') {
+      if (c === '\n') { mode = 'code'; out += c; } else out += ' ';
+      i += 1; continue;
+    }
+    if (mode === 'block') {
+      if (c === '*' && next === '/') { mode = 'code'; out += '  '; i += 2; continue; }
+      out += c === '\n' ? c : ' '; i += 1; continue;
+    }
+    // 文字列/テンプレート内: エスケープを飛ばしつつ終端を待つ
+    if (c === '\\') { out += src.slice(i, i + 2); i += 2; continue; }
+    if ((mode === 'single' && c === "'") || (mode === 'double' && c === '"') || (mode === 'template' && c === '`')) mode = 'code';
+    out += c; i += 1;
+  }
+  return out;
+}
+
 const FILES = tsFiles(CF_ROOT).map((p) => ({
   path: relative(process.cwd(), p).split(/[\\/]/).join('/'),
-  src: readFileSync(p, 'utf8'),
+  src: stripComments(readFileSync(p, 'utf8')),
 }));
 
 /** catch 節の本体を波括弧の対応で切り出す */
@@ -100,5 +140,23 @@ describe('Cloud Functions の無音の失敗ガード（Day118）', () => {
     expect(body).toMatch(/logger\.error/);
     expect(body).toMatch(/throw/);
     expect(body).not.toMatch(/catch\s*\{\s*return false/); // 旧実装へ戻さない
+  });
+
+  // --- ガード自身の穴（Day120） ---
+  it('判定はコードだけに当てる（コメントの中の書き方例で誤検知しない）', () => {
+    const src = "// ここを .catch(() => []) で埋めるな\nconst a = 1;\n";
+    expect(stripComments(src)).not.toContain('catch');
+    expect(stripComments(src)).toContain('const a = 1;');
+  });
+
+  it('★catch 本体がコメントだけの「報告したことにする」を素通りさせない', () => {
+    const src = 'try { f(); } catch (e) {\n  // logger.error は不要\n}\n';
+    const [only] = catchBodies(stripComments(src));
+    expect(REPORTED.test(only.body)).toBe(false);
+  });
+
+  it('コメントを潰しても実コードの `.catch(() => [])` は摘発できる', () => {
+    const src = 'const u = "https://example.com"; // 説明\nconst x = await q().catch(() => []);\n';
+    expect(/\.catch\(\s*\(\s*\)\s*=>\s*(undefined|null|\{\s*\}|\[\]|0|false)\s*\)/.test(stripComments(src))).toBe(true);
   });
 });

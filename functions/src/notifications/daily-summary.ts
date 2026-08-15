@@ -6,7 +6,7 @@
 import { Timestamp } from 'firebase-admin/firestore';
 import * as logger from 'firebase-functions/logger';
 import { listUidsWithPrefEnabled } from '../lib/prefs';
-import { listOwnedWorkspaces, listCustomers, listLogsInRange } from '../lib/workspaces';
+import { listUserWorkspaces, listCustomers, listLogsInRange } from '../lib/workspaces';
 import { sendToUser } from '../lib/push';
 import { jstStartOfToday, jstStartOfYesterday } from '../lib/datetime';
 import type { ContactLogLite } from '../types';
@@ -40,7 +40,7 @@ export async function runDailySummary(): Promise<RunResult> {
 
   for (const uid of uids) {
     try {
-      const workspaces = await listOwnedWorkspaces(uid);
+      const workspaces = await listUserWorkspaces(uid);
       let salesTotal = 0;
       let groupTotal = 0;
       let plannedTotal = 0;

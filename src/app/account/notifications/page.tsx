@@ -5,6 +5,7 @@ import { AuthGuard } from '@/components/AuthGuard';
 import { AccountShell } from '@/components/AccountShell';
 import { db } from '@/lib/firebase/config';
 import { describeFirestoreError } from '@/lib/firestore-error';
+import { describePushTarget, type PushTargetState } from '@/lib/push-target';
 import type { User } from 'firebase/auth';
 
 const DEFAULTS = {
@@ -23,10 +24,24 @@ function NotificationsEditor({ user }: { user: User }) {
   const [loadError, setLoadError] = useState<string | null>(null);
   // 保存の失敗（旧実装は try すら無く、失敗するとボタンが「保存中…」のまま固まっていた）
   const [saveError, setSaveError] = useState<string | null>(null);
+  // 届く先（端末登録）の有無。ON なのに一件も届かない状態を本人にも見せる（Day120）
+  const [pushTarget, setPushTarget] = useState<PushTargetState | null>(null);
 
   useEffect(() => {
     let alive = true;
     (async () => {
+      // 端末登録の確認。読めなかったことを「未登録」に倒さない（unknown のまま出す）
+      try {
+        const tokenSnap = await getDoc(doc(db, `notification_push_tokens/${user.uid}`));
+        if (alive) {
+          const token = tokenSnap.exists() ? (tokenSnap.data() as { token?: string }).token : undefined;
+          setPushTarget(token
+            ? { kind: 'registered', platform: (tokenSnap.data() as { platform?: string }).platform }
+            : { kind: 'none' });
+        }
+      } catch {
+        if (alive) setPushTarget({ kind: 'unknown' });
+      }
       try {
         const snap = await getDoc(doc(db, `account_app_settings/${user.uid}`));
         if (!alive) return;
@@ -82,6 +97,23 @@ function NotificationsEditor({ user }: { user: User }) {
           {loadError} いまの設定を読み取れていないため、下の表示は既定値です。この状態で保存すると既定値で上書きされます。
         </p>
       )}
+      {pushTarget && (() => {
+        const notice = describePushTarget(pushTarget);
+        const color = notice.tone === 'warn' ? 'var(--noxa-status-warning)'
+          : notice.tone === 'info' ? 'var(--noxa-text-muted)' : 'var(--noxa-text-faint)';
+        return (
+          <p
+            role={notice.tone === 'warn' ? 'alert' : undefined}
+            style={{
+              color, fontSize: 13, margin: '0 0 16px', padding: '10px 12px', borderRadius: 10,
+              background: notice.tone === 'warn' ? 'rgba(230,180,90,0.08)' : 'transparent',
+              border: `1px solid ${notice.tone === 'warn' ? 'var(--noxa-status-warning)' : 'var(--noxa-border)'}`,
+            }}
+          >
+            {notice.text}
+          </p>
+        );
+      })()}
       {!loaded ? (
         <div className="noxa-caption">読み込み中…</div>
       ) : (

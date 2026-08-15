@@ -5,7 +5,7 @@
 import { Timestamp } from 'firebase-admin/firestore';
 import * as logger from 'firebase-functions/logger';
 import { listUidsWithPrefEnabled } from '../lib/prefs';
-import { listOwnedWorkspaces, listCustomers } from '../lib/workspaces';
+import { listUserWorkspaces, listCustomers } from '../lib/workspaces';
 import { sendToUser } from '../lib/push';
 import { jstStartOfToday } from '../lib/datetime';
 import type { RunResult } from './birthday';
@@ -32,10 +32,11 @@ export async function runNextActionReminder(): Promise<RunResult> {
 
   for (const uid of uids) {
     try {
-      const workspaces = await listOwnedWorkspaces(uid);
+      const workspaces = await listUserWorkspaces(uid);
       let dueCount = 0;
       let firstName = '';
       let firstId = '';
+      let firstWorkspaceId = '';
       for (const ws of workspaces) {
         const customers = await listCustomers(ws.id);
         for (const c of customers) {
@@ -45,6 +46,7 @@ export async function runNextActionReminder(): Promise<RunResult> {
             if (!firstName) {
               firstName = c.name;
               firstId = c.id;
+              firstWorkspaceId = ws.id;
             }
           }
         }
@@ -62,6 +64,8 @@ export async function runNextActionReminder(): Promise<RunResult> {
           data: {
             type: 'next_action_due',
             customerId: firstId,
+            // 顧客 ID だけでは開けない（店舗の顧客と MyDeck の顧客は別コレクション・Day120）
+            workspaceId: firstWorkspaceId,
             count: String(dueCount),
           },
         },

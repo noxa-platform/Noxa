@@ -6,7 +6,7 @@
  */
 import * as logger from 'firebase-functions/logger';
 import { listUidsWithPrefEnabled } from '../lib/prefs';
-import { listOwnedWorkspaces, listCustomers } from '../lib/workspaces';
+import { listUserWorkspaces, listCustomers } from '../lib/workspaces';
 import { sendToUser } from '../lib/push';
 import { jstDaysAgo } from '../lib/datetime';
 import type { RunResult } from './birthday';
@@ -31,10 +31,11 @@ export async function runLongTimeNoSeeReminder(): Promise<RunResult> {
 
   for (const uid of uids) {
     try {
-      const workspaces = await listOwnedWorkspaces(uid);
+      const workspaces = await listUserWorkspaces(uid);
       let matchCount = 0;
       let firstName = '';
       let firstId = '';
+      let firstWorkspaceId = '';
       for (const ws of workspaces) {
         const customers = await listCustomers(ws.id);
         for (const c of customers) {
@@ -46,6 +47,7 @@ export async function runLongTimeNoSeeReminder(): Promise<RunResult> {
             if (!firstName) {
               firstName = c.name;
               firstId = c.id;
+              firstWorkspaceId = ws.id;
             }
           }
         }
@@ -63,6 +65,8 @@ export async function runLongTimeNoSeeReminder(): Promise<RunResult> {
           data: {
             type: 'long_time_no_see',
             customerId: firstId,
+            // 顧客 ID だけでは開けない（店舗の顧客と MyDeck の顧客は別コレクション・Day120）
+            workspaceId: firstWorkspaceId,
             count: String(matchCount),
           },
         },
