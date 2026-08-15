@@ -8,6 +8,7 @@ import { loginWithEmail, signinWithGoogle, signinWithApple, handlePostLoginRedir
 import { startLineLogin, isLineLoginEnabled } from '@/lib/auth/line';
 import { LinkAccountDialog } from '@/components/auth/LinkAccountDialog';
 import { auth } from '@/lib/firebase/config';
+import { describeAuthError } from '@/lib/auth-error';
 
 function LoginForm() {
   const router = useRouter();
@@ -59,7 +60,7 @@ function LoginForm() {
         setLoading(false);
         return;
       }
-      setError(parseFirebaseAuthError(err));
+      setError(describeAuthError(err, 'login'));
       setLoading(false);
     }
   }
@@ -76,7 +77,7 @@ function LoginForm() {
         setLoading(false);
         return;
       }
-      setError(parseFirebaseAuthError(err));
+      setError(describeAuthError(err, 'login'));
       setLoading(false);
     }
   }
@@ -93,7 +94,7 @@ function LoginForm() {
         setLoading(false);
         return;
       }
-      setError(parseFirebaseAuthError(err));
+      setError(describeAuthError(err, 'login'));
       setLoading(false);
     }
   }
@@ -338,16 +339,6 @@ function LoginForm() {
       )}
     </main>
   );
-}
-
-function parseFirebaseAuthError(err: unknown): string {
-  const code = (err as { code?: string })?.code ?? '';
-  if (code === 'auth/invalid-credential' || code === 'auth/wrong-password' || code === 'auth/user-not-found') {
-    return 'メールアドレスまたはパスワードが間違っています';
-  }
-  if (code === 'auth/too-many-requests') return 'ログイン試行が多すぎます。しばらく待ってから再試行してください';
-  if (code === 'auth/network-request-failed') return 'ネットワークエラー';
-  return 'ログインに失敗しました';
 }
 
 export default function LoginPage() {

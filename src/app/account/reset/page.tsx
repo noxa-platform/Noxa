@@ -3,6 +3,7 @@ import { useState, Suspense } from 'react';
 import { useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { sendPasswordReset } from '@/lib/auth';
+import { describeAuthError } from '@/lib/auth-error';
 
 /**
  * パスワード再設定（Day112）。
@@ -31,7 +32,7 @@ function ResetForm() {
       await sendPasswordReset(email.trim());
       setSent(true);
     } catch (err: unknown) {
-      setError(parseResetError(err));
+      setError(describeAuthError(err, 'reset'));
     } finally {
       setLoading(false);
     }
@@ -95,13 +96,6 @@ function ResetForm() {
 }
 
 /** 再試行が要る失敗だけを文言にする（未登録は成功と同じ表示なのでここに来ない） */
-function parseResetError(err: unknown): string {
-  const code = (err as { code?: string })?.code ?? '';
-  if (code === 'auth/too-many-requests') return '送信リクエストが多すぎます。しばらく待ってから再試行してください';
-  if (code === 'auth/network-request-failed') return 'ネットワークエラー。通信状況を確認してもう一度お試しください';
-  return 'メールを送信できませんでした。時間をおいてもう一度お試しください';
-}
-
 export default function ResetPage() {
   return (
     <Suspense fallback={null}>

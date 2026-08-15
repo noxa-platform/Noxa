@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import type { AuthCredential, User } from 'firebase/auth';
 import { completeLinkWithPassword } from '@/lib/auth';
+import { describeAuthError } from '@/lib/auth-error';
 
 /**
  * 同一メールが既にメール/パスワードで登録済みのとき、パスワードを入力して
@@ -26,8 +27,10 @@ export function LinkAccountDialog({
     try {
       const user = await completeLinkWithPassword(email, password, pendingCred);
       onLinked(user);
-    } catch {
-      setError('パスワードが違うか、リンクに失敗しました。');
+    } catch (e) {
+      // 例外を見ずに「パスワードが違う」と決めつけると、原因が試行超過や通信断のとき
+      // 利用者は正しいパスワードを打ち直し続け、自分でロックを深める（Day125）
+      setError(describeAuthError(e, 'link'));
       setBusy(false);
     }
   };

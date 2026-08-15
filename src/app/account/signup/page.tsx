@@ -6,6 +6,7 @@ import type { AuthCredential } from 'firebase/auth';
 import { signupWithEmail, signinWithGoogle, signinWithApple, handlePostLoginRedirect, LinkPasswordRequiredError } from '@/lib/auth';
 import { startLineLogin, isLineLoginEnabled } from '@/lib/auth/line';
 import { LinkAccountDialog } from '@/components/auth/LinkAccountDialog';
+import { describeAuthError } from '@/lib/auth-error';
 
 function SignupForm() {
   const router = useRouter();
@@ -36,7 +37,7 @@ function SignupForm() {
         setLoading(false);
         return;
       }
-      setError(parseFirebaseSignupError(err));
+      setError(describeAuthError(err, 'signup'));
       setLoading(false);
     }
   }
@@ -57,7 +58,7 @@ function SignupForm() {
         setLoading(false);
         return;
       }
-      setError(parseFirebaseSignupError(err));
+      setError(describeAuthError(err, 'signup'));
       setLoading(false);
     }
   }
@@ -74,7 +75,7 @@ function SignupForm() {
         setLoading(false);
         return;
       }
-      setError(parseFirebaseSignupError(err));
+      setError(describeAuthError(err, 'signup'));
       setLoading(false);
     }
   }
@@ -321,15 +322,6 @@ function SignupForm() {
       )}
     </main>
   );
-}
-
-function parseFirebaseSignupError(err: unknown): string {
-  const code = (err as { code?: string })?.code ?? '';
-  if (code === 'auth/email-already-in-use') return 'このメールアドレスは既に登録されています';
-  if (code === 'auth/invalid-email') return 'メールアドレスの形式が正しくありません';
-  if (code === 'auth/weak-password') return 'パスワードが弱すぎます (8文字以上)';
-  if (code === 'auth/network-request-failed') return 'ネットワークエラー';
-  return 'アカウント作成に失敗しました';
 }
 
 export default function SignupPage() {

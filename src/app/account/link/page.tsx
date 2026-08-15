@@ -38,10 +38,12 @@ function ProfileLinkClient({ user }: { user: User }) {
   // （同期分岐の setHStatus は set-state-in-effect 違反）
   const [editingHandle, setEditingHandle] = useState(false);
   const [newHandle, setNewHandle] = useState('');
-  const [checkSnap, setCheckSnap] = useState<{ for: string; status: 'ok' | 'taken' } | null>(null);
+  // status に 'error' を持つ（**確認できなかったを「使用済み」に倒さない**・Day125）。
+  // 倒すと、実際は空いている ID を利用者が諦めて別の名前を取る（＝間違った次の行動）。
+  const [checkSnap, setCheckSnap] = useState<{ for: string; status: 'ok' | 'taken' | 'error'; message?: string } | null>(null);
   const [hBusy, setHBusy] = useState(false);
   const validH = validateHandle(newHandle);
-  const hStatus: 'idle' | 'checking' | 'ok' | 'taken' | 'invalid' =
+  const hStatus: 'idle' | 'checking' | 'ok' | 'taken' | 'invalid' | 'error' =
     !editingHandle ? 'idle'
     : !validH ? (newHandle ? 'invalid' : 'idle')
     : validH === handle ? 'idle'
@@ -80,7 +82,16 @@ function ProfileLinkClient({ user }: { user: User }) {
     const h = validateHandle(newHandle);
     if (!h || h === handle) return; // 表示は導出（invalid/idle）
     let alive = true;
-    const t = setTimeout(async () => { const ok = await isHandleAvailable(h); if (alive) setCheckSnap({ for: h, status: ok ? 'ok' : 'taken' }); }, 400);
+    // 旧実装は try/catch が無く、読み取りに失敗すると unhandled rejection のまま
+    // 「確認中…」で固まり、変更ボタンが無効なまま理由も出なかった（Day125）
+    const t = setTimeout(async () => {
+      try {
+        const ok = await isHandleAvailable(h);
+        if (alive) setCheckSnap({ for: h, status: ok ? 'ok' : 'taken' });
+      } catch (e) {
+        if (alive) setCheckSnap({ for: h, status: 'error', message: describeFirestoreError(e, 'IDの空き確認') });
+      }
+    }, 400);
     return () => { alive = false; clearTimeout(t); };
   }, [newHandle, editingHandle, handle]);
 
@@ -89,7 +100,14 @@ function ProfileLinkClient({ user }: { user: User }) {
     const h = validateHandle(newHandle); if (!h) return;
     setHBusy(true);
     try { const nh = await changeUserHandle(user.uid, handle, h); setHandle(nh); setEditingHandle(false); setNewHandle(''); }
-    catch { setCheckSnap({ for: h, status: 'taken' }); }
+    catch (e) {
+      // 旧実装は**あらゆる失敗を「使用済み」**に倒していた（権限エラーや通信断でも同じ表示）。
+      // 実際に埋まっているのは HANDLE_TAKEN のときだけ（changeUserHandle の tx 内判定）。
+      const taken = e instanceof Error && e.message === 'HANDLE_TAKEN';
+      setCheckSnap(taken
+        ? { for: h, status: 'taken' }
+        : { for: h, status: 'error', message: describeFirestoreError(e, 'IDの変更') });
+    }
     finally { setHBusy(false); }
   };
 
@@ -146,6 +164,7 @@ function ProfileLinkClient({ user }: { user: User }) {
             {hStatus === 'ok' && <span style={{ color: 'var(--noxa-status-success)' }}>✓ 使用できます</span>}
             {hStatus === 'taken' && <span style={{ color: 'var(--noxa-accent-destructive)' }}>このIDは使用済みです</span>}
             {hStatus === 'invalid' && <span style={{ color: 'var(--noxa-accent-destructive)' }}>英数字と「_」3〜20文字</span>}
+            {hStatus === 'error' && <span style={{ color: 'var(--noxa-status-error)' }}>{checkSnap?.message ?? 'IDの確認ができませんでした。'} 空いているかどうかは分かりません（使用済みとは限りません）。</span>}
           </div>
           <p style={{ margin: '4px 0 0', fontSize: 11, color: 'var(--noxa-text-faint)' }}>※ 変更すると以前のURL（/u/{handle}）は無効になります。</p>
         </div>

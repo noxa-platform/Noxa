@@ -6,6 +6,7 @@ import { useSearchParams } from 'next/navigation';
 import type { User } from 'firebase/auth';
 import { AuthGuard } from '@/components/AuthGuard';
 import { AccountShell } from '@/components/AccountShell';
+import { describeAuthError } from '@/lib/auth-error';
 import { linkedProviderIds, linkGoogle, linkApple, linkEmailPassword, unlinkProvider } from '@/lib/auth';
 
 /**
@@ -40,14 +41,13 @@ function ConnectionsClient({ user }: { user: User }) {
   const linked = linkedProviderIds(user);
   const isLineAccount = user.uid.startsWith('line_');
 
+  // 文言は auth-error.ts に一本化（画面ごとに別の翻訳を持つと、扱うコードがズレる・Day125）。
+  // ここ固有の事情だけ先に処理する: LAST_PROVIDER は unlinkProvider の自前ガード。
   const handleErr = (e: unknown) => {
-    const code = (e as { code?: string })?.code ?? (e as Error)?.message ?? '';
-    if (code === 'auth/credential-already-in-use') return 'このログイン方法は既に別のアカウントで使われています。下の「アカウント統合」で1つにまとめられます。';
-    if (code === 'auth/email-already-in-use') return 'このメールは既に別アカウントで使用されています。';
-    if (code === 'LAST_PROVIDER') return '最低1つのログイン方法は残す必要があります。';
-    if (code === 'auth/requires-recent-login') return 'セキュリティのため、一度ログインし直してから操作してください。';
-    if (code === 'auth/popup-closed-by-user' || code === 'auth/cancelled-popup-request') return '';
-    return '操作に失敗しました。';
+    if (e instanceof Error && e.message === 'LAST_PROVIDER') return '最低1つのログイン方法は残す必要があります。';
+    const text = describeAuthError(e, 'account');
+    // null = 利用者が自分でポップアップを閉じた＝失敗ではないので何も出さない
+    return text ?? '';
   };
 
   const link = async (id: string) => {

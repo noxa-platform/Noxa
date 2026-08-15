@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { signInWithCustomToken } from 'firebase/auth';
 import { auth } from '@/lib/firebase/config';
+import { describeAuthError, describeHttpFailure } from '@/lib/auth-error';
 
 const FUNCTIONS_BASE = process.env.NEXT_PUBLIC_NOXA_FUNCTIONS_URL ?? 'https://asia-northeast1-noxa-platform.cloudfunctions.net';
 
@@ -40,14 +41,20 @@ export default function StoreLoginPage() {
         body: JSON.stringify({ shopId: shopId.trim(), profileId: profile, pin: pin.trim() }),
       });
       if (!res.ok) {
-        const err = res.status === 401 ? 'PIN が違います' : res.status === 404 ? '店舗 / プロファイルが見つかりません' : 'ログインに失敗しました';
+        // 401/404 はサーバ契約として意味が確定しているのでそのまま案内する。
+        // それ以外は**原因を決めつけず**、状況コードを残す（Day125）
+        const err = res.status === 401 ? 'PIN が違います'
+          : res.status === 404 ? '店舗 / プロファイルが見つかりません'
+          : describeHttpFailure(res.status, null, '端末のログイン');
         setMsg(err); setBusy(false); return;
       }
       const { customToken } = (await res.json()) as { customToken: string };
       await signInWithCustomToken(auth, customToken);
       router.push('/account');
-    } catch {
-      setMsg('通信に失敗しました');
+    } catch (e) {
+      // この catch は fetch だけでなく **signInWithCustomToken の失敗も拾う**。
+      // 一律「通信に失敗しました」と出すと、原因が認証（トークン失効等）でも通信を疑わせる（Day125）
+      setMsg(describeAuthError(e, 'login'));
       setBusy(false);
     }
   };

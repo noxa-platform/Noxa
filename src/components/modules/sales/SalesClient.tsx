@@ -6,7 +6,7 @@ import { collection, onSnapshot, addDoc, doc, updateDoc, deleteDoc, getDocs, ser
 import { db } from '@/lib/firebase/config';
 import { useShopId } from '@/lib/useShopId';
 import { businessDayKey } from '@/lib/datetime';
-import { describeFirestoreError } from '@/lib/firestore-error';
+import { describeFirestoreError, isPermissionDenied } from '@/lib/firestore-error';
 import { describeDelegateRequest } from '@/lib/permission-guidance';
 import type { User } from 'firebase/auth';
 
@@ -134,11 +134,15 @@ export function SalesClient({ user }: { user: User }) {
         try {
           const linked = await getDocs(query(collection(db, `shop_shops/${shop.shopId}/unpaid`), where('saleId', '==', s.id)));
           await Promise.all(linked.docs.map((d) => deleteDoc(d.ref)));
-        } catch {
+        } catch (e) {
           // 旧文言は売掛管理での自己解決を指示していたが、その画面自体が売上編集権限
           // （owner/manager/accounting）を要求する＝**案内先を開けない**行き止まりだった（Day114）。
           // 権限が無いと分かっている相手に自己解決を指示せず、誰に頼めばよいかを出す。
-          setOpError('売上は取消しましたが、紐付く未収（ツケ）の削除権限がありません。' + describeDelegateRequest('売掛管理からの未収の削除'));
+          // ただし**原因を確かめずに「権限がありません」と断定しない**（Day125）。通信断や
+          // index 不足でも同じ文言を出していたため、権限を持つ本人にまで他人へ依頼させていた。
+          setOpError(isPermissionDenied(e)
+            ? '売上は取消しましたが、紐付く未収（ツケ）の削除権限がありません。' + describeDelegateRequest('売掛管理からの未収の削除')
+            : describeFirestoreError(e, '紐付く未収（ツケ）の削除') + ' 売上そのものは取消済みです。売掛管理で未収が残っていないか確認してください。');
         }
       }
     } catch (e) {

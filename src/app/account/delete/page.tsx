@@ -4,6 +4,7 @@ import { useRouter } from 'next/navigation';
 import { AuthGuard } from '@/components/AuthGuard';
 import { AccountShell } from '@/components/AccountShell';
 import { auth } from '@/lib/firebase/config';
+import { describeAuthError, describeHttpFailure } from '@/lib/auth-error';
 import type { User } from 'firebase/auth';
 
 function DeleteAccount({ user }: { user: User }) {
@@ -31,12 +32,21 @@ function DeleteAccount({ user }: { user: User }) {
         method: 'POST',
         headers: { Authorization: `Bearer ${idToken}` },
       });
-      if (!res.ok) throw new Error(`status ${res.status}`);
+      if (!res.ok) {
+        // サーバは理由（UNAUTHORIZED / INTERNAL 等）を返しているのに、旧実装は本文を捨てて
+        // 常に「サポートまでお問い合わせください」と案内していた。401 は再ログインで自力解決
+        // できるのに行き止まりへ誘導していた（Day114 の同型・Day125）
+        const code = await res.json().then((b) => (typeof b?.error === 'string' ? b.error : null)).catch(() => null);
+        setError(describeHttpFailure(res.status, code, '退会処理'));
+        setSubmitting(false);
+        return;
+      }
       await auth.signOut();
       router.replace('/?deleted=1');
     } catch (e) {
       console.error(e);
-      setError('退会処理に失敗しました。サポートまでお問い合わせください');
+      // 通信そのものが失敗した場合（fetch の reject）。原因を決めつけずに理由を出す
+      setError(describeAuthError(e, 'account'));
       setSubmitting(false);
     }
   }

@@ -45,9 +45,10 @@ export function NotificationsClient({ user }: { user: User }) {
         const out: Notif[] = []; snap.forEach((d) => out.push(mapN(d.id, d.data())));
         out.sort((a, b) => (b.at ?? 0) - (a.at ?? 0));
         if (alive) setList(out);
-      } catch {
+      } catch (e) {
         // 取得失敗を「通知はまだありません」と誤誘導しない（権限/オフライン等）
-        if (alive) setError('通知を取得できませんでした。通信状態を確認して再読み込みしてください。');
+        // 原因を「通信」と断定していた（権限・認証切れでも同じ文言）。理由をそのまま出す（Day125）
+        if (alive) setError(describeFirestoreError(e, '通知の取得'));
       }
       if (alive) setLoading(false);
     })();
