@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync, readdirSync } from 'node:fs';
 import { join, relative } from 'node:path';
+import { stripComments } from '../helpers/strip-comments';
 
 // Cloud Functions（`functions/src`）の「無音の失敗」ガード（Day118 新設）。
 //
@@ -25,46 +26,6 @@ function tsFiles(dir: string): string[] {
     const p = join(dir, e.name);
     if (e.isDirectory()) out.push(...tsFiles(p));
     else if (e.name.endsWith('.ts')) out.push(p);
-  }
-  return out;
-}
-
-/**
- * コメントを空白に潰す（行番号は保つ）。
- *
- * Day120 の**ガード自身の穴**: 判定を生ソースに当てていたため、
- * 「ここを `.catch(() => [])` で埋めると〜」という**注意書きのコメント**を実装として摘発した。
- * 逆向きの穴の方が重く、catch 本体が `// logger.error は不要` というコメント 1 行だけでも
- * 「報告している」と見なして素通りしていた。判定はコードだけに当てる。
- */
-function stripComments(src: string): string {
-  let out = '';
-  let i = 0;
-  type Mode = 'code' | 'line' | 'block' | 'single' | 'double' | 'template';
-  let mode: Mode = 'code';
-  while (i < src.length) {
-    const c = src[i];
-    const next = src[i + 1];
-    if (mode === 'code') {
-      if (c === '/' && next === '/') { mode = 'line'; out += '  '; i += 2; continue; }
-      if (c === '/' && next === '*') { mode = 'block'; out += '  '; i += 2; continue; }
-      if (c === "'") mode = 'single';
-      else if (c === '"') mode = 'double';
-      else if (c === '`') mode = 'template';
-      out += c; i += 1; continue;
-    }
-    if (mode === 'line') {
-      if (c === '\n') { mode = 'code'; out += c; } else out += ' ';
-      i += 1; continue;
-    }
-    if (mode === 'block') {
-      if (c === '*' && next === '/') { mode = 'code'; out += '  '; i += 2; continue; }
-      out += c === '\n' ? c : ' '; i += 1; continue;
-    }
-    // 文字列/テンプレート内: エスケープを飛ばしつつ終端を待つ
-    if (c === '\\') { out += src.slice(i, i + 2); i += 2; continue; }
-    if ((mode === 'single' && c === "'") || (mode === 'double' && c === '"') || (mode === 'template' && c === '`')) mode = 'code';
-    out += c; i += 1;
   }
   return out;
 }

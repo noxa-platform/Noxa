@@ -15,6 +15,10 @@ import type { User } from 'firebase/auth';
 import { db } from '@/lib/firebase/config';
 import { useShopId } from '@/lib/useShopId';
 import { describeFirestoreError } from '@/lib/firestore-error';
+import { valueForScope, type ScopedSnapshot } from '@/lib/scoped-snapshot';
+
+/** 業種が未取得・別店舗のときの空値（前の店の業種を持ち越さない） */
+const EMPTY_INDUSTRY: { industry?: string; error: string | null } = { industry: undefined, error: null };
 
 export type ModuleCfg = { key: string; enabled: boolean; label?: string };
 export type RoleWage = { name: string; wage: number };
@@ -146,20 +150,27 @@ export function useShopConfig(user: User): UseShopConfig {
   const shop = useShopId(user);
   // 出所（shopId）つきスナップショットから config/loading を導出（set-state-in-effect 返済・Day19）
   const [cfgSnap, setCfgSnap] = useState<{ shopId: string; config: ShopConfig; error?: string } | null>(null);
-  const [industry, setIndustry] = useState<string | undefined>(undefined);
+  /**
+   * 業種は用語プリセットの土台。config は出所つきなのに**業種だけ出所無しの state** だったため、
+   * 店舗を切り替えた直後は「config は既定に戻ったのに用語だけ前の店の業種のまま」という
+   * ちぐはぐな表示になっていた（Day123 バグハント）。同じ規則で出所つきにする。
+   */
+  const [industrySnap, setIndustrySnap] = useState<ScopedSnapshot<{ industry?: string; error: string | null }> | null>(null);
+  const { industry, error: industryError } = valueForScope(industrySnap, shop.shopId, EMPTY_INDUSTRY);
   const config = useMemo(
     () => (shop.shopId && cfgSnap?.shopId === shop.shopId ? cfgSnap.config : DEFAULT_CONFIG),
     [cfgSnap, shop.shopId],
   );
 
-  // 業種（用語プリセットの土台）。読めないと用語が既定へ戻るため、失敗は握り潰さず error に載せる
-  const [industryError, setIndustryError] = useState<string | null>(null);
+  // 業種の取得。読めないと用語が既定へ戻るため、失敗は握り潰さず error に載せる
   useEffect(() => {
-    if (!shop.shopId) return;
-    getDoc(doc(db, `shop_shops/${shop.shopId}`)).then((s) => {
-      setIndustry((s.data() as { storeTypeName?: string } | undefined)?.storeTypeName);
-      setIndustryError(null);
-    }).catch((e) => { setIndustryError(describeFirestoreError(e, '店舗情報の読み込み')); });
+    const sid = shop.shopId;
+    if (!sid) return;
+    getDoc(doc(db, `shop_shops/${sid}`)).then((s) => {
+      setIndustrySnap({ scope: sid, value: { industry: (s.data() as { storeTypeName?: string } | undefined)?.storeTypeName, error: null } });
+    }).catch((e) => {
+      setIndustrySnap({ scope: sid, value: { industry: undefined, error: describeFirestoreError(e, '店舗情報の読み込み') } });
+    });
   }, [shop.shopId]);
 
   useEffect(() => {

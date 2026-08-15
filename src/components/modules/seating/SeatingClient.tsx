@@ -11,6 +11,7 @@ import { PosClient } from '@/components/modules/pos/PosClient';
 import { generateSmartProposals, getSourcingCandidates, sanitizeAiPlan, ASSIST_MODE_LABEL, type AiPlanItem, type AssistMode } from '@/lib/seating/ai';
 import { computeSetTimer, orderedRotationQueue, moveInOrder, firstVisitPickupSet } from '@/lib/seating/logic';
 import { describeFirestoreError } from '@/lib/firestore-error';
+import { valueForScope, type ScopedSnapshot } from '@/lib/scoped-snapshot';
 import { calculateResult, type CalculatorState } from '@/lib/pos/engine';
 import { AI_CONSENT_TEXT } from '@/lib/ai-privacy';
 import { createDefaultStoreConfig } from '@/lib/pos/defaultConfig';
@@ -45,19 +46,29 @@ function elapsedMin(start: number | null): number {
  * POS 料金設定の購読（席回し画面で伝票金額を出すため。読取専用・無ければ既定値）。
  * 読めなかったことは呼び出し側へ返す（Day115）——旧実装は握り潰しており、
  * **既定料金で計算した卓合計**が「自店の金額」として画面に出ていた（Day110 と同型）。
+ *
+ * さらに旧実装は `snap.exists()` のときだけ `setConfig` していたため、**店舗を切り替えても
+ * 前の店の料金設定が残った**（新しい店に pos_config が無い／読み込み中はそのまま）。
+ * 卓合計が別店舗の料金で出るので、出所（shopId）つきスナップショットで持つ（Day123）。
  */
 function usePosConfigLite(shopId: string | null): { config: StoreConfig; error: string | null } {
-  const [config, setConfig] = useState<StoreConfig>(() => createDefaultStoreConfig('active'));
-  const [error, setError] = useState<string | null>(null);
+  const [snap, setSnap] = useState<ScopedSnapshot<{ config: StoreConfig; error: string | null }> | null>(null);
   useEffect(() => {
     if (!shopId) return;
-    const unsub = onSnapshot(doc(db, `shop_shops/${shopId}/pos_config/active`), (snap) => {
-      if (snap.exists()) setConfig({ ...createDefaultStoreConfig('active'), ...(snap.data() as Partial<StoreConfig>) } as StoreConfig);
-      setError(null);
-    }, (e) => setError(describeFirestoreError(e, '料金設定の読み込み')));
+    const unsub = onSnapshot(doc(db, `shop_shops/${shopId}/pos_config/active`), (s) => {
+      // doc が無い店舗は「まだ料金未設定」＝既定（前の店の設定を持ち越さない）
+      const config = s.exists()
+        ? ({ ...createDefaultStoreConfig('active'), ...(s.data() as Partial<StoreConfig>) } as StoreConfig)
+        : createDefaultStoreConfig('active');
+      setSnap({ scope: shopId, value: { config, error: null } });
+    }, (e) => setSnap({
+      scope: shopId,
+      value: { config: createDefaultStoreConfig('active'), error: describeFirestoreError(e, '料金設定の読み込み') },
+    }));
     return () => unsub();
   }, [shopId]);
-  return { config, error };
+  const fallback = useMemo(() => ({ config: createDefaultStoreConfig('active'), error: null }), []);
+  return valueForScope(snap, shopId, fallback);
 }
 
 /** 新規案内（first-visit タブレット）の着信購読。指名確定が席回しへ流れてきたことを知らせる */

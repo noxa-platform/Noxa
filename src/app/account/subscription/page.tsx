@@ -4,7 +4,12 @@ import { doc, getDoc } from 'firebase/firestore';
 import { AuthGuard } from '@/components/AuthGuard';
 import { AccountShell } from '@/components/AccountShell';
 import { db } from '@/lib/firebase/config';
+import { describeFirestoreError } from '@/lib/firestore-error';
+import { valueForScope, type ScopedSnapshot } from '@/lib/scoped-snapshot';
 import type { User } from 'firebase/auth';
+
+/** 未取得・別ユーザーのときに使う空値（プランは確定していない） */
+const EMPTY_SUB: { sub: Sub | null; error: string | null } = { sub: null, error: null };
 
 interface Sub {
   planTier: string;
@@ -16,17 +21,35 @@ interface Sub {
 }
 
 function SubscriptionView({ user }: { user: User }) {
-  const [sub, setSub] = useState<Sub | null>(null);
+  /**
+   * 契約情報は**出所（uid）つき**で持ち、読み取り失敗と「未加入」を区別する（Day123）。
+   * 旧実装は `getDoc` に catch が無く、失敗しても `sub` は null のまま＝**課金していても
+   * 「Noxa Free」と表示**していた（残クレジットも 0 と出る）。金額に関わる表示で
+   * 「確認できなかった」を「無料プラン」に倒すのは、今週ずっと直してきた偽の情報そのもの。
+   */
+  const [snapshot, setSnapshot] = useState<ScopedSnapshot<{ sub: Sub | null; error: string | null }> | null>(null);
 
   useEffect(() => {
+    const uid = user.uid;
+    let alive = true;
     (async () => {
-      const snap = await getDoc(doc(db, `account_subscriptions/${user.uid}`));
-      if (snap.exists()) setSub(snap.data() as Sub);
+      try {
+        const snap = await getDoc(doc(db, `account_subscriptions/${uid}`));
+        if (alive) setSnapshot({ scope: uid, value: { sub: snap.exists() ? (snap.data() as Sub) : null, error: null } });
+      } catch (e) {
+        if (alive) setSnapshot({ scope: uid, value: { sub: null, error: describeFirestoreError(e, 'プラン情報の取得') } });
+      }
     })();
+    return () => { alive = false; };
   }, [user.uid]);
 
+  const { sub, error: subError } = valueForScope(snapshot, user.uid, EMPTY_SUB);
+
   const planTier = sub?.planTier ?? 'free';
-  const planLabel = planTier === 'free' ? 'Noxa Free' : `Noxa ${planTier.charAt(0).toUpperCase()}${planTier.slice(1)}`;
+  // 読めなかったときに「Noxa Free」と言い切らない（課金済みでも無料に見える・Day123）
+  const planLabel = subError
+    ? '確認できませんでした'
+    : planTier === 'free' ? 'Noxa Free' : `Noxa ${planTier.charAt(0).toUpperCase()}${planTier.slice(1)}`;
 
   return (
     <AccountShell user={user}>
@@ -71,6 +94,12 @@ function SubscriptionView({ user }: { user: User }) {
             )}
           </div>
         </div>
+
+        {subError && (
+          <p role="alert" style={{ color: 'var(--noxa-status-error)', fontSize: 13, margin: 0, padding: '10px 12px', borderRadius: 10, background: 'rgba(229,115,115,0.08)', border: '1px solid var(--noxa-status-error)' }}>
+            {subError} 下のプラン・クレジット残高は実際の契約を表していません（0 と表示されていても消費されているとは限りません）。画面を再読み込みしてください。
+          </p>
+        )}
 
         <div className="grid gap-4" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))' }}>
           <div className="noxa-card">

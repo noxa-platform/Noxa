@@ -8,7 +8,12 @@ import { useShopContext, useDeviceClaims, type DeviceClaims } from '@/lib/useSho
 import { useUiMode } from '@/lib/useUiMode';
 import { resolveDeviceModules, DEVICE_NO_MODULE_TEXT } from '@/lib/device-nav';
 import { db } from '@/lib/firebase/config';
+import { describeFirestoreError } from '@/lib/firestore-error';
+import { valueForScope, type ScopedSnapshot } from '@/lib/scoped-snapshot';
 import type { User } from 'firebase/auth';
+
+/** 未取得・別ユーザーのときに使う空値（プランは確定していない） */
+const EMPTY_SUB: { sub: Sub | null; error: string | null } = { sub: null, error: null };
 
 interface Sub {
   planTier: string;
@@ -61,20 +66,32 @@ const SERVICES = [
 ];
 
 function AccountDashboard({ user }: { user: User }) {
-  const [sub, setSub] = useState<Sub | null>(null);
+  /** 契約情報は出所（uid）つき。読み取り失敗を「無料プラン」に倒さない（Day123） */
+  const [subSnap, setSubSnap] = useState<ScopedSnapshot<{ sub: Sub | null; error: string | null }> | null>(null);
+  const { sub, error: subError } = valueForScope(subSnap, user.uid, EMPTY_SUB);
   // hasShop はオーナーだけでなく「招待で参加したメンバー」も true（店舗運営セクションの到達性）。
   // isOwner は「自分の店を登録済みか」＝登録 CTA を出すかの判定にのみ使う。
   const { hasShop, isOwner, error: shopCtxError } = useShopContext(user.uid);
 
   useEffect(() => {
+    const uid = user.uid;
+    let alive = true;
     (async () => {
-      const snap = await getDoc(doc(db, `account_subscriptions/${user.uid}`));
-      if (snap.exists()) setSub(snap.data() as Sub);
+      try {
+        const snap = await getDoc(doc(db, `account_subscriptions/${uid}`));
+        if (alive) setSubSnap({ scope: uid, value: { sub: snap.exists() ? (snap.data() as Sub) : null, error: null } });
+      } catch (e) {
+        if (alive) setSubSnap({ scope: uid, value: { sub: null, error: describeFirestoreError(e, 'プラン情報の取得') } });
+      }
     })();
+    return () => { alive = false; };
   }, [user.uid]);
 
   const planTier = sub?.planTier ?? 'free';
-  const planLabel = planTier === 'free' ? 'Noxa Free' : `Noxa ${planTier.charAt(0).toUpperCase()}${planTier.slice(1)}`;
+  // 読めなかったときに「Noxa Free」「残 0」と言い切らない（Day123）
+  const planLabel = subError
+    ? '確認できませんでした'
+    : planTier === 'free' ? 'Noxa Free' : `Noxa ${planTier.charAt(0).toUpperCase()}${planTier.slice(1)}`;
   const totalCredits = sub?.aiCreditsTotal ?? 0;
   const usedCredits = sub?.aiCreditsUsed ?? 0;
   const remainingCredits = totalCredits - usedCredits;
@@ -188,6 +205,11 @@ function AccountDashboard({ user }: { user: User }) {
           }}
         >
           <div className="noxa-eyebrow">Credits</div>
+          {subError && (
+            <p role="alert" style={{ color: 'var(--noxa-status-error)', fontSize: 12, margin: 0 }}>
+              {subError} 下の残高は実際の契約を表していません。
+            </p>
+          )}
           <div className="flex items-baseline gap-1.5">
             <span
               style={{

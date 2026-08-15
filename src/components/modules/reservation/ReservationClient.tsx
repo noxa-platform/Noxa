@@ -18,6 +18,7 @@ import { createDefaultStoreConfig } from '@/lib/pos/defaultConfig';
 import type { StoreConfig } from '@/lib/pos/types';
 import { businessDayKey } from '@/lib/datetime';
 import { describeFirestoreError } from '@/lib/firestore-error';
+import { valueForScope, type ScopedSnapshot } from '@/lib/scoped-snapshot';
 import { describeMissingShop } from '@/lib/shop-id-state';
 
 /**
@@ -128,14 +129,19 @@ export function ReservationClient({ user }: { user: User }) {
   // 席回しの実データ（担当/卓セレクトと「来店済→開卓」連携用）
   const [seatCasts, setSeatCasts] = useState<CheckinCast[]>([]);
   const [seatTables, setSeatTables] = useState<{ id: string; name: string }[]>([]);
-  const [posCfg, setPosCfg] = useState<StoreConfig>(() => createDefaultStoreConfig('active'));
   /**
-   * 料金設定を読めたか（Day115）。
+   * 料金設定（Day115・Day123）。
    * 来店処理は `createInitialState(posCfg)` を**卓の伝票として永続化**するため、
    * 取得に失敗したまま開卓すると**既定料金の初期伝票**が作られ、そのまま会計→売上に流れる。
    * Day110 で POS と伝票計算には同じ穴を塞いだが、**予約からの開卓だけ取り逃していた**。
+   *
+   * さらに旧実装は「exists のときだけ set」で shopId が変わっても初期化しなかったため、
+   * **店舗を切り替えた直後は前の店の料金設定で伝票が作られ得た**（Day123）。
+   * 出所（shopId）つきスナップショットで持ち、出所が一致しないときは既定へ戻す。
    */
-  const [posCfgError, setPosCfgError] = useState<string | null>(null);
+  const [posCfgSnap, setPosCfgSnap] = useState<ScopedSnapshot<{ cfg: StoreConfig; error: string | null }> | null>(null);
+  const posCfgFallback = useMemo(() => ({ cfg: createDefaultStoreConfig('active'), error: null }), []);
+  const { cfg: posCfg, error: posCfgError } = valueForScope(posCfgSnap, shop.shopId, posCfgFallback);
   useEffect(() => {
     if (!shop.shopId) return;
     const sid = shop.shopId;
@@ -159,13 +165,19 @@ export function ReservationClient({ user }: { user: User }) {
     ];
     getDoc(doc(db, `shop_shops/${sid}/pos_config/active`))
       .then((s) => {
-        if (s.exists()) { setPosCfg({ ...createDefaultStoreConfig('active'), ...(s.data() as Partial<StoreConfig>) } as StoreConfig); setPosCfgError(null); }
-        // doc 自体が無い店舗は「まだ料金未設定」＝既定でよい（POS 設定で作られる）
-        else setPosCfgError(null);
+        // doc 自体が無い店舗は「まだ料金未設定」＝既定でよい（POS 設定で作られる）。
+        // ただし**前の店の設定を持ち越さない**ため、必ずこの店舗の値として置き直す
+        const cfg = s.exists()
+          ? ({ ...createDefaultStoreConfig('active'), ...(s.data() as Partial<StoreConfig>) } as StoreConfig)
+          : createDefaultStoreConfig('active');
+        setPosCfgSnap({ scope: sid, value: { cfg, error: null } });
       })
       // 旧実装は失敗を握り潰しており、**読めなかったことを誰も知らない**まま
       // 既定料金の初期伝票を卓に書き込んでいた（Day110 と同型。金額が下流の売上まで流れる）
-      .catch((e) => setPosCfgError(describeFirestoreError(e, '料金設定の読み込み')));
+      .catch((e) => setPosCfgSnap({
+        scope: sid,
+        value: { cfg: createDefaultStoreConfig('active'), error: describeFirestoreError(e, '料金設定の読み込み') },
+      }));
     return () => unsubs.forEach((u) => u());
   }, [shop.shopId]);
 
