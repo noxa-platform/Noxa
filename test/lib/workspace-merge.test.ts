@@ -22,6 +22,15 @@ describe('mergeWorkspaces（所有＋所属の畳み込み）', () => {
     ]);
   });
 
+  it('★重複時は正本（店舗 doc）の名前が勝つ（index の denormalize 名で潰さない）', () => {
+    // CF の名前同期が失敗・未デプロイの間、index の shopName は古いままになり得る。
+    // 伝票計算の店舗選択は所有を Map に入れた後で memberships を上書きしていたため、
+    // **自分の店の名前だけ古い名前で出ていた**（Day122 バグハント）
+    expect(mergeWorkspaces([{ id: 's1', name: '新しい店名' }], [{ id: 's1', name: '古い店名' }])).toEqual([
+      { id: 's1', name: '新しい店名', role: 'owner' },
+    ]);
+  });
+
   it('★店舗名が取れなくても要素は落とさない（名前は ID にフォールバック）', () => {
     // shopName 未設定の古い memberships / 店舗 doc の取得失敗でも、切替先としては残す。
     // ここで要素ごと落とすと「名前が引けない店には二度と戻れない」行き止まりになる。

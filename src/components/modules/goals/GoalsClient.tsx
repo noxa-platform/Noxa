@@ -6,6 +6,7 @@ import { collection, doc, getDocs, query, where, serverTimestamp, setDoc, type D
 import type { User } from 'firebase/auth';
 import { db } from '@/lib/firebase/config';
 import { getActiveShop, pickShopId } from '@/lib/workspace';
+import { activeMembershipIds } from '@/lib/membership';
 import { computeGoalHistory } from '@/lib/goals/history';
 import { businessMonthKey } from '@/lib/datetime';
 import { currentBusinessYm, lastSixMonths } from '@/lib/goals/months';
@@ -53,7 +54,7 @@ async function loadPerf(uid: string): Promise<Perf> {
   try {
     const owned = await getDocs(query(collection(db, 'shop_shops'), where('ownerUid', '==', uid)));
     const ms = await getDocs(collection(db, `account_users/${uid}/memberships`));
-    const { shopId, isOwner } = pickShopId(owned.docs.map((d) => d.id), ms.docs.map((d) => d.id), getActiveShop());
+    const { shopId, isOwner } = pickShopId(owned.docs.map((d) => d.id), activeMembershipIds(ms.docs), getActiveShop());
     if (shopId) {
       const col = collection(db, `shop_shops/${shopId}/sales`);
       // 期間クエリ化（Day13）: グラフに使うのは直近6ヶ月のみ。全件取得は read 数が

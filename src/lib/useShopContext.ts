@@ -4,6 +4,7 @@ import { collection, getDocs, query, where } from 'firebase/firestore';
 import type { User } from 'firebase/auth';
 import { db } from '@/lib/firebase/config';
 import { resolveStoreAccessState } from '@/lib/store-access';
+import { activeMembershipIds } from '@/lib/membership';
 import { describeFirestoreError } from '@/lib/firestore-error';
 import { SHOP_UNRESOLVED_TEXT } from '@/lib/shop-id-state';
 
@@ -92,7 +93,7 @@ export function useShopContext(uid: string | undefined): ShopContext {
       // 読み取り失敗を「店舗が無い」と同一視しない（store-access.ts の resolveStoreAccessState 参照）
       const { hasStore, isOwner, unresolved } = resolveStoreAccessState(
         owned ? shops.map((s) => s.id) : null,
-        ms ? ms.docs.map((d) => d.id) : null,
+        ms ? activeMembershipIds(ms.docs) : null,
       );
       setSnap({ uid, ctx: {
         loading: false, hasShop: hasStore, isOwner, shops,

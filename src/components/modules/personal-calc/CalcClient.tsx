@@ -6,6 +6,8 @@ import { collection, doc, getDoc, getDocs, query, where } from 'firebase/firesto
 import type { User } from 'firebase/auth';
 import { db } from '@/lib/firebase/config';
 import { describeFirestoreError } from '@/lib/firestore-error';
+import { activeMemberships } from '@/lib/membership';
+import { mergeWorkspaces } from '@/lib/workspace';
 import type { StoreConfig } from '@/lib/pos/types';
 import { createDefaultStoreConfig } from '@/lib/pos/defaultConfig';
 import {
@@ -36,17 +38,24 @@ type ShopRef = { id: string; name: string };
  * 失敗は理由として返し、画面が「所属していない」と言い切らないようにする。
  */
 async function loadShops(uid: string): Promise<{ shops: ShopRef[]; error: string | null }> {
-  const map = new Map<string, string>();
   let error: string | null = null;
+  let owned: { id: string; name?: string }[] = [];
+  let members: { id: string; name?: string }[] = [];
   try {
-    const owned = await getDocs(query(collection(db, 'shop_shops'), where('ownerUid', '==', uid)));
-    owned.forEach((d) => map.set(d.id, (d.data().name as string) ?? d.id));
+    const snap = await getDocs(query(collection(db, 'shop_shops'), where('ownerUid', '==', uid)));
+    owned = snap.docs.map((d) => ({ id: d.id, name: (d.data() as { name?: string }).name }));
   } catch (e) { error ??= describeFirestoreError(e, '店舗情報の取得'); }
   try {
     const ms = await getDocs(collection(db, `account_users/${uid}/memberships`));
-    ms.forEach((d) => { const x = d.data(); map.set(d.id, (x.shopName as string) ?? d.id); });
+    // 在籍中だけ（退店済みの残骸を店舗選択に出さない・Day122）
+    members = activeMemberships(ms.docs).map((m) => ({ id: m.id, name: m.name }));
   } catch (e) { error ??= describeFirestoreError(e, '店舗情報の取得'); }
-  return { shops: Array.from(map.entries()).map(([id, name]) => ({ id, name })), error };
+  // 畳み込みは切替 UI と同じ規則（所有が勝つ）。旧実装は所有を Map に入れた後で
+  // memberships を上書きしており、**正本（店舗 doc の名前）を派生（index の
+  // denormalize 名）で潰していた**——CF の名前同期が失敗・未デプロイの間、
+  // 自分の店の名前だけ古いまま出る（Day122 バグハント）。
+  const shops = mergeWorkspaces(owned, members).map(({ id, name }) => ({ id, name }));
+  return { shops, error };
 }
 
 export function CalcClient({ user }: { user: User }) {

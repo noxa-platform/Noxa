@@ -10,6 +10,7 @@ import { useEffect, useState } from 'react';
 import { collection, doc, getDoc, getDocs, query, where } from 'firebase/firestore';
 import type { User } from 'firebase/auth';
 import { db } from '@/lib/firebase/config';
+import { activeMemberships, keepMembershipWorkspace } from '@/lib/membership';
 
 export const ACTIVE_SHOP_KEY = 'noxa_active_shop';
 
@@ -74,14 +75,17 @@ export function useWorkspaces(user: User): UseWorkspaces {
       const ownedSnap = await getDocs(query(collection(db, 'shop_shops'), where('ownerUid', '==', user.uid))).catch(() => null);
       const msSnap = await getDocs(collection(db, `account_users/${user.uid}/memberships`)).catch(() => null);
       const owned = (ownedSnap?.docs ?? []).map((d) => ({ id: d.id, name: (d.data() as { name?: string }).name }));
-      // 店舗名は CF が memberships に denormalize 済み（shopName）。未設定の古い doc だけ
-      // 店舗 doc へフォールバックし、その取得失敗は**その1件の表示名**に閉じ込める。
-      const memberships = await Promise.all((msSnap?.docs ?? []).map(async (m) => {
-        const name = (m.data() as { shopName?: string | null }).shopName;
-        if (name) return { id: m.id, name };
-        const s = await getDoc(doc(db, `shop_shops/${m.id}`)).catch(() => null);
-        return { id: m.id, name: (s?.data() as { name?: string } | undefined)?.name };
-      }));
+      // 在籍中の所属だけを候補にする（判定は membership.ts に 1 本化・Day122）。
+      // 店舗名は CF が denormalize 済み（shopName）だが、**店舗そのものが消えていても
+      // index には残る**（掃除トリガーは今後の削除にしか効かない・Day121）。消えた店を
+      // 切替リストに並べると、選んだ瞬間に何も開けない行き止まりになるので実在を確認する。
+      // 取得できなかった場合は**消さずに残す**（読み取り失敗を「店が無い」に倒さない・Day109）。
+      const memberships = (await Promise.all(activeMemberships(msSnap?.docs ?? []).map(async (m) => {
+        const shop = await getDoc(doc(db, `shop_shops/${m.id}`)).catch(() => null);
+        // 削除済みと**確認できた**ものだけ落とす（確認できなかった null は残す）
+        if (!keepMembershipWorkspace(shop ? shop.exists() : null)) return null;
+        return { id: m.id, name: m.name ?? (shop?.data() as { name?: string } | undefined)?.name };
+      }))).filter((m): m is { id: string; name: string | undefined } => m !== null);
       if (!alive) return;
       const items = mergeWorkspaces(owned, memberships);
       setState({ loading: false, items, activeId: pickActiveId(items.map((i) => i.id), getActiveShop()) });

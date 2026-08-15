@@ -6,6 +6,7 @@ import { collection, doc, getDoc, getDocs, query, where, serverTimestamp, setDoc
 import type { User } from 'firebase/auth';
 import { db } from '@/lib/firebase/config';
 import { getActiveShop, pickShopId } from '@/lib/workspace';
+import { activeMembershipIds } from '@/lib/membership';
 import type { StoreConfig, MenuItemDef, MenuCategoryDef, PinnedOrderDef } from '@/lib/pos/types';
 import { createDefaultStoreConfig } from '@/lib/pos/defaultConfig';
 import { describeFirestoreError } from '@/lib/firestore-error';
@@ -53,7 +54,7 @@ export function PosConfigClient({ user }: { user: User }) {
         if (shops.empty) {
           // オーナーではない＝在籍しているのか本当に店が無いのかで案内が真逆になる
           const ms = await getDocs(collection(db, `account_users/${user.uid}/memberships`))
-            .then((s) => !s.empty)
+            .then((s) => activeMembershipIds(s.docs).length > 0) // 在籍中だけを数える（Day122）
             .catch(() => null); // 確認できないときは断定しない（Day109）
           if (alive) { setIsMember(ms); setLoading(false); }
           return;

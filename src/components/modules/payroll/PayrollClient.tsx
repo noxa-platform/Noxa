@@ -8,6 +8,7 @@ import { useDeviceClaims } from '@/lib/useShopContext';
 import { useShopId } from '@/lib/useShopId';
 import { getActiveShop } from '@/lib/workspace';
 import { resolveShopIdState, SHOP_UNRESOLVED_TEXT, SHOP_NOT_FOUND_TEXT } from '@/lib/shop-id-state';
+import { activeMembershipIds } from '@/lib/membership';
 import { describeFirestoreError } from '@/lib/firestore-error';
 import { Shell, Section, Empty, Eyebrow } from '@/components/modules/schedule/ScheduleClient';
 
@@ -78,7 +79,7 @@ export function PayrollClient({ user }: { user: User }) {
             .then((snap) => snap.docs.map((d) => d.id))
             .catch((e) => { failure ??= describeFirestoreError(e, '店舗情報の取得'); return null; });
           const ms = await getDocs(collection(db, `account_users/${user.uid}/memberships`))
-            .then((snap) => snap.docs.map((d) => d.id))
+            .then((snap) => activeMembershipIds(snap.docs))
             .catch((e) => { failure ??= describeFirestoreError(e, '店舗情報の取得'); return null; });
           const st = resolveShopIdState({ owned, memberships: ms, active: getActiveShop() });
           if (st.unresolved) {

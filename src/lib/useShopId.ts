@@ -7,6 +7,7 @@ import { useDeviceClaims } from '@/lib/useShopContext';
 import { getActiveShop } from '@/lib/workspace';
 import { describeFirestoreError } from '@/lib/firestore-error';
 import { resolveShopIdState, SHOP_UNRESOLVED_TEXT } from '@/lib/shop-id-state';
+import { activeMembershipIds } from '@/lib/membership';
 
 /**
  * 操作対象 shopId を解決する共通フック。
@@ -43,7 +44,7 @@ export function useShopId(user: User): ShopId {
         .then((snap) => snap.docs.map((d) => d.id))
         .catch((e) => { failure ??= describeFirestoreError(e, '店舗情報の取得'); return null; });
       const ms = await getDocs(collection(db, `account_users/${user.uid}/memberships`))
-        .then((snap) => snap.docs.map((d) => d.id))
+        .then((snap) => activeMembershipIds(snap.docs))
         .catch((e) => { failure ??= describeFirestoreError(e, '店舗情報の取得'); return null; });
       if (!alive) return;
       const st = resolveShopIdState({ owned, memberships: ms, active: getActiveShop() });
