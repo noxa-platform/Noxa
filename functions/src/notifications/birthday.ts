@@ -50,7 +50,7 @@ export async function runBirthdayReminder(): Promise<RunResult> {
       const workspaces = await listUserWorkspaces(uid);
       const hits: Hit[] = [];
       for (const ws of workspaces) {
-        const customers = await listCustomers(ws.id);
+        const customers = await listCustomers(ws);
         for (const c of customers) {
           const md = extractMonthDay(c.birthday);
           if (!md) continue;

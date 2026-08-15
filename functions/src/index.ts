@@ -77,6 +77,7 @@ export {
   syncShopPublicProfile,
   syncMembershipIndex,
   syncShopNameToMemberships,
+  cleanupMembershipIndexOnShopDelete,
 } from './v2-sync';
 
 // 店舗売上 → キャスト個人売上の控え同期（冪等・退店後も個人履歴が残る）

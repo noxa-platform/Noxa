@@ -41,6 +41,49 @@ async function moveItems(parent: string, from: string, to: string): Promise<numb
   return n;
 }
 
+/**
+ * uid が member doc を持つ店舗 ID を列挙する（Day121）。
+ *
+ * 旧実装は `collectionGroup('members').where('uid','==',uid)` **だけ**を見ていた。
+ * ところが member doc を書く 2 経路（`/store/new` のオーナー自己登録・`redeem-invite`）は
+ * どちらも **`uid` フィールドを書かない**。つまりこの検索は常に 0 件で、
+ * 統合しても正本（`shop_shops/{shopId}/members/{uid}`）は 1 件も移らなかった。
+ * 逆引き index（`account_users/{uid}/memberships`）だけが移るので、統合先は
+ * **「index では所属しているのに rules では非メンバー」**になる（画面は permission-denied、
+ * Admin SDK で動く通知だけが届く）。
+ *
+ * そこで id を 3 系統から集める:
+ *   (a) `shop_shops` を走査して `members/{uid}` の存在を確認（`account/delete` と同じ手）
+ *   (b) 逆引き index の id（親 doc が消えた店舗の member doc も拾える）
+ *   (c) uid フィールドを持つ member doc（他クライアントが書いた場合の保険）
+ */
+export async function listMemberShopIds(uid: string): Promise<string[]> {
+  const fs = db();
+  const ids = new Set<string>();
+
+  const shopsSnap = await fs.collection('shop_shops').get();
+  for (const shop of shopsSnap.docs) {
+    const m = await fs.doc(`shop_shops/${shop.id}/members/${uid}`).get();
+    if (m.exists) ids.add(shop.id);
+  }
+
+  const indexSnap = await fs.collection(`account_users/${uid}/memberships`).get();
+  for (const d of indexSnap.docs) ids.add(d.id);
+
+  try {
+    const byField = await fs.collectionGroup('members').where('uid', '==', uid).get();
+    for (const d of byField.docs) {
+      const shopId = d.ref.parent.parent?.id;
+      if (shopId) ids.add(shopId);
+    }
+  } catch (e) {
+    // index 未作成などで引けないことがある。(a)(b) で結論は出るが、黙って落とさない
+    logger.warn('[mergeAccounts] members の uid 検索に失敗（他 2 系統で継続）', { uid, error: String(e) });
+  }
+
+  return [...ids];
+}
+
 /** collectionGroup の field==B を A に付け替え */
 async function reassignField(group: string, field: string, from: string, to: string): Promise<number> {
   const fs = db();
@@ -80,22 +123,35 @@ export const mergeAccounts = onRequest({ cors: false, region: 'asia-northeast1',
     const snap = await fs.collection('shop_shops').where('ownerUid', '==', uidB).get();
     let n = 0; for (const d of snap.docs) { await d.ref.set({ ownerUid: uidA }, { merge: true }); n++; } return n;
   });
-  // 2) 店舗メンバー（members/{uid}）
+  // 2) 店舗メンバー（members/{uid}）。id の集め方は listMemberShopIds を参照（Day121）
   await step('members', async () => {
-    const snap = await fs.collectionGroup('members').where('uid', '==', uidB).get();
+    const shopIds = await listMemberShopIds(uidB);
     let n = 0;
-    for (const d of snap.docs) {
-      const targetRef = d.ref.parent.doc(uidA);
-      const exists = (await targetRef.get()).exists;
-      if (!exists) await targetRef.set({ ...d.data(), uid: uidA });
-      await d.ref.delete(); n++;
+    for (const shopId of shopIds) {
+      const srcRef = fs.doc(`shop_shops/${shopId}/members/${uidB}`);
+      const src = await srcRef.get();
+      if (!src.exists) continue; // index だけが残っていた店舗（正本が無い＝移すものが無い）
+      const targetRef = fs.doc(`shop_shops/${shopId}/members/${uidA}`);
+      if (!(await targetRef.get()).exists) await targetRef.set({ ...src.data(), uid: uidA });
+      await srcRef.delete(); n++;
     }
     return n;
   });
   // 3) account_users/{B}/memberships → A
+  // index は正本（members/{uid}）の派生。**正本を見ずに index だけ動かすと
+  // 「所属していることになっているのに開けない」状態を作る**ので、両方向で実体に合わせる（Day121）。
   await step('memberships', async () => {
     const snap = await fs.collection(`account_users/${uidB}/memberships`).get();
-    let n = 0; for (const d of snap.docs) { await fs.doc(`account_users/${uidA}/memberships/${d.id}`).set(d.data(), { merge: true }); await d.ref.delete(); n++; } return n;
+    let n = 0;
+    for (const d of snap.docs) {
+      const shopId = d.id;
+      const aIsMember = (await fs.doc(`shop_shops/${shopId}/members/${uidA}`).get()).exists;
+      if (aIsMember) { await fs.doc(`account_users/${uidA}/memberships/${shopId}`).set(d.data(), { merge: true }); n++; }
+      // B 側の正本が残っている（＝2 の移管が失敗した）なら index も残す。ズレを作らない
+      const bStillMember = (await fs.doc(`shop_shops/${shopId}/members/${uidB}`).get()).exists;
+      if (!bStillMember) await d.ref.delete();
+    }
+    return n;
   });
   // 4) 個人データ items 移管
   for (const parent of ['personal_customers', 'personal_sales', 'personal_ai_threads', 'personal_templates', 'personal_goals', 'personal_reminders', 'reward_missions', 'reward_grants']) {

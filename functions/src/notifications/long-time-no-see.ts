@@ -37,7 +37,7 @@ export async function runLongTimeNoSeeReminder(): Promise<RunResult> {
       let firstId = '';
       let firstWorkspaceId = '';
       for (const ws of workspaces) {
-        const customers = await listCustomers(ws.id);
+        const customers = await listCustomers(ws);
         for (const c of customers) {
           if (!c.lastContactAt) continue;
           const lastMs = c.lastContactAt.toMillis();

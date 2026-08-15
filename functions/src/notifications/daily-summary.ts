@@ -45,12 +45,12 @@ export async function runDailySummary(): Promise<RunResult> {
       let groupTotal = 0;
       let plannedTotal = 0;
       for (const ws of workspaces) {
-        const logs = await listLogsInRange(ws.id, yStart, tStart);
+        const logs = await listLogsInRange(ws, yStart, tStart);
         for (const l of logs) {
           salesTotal += l.salesAmount;
           if (isCountedAsGroup(l)) groupTotal += 1;
         }
-        const customers = await listCustomers(ws.id);
+        const customers = await listCustomers(ws);
         for (const c of customers) {
           if (!c.nextActionDue) continue;
           if (c.nextActionDue.toMillis() <= todayCutoff.toMillis()) plannedTotal += 1;

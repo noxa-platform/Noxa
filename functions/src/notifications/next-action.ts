@@ -38,7 +38,7 @@ export async function runNextActionReminder(): Promise<RunResult> {
       let firstId = '';
       let firstWorkspaceId = '';
       for (const ws of workspaces) {
-        const customers = await listCustomers(ws.id);
+        const customers = await listCustomers(ws);
         for (const c of customers) {
           if (!c.nextAction || !c.nextActionDue) continue;
           if (c.nextActionDue.toMillis() < cutoff.toMillis()) {

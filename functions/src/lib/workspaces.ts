@@ -74,12 +74,25 @@ export async function listUserWorkspaces(uid: string): Promise<WorkspaceLite[]> 
 }
 
 /**
- * wid 内の全 customer を返す (Lite)。
- * - shop_shops/{wid} が存在すれば Shop モード (shop_shops/{wid}/customers)
- * - 無ければ Personal モード (personal_customers/{wid}/items、wid = ownerUid と扱う)
+ * ワークスペースの顧客コレクションパス（純関数・Day121）。
+ *
+ * 旧実装は `shop_shops/{wid}` の**存在確認**で shop / personal を切り分けていた。
+ * これは「引けなかった」を「個人ワークスペースだ」という別の結論に流用する形で、
+ *   - 店舗が削除された後もメンバーの逆引き index が残っているとき（＝ゴースト店舗）
+ *   - shop doc の read が一時的に失敗したとき
+ * に `personal_customers/{shopId}/items` という**別の id 空間**を読みに行き、
+ * 店舗の顧客を丸ごと見失って「0 件」を返す（Day120 で直した「毎朝 ¥0」がここから再発する）。
+ * 種別は列挙側（`listUserWorkspaces`）が知っているので、判定させずに受け取る。
  */
-export async function listCustomers(wid: string): Promise<CustomerLite[]> {
-  const collectionPath = await resolveCustomersCollection(wid);
+export function customersCollectionPath(ws: WorkspaceLite): string {
+  return ws.type === 'personal'
+    ? `personal_customers/${ws.id}/items`
+    : `shop_shops/${ws.id}/customers`;
+}
+
+/** ワークスペース内の全 customer を返す (Lite) */
+export async function listCustomers(ws: WorkspaceLite): Promise<CustomerLite[]> {
+  const collectionPath = customersCollectionPath(ws);
   const snap = await db().collection(collectionPath).get();
   return snap.docs.map((d) => {
     const data = d.data();
@@ -95,13 +108,13 @@ export async function listCustomers(wid: string): Promise<CustomerLite[]> {
   });
 }
 
-/** wid 内の指定期間の logs */
+/** ワークスペース内の指定期間の logs */
 export async function listLogsInRange(
-  wid: string,
+  ws: WorkspaceLite,
   start: Date,
   end: Date,
 ): Promise<ContactLogLite[]> {
-  const collectionPath = await resolveCustomersCollection(wid);
+  const collectionPath = customersCollectionPath(ws);
   const customersSnap = await db().collection(collectionPath).get();
   const logs: ContactLogLite[] = [];
   for (const cust of customersSnap.docs) {
@@ -122,11 +135,4 @@ export async function listLogsInRange(
     });
   }
   return logs;
-}
-
-/** wid を見て shop or personal を判定し customers コレクションパスを返す */
-async function resolveCustomersCollection(wid: string): Promise<string> {
-  const shopDoc = await db().collection('shop_shops').doc(wid).get();
-  if (shopDoc.exists) return `shop_shops/${wid}/customers`;
-  return `personal_customers/${wid}/items`;
 }

@@ -16,6 +16,29 @@ import { db } from './admin';
 
 setGlobalOptions({ region: 'asia-northeast1' });
 
+/**
+ * batch は 500 件上限。超えると commit 自体が落ちて**一件も反映されない**（Day121）。
+ * メンバーの多い店舗で「名前だけ永久に古いまま」「消した店が全員に残ったまま」になるため、
+ * 分割してコミットする。失敗は呼び出し側で記録して throw（再試行させる）。
+ */
+async function commitInChunks<T>(
+  items: readonly T[],
+  apply: (batch: ReturnType<ReturnType<typeof db>['batch']>, item: T) => void,
+  onError: (from: number, error: unknown) => void,
+  chunkSize = 400,
+): Promise<void> {
+  for (let i = 0; i < items.length; i += chunkSize) {
+    const batch = db().batch();
+    for (const item of items.slice(i, i + chunkSize)) apply(batch, item);
+    try {
+      await batch.commit();
+    } catch (e) {
+      onError(i, e);
+      throw e;
+    }
+  }
+}
+
 const PUBLIC_FIELDS = [
   'name', 'handle', 'area', 'description', 'hours',
   'phone', 'email', 'address', 'seatCount', 'gallery',
@@ -117,6 +140,38 @@ export const syncMembershipIndex = onDocumentWritten(
 );
 
 /**
+ * shop_shops/{shopId} 削除時、全メンバーの逆引き index を掃除する（Day121）。
+ *
+ * 逆引き index を消す経路は `members/{uid}` の削除トリガーしか無かった。ところが
+ * **店舗 doc を消してもサブコレクション（members）は残る**ため、この経路は一度も発火しない。
+ * 実際に `account/delete`（オーナー退会）は `shop_shops/{id}` だけを消して members を残す。
+ * 結果、消えた店舗が全メンバーの逆引きに残り続け、
+ *   - ホームの店舗切替に「開けない店」が並ぶ（Day114 型の行き止まり）
+ *   - 共有端末の許可モジュール判定がこの index を見る（Day113）
+ *   - 通知がその店舗を見に行く（Day120）
+ * と、3 系統がゴーストを掴む。index は CF が持つ非正本の派生データなので、
+ * 正本（members / customers）には触らずに index だけを実体に合わせる。
+ */
+export const cleanupMembershipIndexOnShopDelete = onDocumentWritten(
+  'shop_shops/{shopId}',
+  async (event) => {
+    const shopId = event.params.shopId;
+    if (event.data?.after.data()) return; // 削除以外は対象外
+
+    const membersSnap = await db().collection(`shop_shops/${shopId}/members`).get();
+    if (membersSnap.empty) return;
+
+    const uids = membersSnap.docs.map((d) => d.id);
+    await commitInChunks(
+      uids,
+      (batch, uid) => batch.delete(db().doc(`account_users/${uid}/memberships/${shopId}`)),
+      (from, error) => logger.error('[cleanupMembershipIndexOnShopDelete] 逆引き index の掃除に失敗（消した店舗が所属に残る）', { shopId, from, error: String(error) }),
+    );
+    logger.info('[cleanupMembershipIndexOnShopDelete] 削除済み店舗の逆引きを掃除', { shopId, count: uids.length });
+  },
+);
+
+/**
  * shop_shops/{shopId} の name 変更時、関連 memberships の shopName denormalize を更新。
  */
 export const syncShopNameToMemberships = onDocumentWritten(
@@ -129,15 +184,15 @@ export const syncShopNameToMemberships = onDocumentWritten(
     if (!after || (before?.name === after.name)) return;
 
     const membersSnap = await db().collection(`shop_shops/${shopId}/members`).get();
-    const batch = db().batch();
-    for (const m of membersSnap.docs) {
-      const uid = m.id;
-      batch.set(
+    // 500 件上限で丸ごと落ちると、メンバーの多い店舗ほど**名前が永久に古いまま**になる（Day121）
+    await commitInChunks(
+      membersSnap.docs.map((m) => m.id),
+      (batch, uid) => batch.set(
         db().doc(`account_users/${uid}/memberships/${shopId}`),
         { shopName: after.name ?? null, updatedAt: FieldValue.serverTimestamp() },
         { merge: true },
-      );
-    }
-    await batch.commit();
+      ),
+      (from, error) => logger.error('[syncShopNameToMemberships] 店舗名の反映に失敗（所属一覧に古い名前が残る）', { shopId, from, error: String(error) }),
+    );
   },
 );

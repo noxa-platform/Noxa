@@ -18,7 +18,7 @@ vi.mock('firebase-admin/firestore', () => ({
   Timestamp: { fromDate: (d: Date) => ({ toMillis: () => d.getTime() }) },
 }));
 
-import { listUserWorkspaces } from '../../functions/src/lib/workspaces';
+import { listUserWorkspaces, customersCollectionPath } from '../../functions/src/lib/workspaces';
 import { runBirthdayReminder } from '../../functions/src/notifications/birthday';
 import { runDailySummary } from '../../functions/src/notifications/daily-summary';
 import { jstMonthDayDaysAhead, jstStartOfYesterday } from '../../functions/src/lib/datetime';
@@ -144,6 +144,23 @@ describe('listUserWorkspaces（通知が見に行くワークスペース）', (
     mocks.db.mockReturnValue(db);
 
     await expect(listUserWorkspaces('mgr1')).rejects.toThrow();
+  });
+});
+
+describe('customersCollectionPath（種別を存在確認から再導出しない・Day121）', () => {
+  it('MyDeck は個人台帳、店舗は店舗の顧客', () => {
+    expect(customersCollectionPath({ id: 'u1', type: 'personal' })).toBe('personal_customers/u1/items');
+    expect(customersCollectionPath({ id: 's1', type: 'business' })).toBe('shop_shops/s1/customers');
+  });
+
+  it('★店舗 doc が消えていても店舗として読む（旧実装は uid の id 空間へ落ちていた）', () => {
+    // 逆引き index にゴーストが残っている間、旧実装は personal_customers/{shopId}/items を読み、
+    // 実際に顧客が残っている shop_shops/{shopId}/customers を素通りしていた
+    expect(customersCollectionPath({ id: 'ghost', type: 'business' })).toBe('shop_shops/ghost/customers');
+  });
+
+  it('type 未設定は店舗として扱う（個人台帳へ倒さない）', () => {
+    expect(customersCollectionPath({ id: 's1' })).toBe('shop_shops/s1/customers');
   });
 });
 
