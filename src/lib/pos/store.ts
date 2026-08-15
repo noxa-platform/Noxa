@@ -26,6 +26,9 @@ import { resolveShopIdState, SHOP_UNRESOLVED_TEXT } from '@/lib/shop-id-state';
 import { activeMembershipIds } from '@/lib/membership';
 import { describeFirestoreError } from '@/lib/firestore-error';
 import { useOperationError } from '@/lib/operation-error';
+import {
+  APPLIED, UNCHANGED, assertWriteApplied, describeMissingWrite, missing, type WriteOutcome,
+} from '@/lib/write-outcome';
 import type { StoreConfig } from './types';
 import { createDefaultStoreConfig } from './defaultConfig';
 import {
@@ -52,6 +55,29 @@ export function nowHHMM(): string {
 import { businessDayKey as dayKey } from '@/lib/datetime';
 
 export type ShopCustomer = { id: string; name: string; mainCastId?: string | null; mainCastUid?: string | null };
+
+/**
+ * 伝票一覧の中の 1 枚を差し替える（純関数・Day124）。
+ *
+ * **対象が一覧に無ければ書き込みを作らず `missing('slip')` を返す**のが要点。
+ * 旧実装は「見つからなければそのまま」で、他端末が先に会計・破棄した伝票への注文追加が
+ * 黙って消え、しかも成功として表示されていた（ボトル 1 本＝売上がまるごと落ちる）。
+ * `fn` が null を返した場合は削除＝適用済み（伝票は消えるが「書いた」ので成功）。
+ */
+export function replaceSlipInList(
+  slips: PosSlip[],
+  slipId: string,
+  fn: (s: PosSlip) => PosSlip | null,
+): { slips: PosSlip[] } | WriteOutcome {
+  if (!slips.some((s) => s.id === slipId)) return missing('slip');
+  const next: PosSlip[] = [];
+  for (const s of slips) {
+    if (s.id !== slipId) { next.push(s); continue; }
+    const r = fn(s);
+    if (r) next.push(r);
+  }
+  return { slips: next };
+}
 
 export type PosShopContext = {
   loading: boolean; shopId: string | null; canConfig: boolean; isDevice: boolean; error: string | null;
@@ -249,20 +275,26 @@ export function usePosStore(user: User): UsePosStore {
   // transform はサーバ最新の slips と卓データを受け取り、新 slips と卓への追加更新(extra)を返す。
   const txSlips = useCallback(async (
     tableId: string,
-    transform: (slips: PosSlip[], data: DocumentData) => { slips: PosSlip[]; extra?: Record<string, unknown> } | null,
-  ) => {
-    if (!shopId) return;
+    transform: (slips: PosSlip[], data: DocumentData) => { slips: PosSlip[]; extra?: Record<string, unknown> } | WriteOutcome | null,
+  ): Promise<WriteOutcome> => {
+    if (!shopId) return UNCHANGED;
+    // 「何も書かなかった」を呼び出し側へ返す（Day124）。旧実装は卓が消えていても黙って
+    // 正常終了し、run() が成功として扱っていた＝押しても伝票が変わらないのに成功表示。
+    let outcome: WriteOutcome = APPLIED;
     await runTransaction(db, async (tx) => {
+      outcome = APPLIED; // 競合による再試行で前回の結末を持ち越さない
       const ref = tableRef(tableId);
       const snap = await tx.get(ref);
-      if (!snap.exists()) return;
+      if (!snap.exists()) { outcome = missing('table'); return; }
       const data = snap.data();
       const slips: PosSlip[] = Array.isArray(data.slips) ? (data.slips as PosSlip[]) : [];
       const result = transform(slips, data);
-      if (!result) return;
+      if (!result) { outcome = UNCHANGED; return; }
+      if ('kind' in result) { outcome = result; return; } // transform 側が対象の消失を検出
       const clean = JSON.parse(JSON.stringify(result.slips));
       tx.set(ref, { slips: clean, updatedAt: serverTimestamp(), ...(result.extra ?? {}) }, { merge: true });
     });
+    return outcome;
   }, [shopId, tableRef]);
 
   const addSlip = useCallback<RawPosOp<UsePosStore['addSlip']>>(async (tableId, init) => {
@@ -273,7 +305,7 @@ export function usePosStore(user: User): UsePosStore {
       : base;
     // 整合: castId 未指定でも castName から席回しキャストを解決し、必ず卓に配置する
     const resolvedCastId = init?.castId ?? (init?.castName ? casts.find((c) => c.name === init.castName)?.id : undefined);
-    await txSlips(tableId, (slips, data) => {
+    assertWriteApplied(await txSlips(tableId, (slips, data) => {
       const newSlip: PosSlip = {
         id: genSlipId(),
         name: init?.customerName?.trim() ? init.customerName.trim() : nextSlipName(slips),
@@ -294,27 +326,27 @@ export function usePosStore(user: User): UsePosStore {
         extra.castStartTimes = { ...(data.castStartTimes ?? {}), [resolvedCastId]: Date.now() };
       }
       return { slips: [...slips, newSlip], extra };
-    });
+    }));
   }, [configRef, txSlips, casts]);
 
+  /**
+   * 伝票 1 枚を書き換える。**対象の伝票がサーバ側に無ければ書かずに missing を返す**
+   * （旧実装は「無ければ何もしない」＝注文追加が黙って消えていた・Day124）。
+   */
   const mutateSlip = useCallback(async (tableId: string, slipId: string, fn: (s: PosSlip) => PosSlip | null) => {
-    await txSlips(tableId, (slips) => {
-      const next: PosSlip[] = [];
-      for (const s of slips) { if (s.id === slipId) { const r = fn(s); if (r) next.push(r); } else next.push(s); }
-      return { slips: next };
-    });
+    return txSlips(tableId, (slips) => replaceSlipInList(slips, slipId, fn));
   }, [txSlips]);
 
   const dispatchSlip = useCallback<RawPosOp<UsePosStore['dispatchSlip']>>(async (tableId, slipId, action) => {
-    await mutateSlip(tableId, slipId, (s) => ({ ...s, state: calculatorReducer(s.state, action, configRef.current) }));
+    assertWriteApplied(await mutateSlip(tableId, slipId, (s) => ({ ...s, state: calculatorReducer(s.state, action, configRef.current) })));
   }, [mutateSlip, configRef]);
 
   const renameSlip = useCallback<RawPosOp<UsePosStore['renameSlip']>>(async (tableId, slipId, name) => {
-    await mutateSlip(tableId, slipId, (s) => ({ ...s, name }));
+    assertWriteApplied(await mutateSlip(tableId, slipId, (s) => ({ ...s, name })));
   }, [mutateSlip]);
 
   const removeSlip = useCallback<RawPosOp<UsePosStore['removeSlip']>>(async (tableId, slipId) => {
-    await mutateSlip(tableId, slipId, () => null);
+    assertWriteApplied(await mutateSlip(tableId, slipId, () => null));
   }, [mutateSlip]);
 
   const checkoutSlip = useCallback<RawPosOp<UsePosStore['checkoutSlip']>>(async (tableId, slipId, opts) => {
@@ -325,11 +357,20 @@ export function usePosStore(user: User): UsePosStore {
     await runTransaction(db, async (tx) => {
       const ref = tableRef(tableId);
       const snap = await tx.get(ref);
-      if (!snap.exists()) return;
+      // 卓が消えていると売上を 1 件も書かずに正常終了し、UI は伝票を閉じていた（Day124）
+      if (!snap.exists()) throw new Error(describeMissingWrite('table'));
       const data = snap.data();
       const slips: PosSlip[] = Array.isArray(data.slips) ? (data.slips as PosSlip[]) : [];
       const slip = slips.find((s) => s.id === slipId);
-      if (!slip) return; // 既に会計済み（他端末）等
+      // 既に会計済み（他端末）等。**黙って成功にしない**——旧実装は売上が増えないまま
+      // ok=true を返し、UI が伝票を閉じるため、両方の端末が「会計した」と思っていた。
+      // 先に通った会計の金額がこちらと違えば、売上の食い違いに誰も気づけない（Day124）。
+      if (!slip) {
+        const tableName = (data.name as string) ?? '';
+        throw new Error(describeMissingWrite('slip', {
+          hint: `${tableName ? `卓「${tableName}」の` : 'この'}伝票は他の端末で先に会計・破棄された可能性があります。二重会計を防ぐため中止しました。売上画面で金額が記録済みかを確認してください。`,
+        }));
+      }
       // 内訳（注文品目）のスナップショット。会計後も「何を何本」を残すため sales に保存する。
       // count>0 の品目のみ。合計 amount は set/税/指名等を含むため lineItems の和とは一致しない（注文明細のみ）。
       const lineItems = (Array.isArray(slip.state.orders) ? slip.state.orders : [])

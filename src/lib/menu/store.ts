@@ -19,6 +19,7 @@ import type { User } from 'firebase/auth';
 import { db } from '@/lib/firebase/config';
 import { describeFirestoreError } from '@/lib/firestore-error';
 import { useOperationError } from '@/lib/operation-error';
+import { APPLIED, missing, type WriteOutcome } from '@/lib/write-outcome';
 import { useShopId } from '@/lib/useShopId';
 import {
   DEFAULT_MENU_CONFIG, type InfoCard, type MenuColor, type MenuConfig, type MenuOrder,
@@ -63,7 +64,11 @@ export type UseMenuStore = {
   // 情報カード
   addInfoCard: (label: string) => Promise<string>;
   // 指名オーダー
-  submitOrders: (groups: { color: MenuColor; casts: MenuOrderCast[]; seat: string; customerName: string; memo: string }[], source: string) => Promise<void>;
+  /**
+   * 指名オーダーの送信。戻り値は**卓へ反映できなかった席名**（オーダー自体は記録済み・Day124）。
+   * 空配列＝全席に反映できた。呼び出し側は再送を促さずに「フロアに出ていない」ことだけ出す。
+   */
+  submitOrders: (groups: { color: MenuColor; casts: MenuOrderCast[]; seat: string; customerName: string; memo: string }[], source: string) => Promise<string[]>;
   updateOrder: (id: string, patch: Partial<Pick<MenuOrder, 'seat' | 'customerName' | 'memo'>>) => Promise<void>;
   deleteOrder: (id: string) => Promise<boolean>;
   clearOrders: () => Promise<boolean>;
@@ -233,10 +238,12 @@ export function useMenuStore(user: User): UseMenuStore {
   }, [shopId, panels]);
 
   const submitOrders = useCallback<UseMenuStore['submitOrders']>(async (groups, source) => {
-    if (!shopId) return;
+    if (!shopId) return [];
     const now = Date.now();
     // 候補プール（表示中のキャストパネル）。未選択パネルはこの卓の除外に入れる
     const pool = visiblePanels.filter((p) => p.kind !== 'info').map((p) => p.id);
+    // 卓が消えていて**反映だけ落ちた**席（オーダーは記録済み）。最後にまとめて報告する（Day124）
+    const unreflected: string[] = [];
     for (const g of groups) {
       const table = tables.find((t) => t.name === g.seat);
       const orderRef = doc(collection(db, `shop_shops/${shopId}/menu_orders`));
@@ -249,15 +256,21 @@ export function useMenuStore(user: User): UseMenuStore {
       // 卓は tx 内で最新を読み直してパッチ（変更フィールドのみ）を作る
       // （旧実装は画面キャッシュ由来の全体像を非Txで merge 書きしており、
       //   席回し/POS 側の同時操作を古い値で巻き戻す事故があった）。
+      let outcome: WriteOutcome = APPLIED;
       await runTransaction(db, async (tx) => {
+        outcome = APPLIED; // 競合による再試行で前回の結末を持ち越さない
         const tref = doc(db, `shop_shops/${shopId}/seating_tables/${table.id}`);
         const snap = await tx.get(tref);
         tx.set(orderRef, orderData);
-        if (!snap.exists()) return;
+        // 卓が消えていると**オーダーだけ記録されて卓に出ない**（＝部分成功）。
+        // 旧実装は黙って正常終了しており、フロアに指名が出ていないことに誰も気づけなかった。
+        if (!snap.exists()) { outcome = missing('table'); return; }
         const patch = buildFirstVisitPatch(snap.data() as FirstVisitTableDoc, g.casts.map((c) => c.id), pool, now);
         tx.set(tref, { ...patch, updatedAt: serverTimestamp() }, { merge: true });
       });
+      if (outcome.kind === 'missing') unreflected.push(g.seat);
     }
+    return unreflected;
   }, [shopId, tables, visiblePanels]);
 
   const updateOrder = useCallback<UseMenuStore['updateOrder']>(async (id, patch) => {

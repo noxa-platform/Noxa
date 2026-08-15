@@ -8,6 +8,7 @@ import {
   deleteDoc,
   doc,
   onSnapshot,
+  runTransaction,
   serverTimestamp,
   updateDoc,
   type DocumentData,
@@ -17,6 +18,7 @@ import { db } from '@/lib/firebase/config';
 import { useShopRole, hasShopRole } from '@/lib/useShopRole';
 import { UNPAID_STATUS_OPTIONS, balanceOf, collectPatch, isOverdue as isOverdueAt, statusChangePatch, type UnpaidStatus } from '@/lib/unpaid/logic';
 import { describeFirestoreError } from '@/lib/firestore-error';
+import { APPLIED, UNCHANGED, assertWriteApplied, missing, type WriteOutcome } from '@/lib/write-outcome';
 import { describeMissingShop } from '@/lib/shop-id-state';
 import { SALES_EDIT_ROLES, SALES_EDIT_ROLE_LABEL, describeSalesEditDenied } from '@/lib/permission-guidance';
 
@@ -250,11 +252,29 @@ export function UnpaidClient({ user }: { user: User }) {
   // 一部回収を確定（paidAmount を加算し、status を自動更新）
   const applyCollect = async (r: UnpaidRecord) => {
     if (!path || busy) return;
-    const patch = collectPatch(r, Number(collectAmount));
-    if (!patch) return;
+    const add = Number(collectAmount);
+    if (!collectPatch(r, add)) return; // 入力の妥当性（NaN/0以下）だけ先に見る
     setBusy(true); setOpError(null);
     try {
-      await updateDoc(doc(db, `${path}/${r.id}`), patch);
+      // 回収額は**サーバ最新の回収済額に足す**（Day124）。旧実装は画面キャッシュの
+      // paidAmount から作った絶対値を書いていたため、別の端末が先に回収を入れていると
+      // **その入金が黙って消える**（残高が戻り、回収済が未回収に戻る）。
+      // 在庫の増減・POS の伝票と同じ「tx でサーバ最新値に適用」の規約に揃える。
+      const ref = doc(db, `${path}/${r.id}`);
+      let outcome: WriteOutcome = APPLIED;
+      await runTransaction(db, async (tx) => {
+        outcome = APPLIED; // 競合による再試行で前回の結末を持ち越さない
+        const snap = await tx.get(ref);
+        if (!snap.exists()) { outcome = missing('unpaid'); return; }
+        const cur = snap.data() as { amount?: number; paidAmount?: number };
+        const patch = collectPatch(
+          { amount: Number(cur.amount) || 0, paidAmount: Number(cur.paidAmount) || 0 },
+          add,
+        );
+        if (!patch) { outcome = UNCHANGED; return; }
+        tx.update(ref, patch);
+      });
+      assertWriteApplied(outcome);
       setCollectId(null);
       setCollectAmount('');
     } catch (e) {

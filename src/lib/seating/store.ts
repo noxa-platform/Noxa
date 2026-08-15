@@ -36,6 +36,7 @@ import { resolveShopIdState, SHOP_UNRESOLVED_TEXT } from '@/lib/shop-id-state';
 import { activeMembershipIds } from '@/lib/membership';
 import { describeFirestoreError } from '@/lib/firestore-error';
 import { useOperationError } from '@/lib/operation-error';
+import { APPLIED, UNCHANGED, assertWriteApplied, describeMissingWrite, missing, type WriteOutcome } from '@/lib/write-outcome';
 import { businessDayKey } from '@/lib/datetime';
 import {
   computeCasts, rotateOrder, nextDailySequence, canStartSet,
@@ -222,15 +223,22 @@ export function useSeatingStore(user: User): UseSeatingStore {
    */
   const txUpdateTable = useCallback(async (tableId: string, mut: (fresh: FloorTable) => TablePatch | null) => {
     if (!shopId) return;
+    // 卓が消えていたら**失敗として報告**する（Day124）。旧実装は黙って正常終了しており、
+    // 配置・延長・退店が無反応のまま「成功」として扱われていた（同じファイルの
+    // startSet / restoreTable / seatQueueGroup は throw していて書き方が割れていた）。
+    // 「変更なし（mut が null）」は正常な no-op なので成功のまま通す。
+    let outcome: WriteOutcome = APPLIED;
     await runTransaction(db, async (tx) => {
+      outcome = APPLIED; // 競合による再試行で前回の結末を持ち越さない
       const ref = tableRef(tableId);
       const snap = await tx.get(ref);
-      if (!snap.exists()) return;
+      if (!snap.exists()) { outcome = missing('table'); return; }
       const fresh = toFloorTable(tableId, snap.data() as Partial<FloorTable>);
       const patch = mut(fresh);
-      if (!patch || Object.keys(patch).length === 0) return;
+      if (!patch || Object.keys(patch).length === 0) { outcome = UNCHANGED; return; }
       tx.update(ref, { ...patch, updatedAt: serverTimestamp() });
     });
+    assertWriteApplied(outcome);
   }, [shopId, tableRef]);
 
   // ── cast ops
@@ -408,7 +416,7 @@ export function useSeatingStore(user: User): UseSeatingStore {
     const metaR = doc(db, `shop_shops/${shopId}/seating_meta/state`);
     await runTransaction(db, async (tx) => {
       const [metaSnap, tableSnap] = [await tx.get(metaR), await tx.get(tableRef(tableId))];
-      if (!tableSnap.exists()) throw new Error('卓が見つかりません');
+      if (!tableSnap.exists()) throw new Error(describeMissingWrite('table'));
       const t = toFloorTable(tableId, tableSnap.data() as Partial<FloorTable>);
       // 使用中の卓への二重セット開始を拒否（先客の customers を上書きで潰さない）
       if (!canStartSet(t.status)) throw new Error(`この卓は使用中です（${t.name}）`);
@@ -507,10 +515,13 @@ export function useSeatingStore(user: User): UseSeatingStore {
     // 退店：最新の卓設定（セット長/ローテ設定・卓名）だけ引き継ぎ、状態と POS 伝票(slips)を空へ。
     // 誤操作アンドゥ用にリセット直前のデータを返す。
     let snapshot: Partial<FloorTable> | null = null;
+    let outcome: WriteOutcome = APPLIED;
     await runTransaction(db, async (tx) => {
+      outcome = APPLIED; // 競合による再試行で前回の結末を持ち越さない
       const ref = tableRef(tableId);
       const snap = await tx.get(ref);
-      if (!snap.exists()) return;
+      // 卓が消えていたら退店を「済んだこと」にしない（アンドゥも出せない・Day124）
+      if (!snap.exists()) { outcome = missing('table'); return; }
       const raw = snap.data() as Partial<FloorTable>;
       const t = toFloorTable(tableId, raw);
       snapshot = JSON.parse(JSON.stringify(raw)); // serverTimestamp 等を含まない plain copy
@@ -523,6 +534,7 @@ export function useSeatingStore(user: User): UseSeatingStore {
         slips: [], updatedAt: serverTimestamp(),
       });
     });
+    assertWriteApplied(outcome); // 画面側は catch して alert を出す（SeatingClient）
     return snapshot;
   }, [shopId, tableRef]);
 
@@ -532,7 +544,7 @@ export function useSeatingStore(user: User): UseSeatingStore {
     await runTransaction(db, async (tx) => {
       const ref = tableRef(tableId);
       const snap = await tx.get(ref);
-      if (!snap.exists()) throw new Error('卓が見つかりません');
+      if (!snap.exists()) throw new Error(describeMissingWrite('table'));
       const cur = toFloorTable(tableId, snap.data() as Partial<FloorTable>);
       if (cur.status !== 'EMPTY') throw new Error(`この卓は既に使用中のため元に戻せません（${cur.name}）`);
       const clean = JSON.parse(JSON.stringify(snapshot)) as Record<string, unknown>;
@@ -560,9 +572,11 @@ export function useSeatingStore(user: User): UseSeatingStore {
     const metaR = doc(db, `shop_shops/${shopId}/seating_meta/state`);
     await runTransaction(db, async (tx) => {
       const queueSnap = await tx.get(queueR);
-      if (!queueSnap.exists()) return; // 既に別端末が案内済み
+      // 既に別端末が案内済み。黙って成功にすると「この卓へ案内した」と思い込んだまま
+      // 実際には別の卓に座っている状態になる（Day124）
+      if (!queueSnap.exists()) throw new Error(describeMissingWrite('queue', { name: item.name }));
       const tableSnap = await tx.get(tableRef(tableId));
-      if (!tableSnap.exists()) throw new Error('卓が見つかりません');
+      if (!tableSnap.exists()) throw new Error(describeMissingWrite('table'));
       const t = toFloorTable(tableId, tableSnap.data() as Partial<FloorTable>);
       if (!canStartSet(t.status)) throw new Error(`この卓は使用中です（${t.name}）`);
       const metaSnap = await tx.get(metaR);

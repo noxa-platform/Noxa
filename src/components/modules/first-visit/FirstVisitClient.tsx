@@ -42,7 +42,9 @@ export function FirstVisitClient({ user }: { user: User }) {
   const [submitting, setSubmitting] = useState(false);
   // 送信の失敗（旧実装は catch が無く、選択が消えないだけで理由が出なかった。
   // 初回案内は接客中に触る画面なので「送れたのか」が分からないまま次の卓へ進んでしまう・Day115）
-  const [submitError, setSubmitError] = useState<string | null>(null);
+  // 送信の結果表示。resendable=false は「記録は済んでいるので再送してはいけない」形
+  // （卓へ反映できなかった部分成功。再送すると指名オーダーが二重に記録される・Day124）
+  const [submitError, setSubmitError] = useState<{ text: string; resendable: boolean } | null>(null);
   const touch = useRef<{ x: number; y: number } | null>(null);
 
   const colorsOf = (id: string) => checked[id] ?? [];
@@ -89,12 +91,20 @@ export function FirstVisitClient({ user }: { user: User }) {
     if (submitting) return;
     setSubmitting(true); setSubmitError(null);
     try {
-      await store.submitOrders(groups, 'main');
+      const unreflected = await store.submitOrders(groups, 'main');
       resetSelection();
       setOrderGroups(null);
+      // オーダーは記録できたが卓へ反映できなかった席（＝部分成功）。記録済みなので選択は消し、
+      // 「フロアに出ていない」ことだけを残す（再送を促すと二重記録になる・Day124）
+      if (unreflected.length > 0) {
+        setSubmitError({
+          text: `指名は記録しましたが、卓「${unreflected.join('・')}」へ反映できませんでした。席回しで卓の状態を確認してください。`,
+          resendable: false,
+        });
+      }
     } catch (e) {
       // 失敗時は resetSelection に到達しない＝選択は残る。理由を出して再送できるようにする
-      setSubmitError(describeFirestoreError(e, 'オーダーの送信'));
+      setSubmitError({ text: describeFirestoreError(e, 'オーダーの送信'), resendable: true });
     } finally { setSubmitting(false); }
   };
 
@@ -140,7 +150,7 @@ export function FirstVisitClient({ user }: { user: User }) {
       {/* 送信の失敗（skipOrderInput ではオーバーレイを出さないので本体側にも必要）・購読の失敗 */}
       {submitError && !orderGroups && (
         <p role="alert" style={{ margin: '0 0 12px', padding: '10px 12px', borderRadius: 10, fontSize: 14, color: 'var(--noxa-status-error)', background: 'rgba(229,115,115,0.12)', border: '1px solid var(--noxa-status-error)' }}>
-          {submitError} 選択は残っているので、そのまま再送できます。
+          {submitError.text}{submitError.resendable ? ' 選択は残っているので、そのまま再送できます。' : ''}
         </p>
       )}
       {store.dataError && (
@@ -279,7 +289,7 @@ export function FirstVisitClient({ user }: { user: User }) {
           </div>
           {submitError && (
             <p role="alert" style={{ margin: '12px 0 0', padding: '10px 12px', borderRadius: 10, fontSize: 13, color: 'var(--noxa-status-error)', background: 'rgba(229,115,115,0.12)', border: '1px solid var(--noxa-status-error)' }}>
-              {submitError} 選択は残っているので、そのまま再送できます。
+              {submitError.text}{submitError.resendable ? ' 選択は残っているので、そのまま再送できます。' : ''}
             </p>
           )}
           <div style={{ display: 'flex', gap: 8, marginTop: 14 }}>
