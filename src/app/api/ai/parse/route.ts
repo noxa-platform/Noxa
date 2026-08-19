@@ -5,6 +5,7 @@ import { estimateAiCost } from '@/lib/ai-cost';
 import { withReservedCredits } from '../with-credits';
 import { verifyRequest, AuthError } from '../../lib/firebase-admin';
 import { resolveAccessContext } from '../../lib/access-context';
+import { maskContactInfo } from '@/lib/ai-privacy';
 
 const MAX_BYTES = 16 * 1024; // 短い発話想定。16KB 上限。
 
@@ -38,9 +39,13 @@ export async function POST(request: NextRequest) {
 
     await resolveAccessContext(uid, workspaceId);
 
+    // 貼り付けテキストは**保存済みメモより PII が濃い**（LINE 履歴そのもの）。
+    // 抽出対象に連絡先は含まれないので、送信前に電話番号・メールを伏せる（Day127）
+    const maskedText = maskContactInfo(text);
+
     // 短文解析なので低コスト固定見積り
     const cost = estimateAiCost({
-      inputText: text,
+      inputText: maskedText,
       expectedOutputTokens: 200,
       featureMultiplier: 0.5,
       maxCap: 2,
@@ -50,7 +55,7 @@ export async function POST(request: NextRequest) {
       // 無料機能でも AI 原価はかかる。課金せず利用だけ記録する（Day126）
       void logAiUsage(uid, 'parse');
       const raw = await generateText(
-        `## 発話\n${text}\n\n上記の発話を解析し、下記スキーマの JSON のみを返してください（前後の説明文やコードフェンスは禁止）。`,
+        `## 発話\n${maskedText}\n\n上記の発話を解析し、下記スキーマの JSON のみを返してください（前後の説明文やコードフェンスは禁止）。`,
         {
           systemInstruction: `あなたは夜職（ホスト/キャバ等）向け顧客管理アプリの入力アシスタントです。
 ユーザーの短い発話を、売上記録・顧客なし日売・予定のいずれかに構造化します。

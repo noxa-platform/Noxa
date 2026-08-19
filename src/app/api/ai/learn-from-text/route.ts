@@ -17,6 +17,7 @@ import { reserveAiCredit, refundAiCredit, logAiLedger } from '../../lib/credits'
 import { estimateAiCost } from '@/lib/ai-cost';
 import { getAdminDb, verifyRequest, AuthError } from '../../lib/firebase-admin';
 import { resolveAccessContext, pathCustomer } from '../../lib/access-context';
+import { maskContactInfo } from '@/lib/ai-privacy';
 import { jstCalendarDate } from '@/lib/datetime';
 import { FieldValue } from 'firebase-admin/firestore';
 
@@ -110,9 +111,13 @@ export async function POST(request: NextRequest) {
 
     const ctx = await resolveAccessContext(uid, workspaceId);
 
+    // 貼り付けテキストは**保存済みメモより PII が濃い**（LINE 履歴そのもの）。
+    // 抽出対象に連絡先は含まれないので、送信前に電話番号・メールを伏せる（Day127）
+    const maskedContent = maskContactInfo(content);
+
     // テキスト量に応じてクレジット見積もり（UI 表示と完全一致、上限なし）
     cost = estimateAiCost({
-      inputText: content,
+      inputText: maskedContent,
       expectedOutputTokens: 1500,
       featureMultiplier: 1.2,
       maxCap: Number.POSITIVE_INFINITY,
@@ -129,7 +134,7 @@ export async function POST(request: NextRequest) {
     let raw: string;
     try {
       raw = await generateText(
-        `## 解析対象テキスト\n${content}\n\n上記の会話履歴を解析して JSON で抽出してください。`,
+        `## 解析対象テキスト\n${maskedContent}\n\n上記の会話履歴を解析して JSON で抽出してください。`,
         {
           systemInstruction: EXTRACT_SYSTEM,
           maxOutputTokens: 1500,

@@ -5,6 +5,7 @@ import { estimateAiCost } from '@/lib/ai-cost';
 import { withReservedCredits } from '../with-credits';
 import { verifyRequest, AuthError } from '../../lib/firebase-admin';
 import { resolveAccessContext } from '../../lib/access-context';
+import { maskContactInfo } from '@/lib/ai-privacy';
 
 const MAX_BYTES = 1024 * 1024; // 1MB（learn-from-text と整合）
 
@@ -52,9 +53,13 @@ export async function POST(request: NextRequest) {
 
     const ctx = await resolveAccessContext(uid, workspaceId);
 
+    // 貼り付けテキストは**保存済みメモより PII が濃い**（LINE 履歴そのもの）。
+    // 抽出対象に連絡先は含まれないので、送信前に電話番号・メールを伏せる（Day127）
+    const maskedText = maskContactInfo(text);
+
     // テキスト量に応じてクレジット見積もり（上限なし、learn-from-text と整合）
     const extractCost = estimateAiCost({
-      inputText: text,
+      inputText: maskedText,
       expectedOutputTokens: 1500,
       featureMultiplier: 1.2,
       maxCap: Number.POSITIVE_INFINITY,
@@ -64,7 +69,7 @@ export async function POST(request: NextRequest) {
       // 無料機能でも AI 原価はかかる。課金せず利用だけ記録する（Day126）
       void logAiUsage(uid, 'customer-extract');
       const raw = await generateText(
-        `## 解析対象テキスト\n${text}\n\n${hint ? `## 補足\n${hint}\n\n` : ''}上記の会話履歴から、相手（顧客）に関する情報を JSON で抽出してください。判断に迷う項目は null を返し、推測で埋めないこと。`,
+        `## 解析対象テキスト\n${maskedText}\n\n${hint ? `## 補足\n${hint}\n\n` : ''}上記の会話履歴から、相手（顧客）に関する情報を JSON で抽出してください。判断に迷う項目は null を返し、推測で埋めないこと。`,
         {
           systemInstruction: `あなたはホスト・キャバ嬢の顧客台帳作成を支援する AI です。
 LINE 等のメッセージ履歴から、相手（顧客）の情報を抽出して JSON で返します。

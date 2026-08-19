@@ -33,21 +33,35 @@ const MASKED = [
   'ai/sales-message/route.ts',
   // pickForAi（内部で maskDeep）で allowlist 抽出しているルート
   'ai/suggest/route.ts',
+  // Day127: 来店ログの memo（＝保存済みの顧客フリーテキスト）を送っていたのに
+  // 「書込み側」に分類されて素通しになっていた
+  'ai/tags/route.ts',
 ];
 
 /**
- * フリーテキスト「書込み側」の route。AI への入力はユーザー自身が貼ったテキストや
- * スクショで、保存済みの顧客フリーテキストをプロンプトに載せないためマスク対象外。
- * （ユーザー本人の入力を本人向けに処理するだけなので Day12 の想定外）
+ * ユーザーが**貼り付けたテキスト**を AI へ送る route（＝マスク必須・Day127 で分類変更）。
+ *
+ * 旧分類はこれらを「書込み側だから Day12 の想定外」としてマスク免除にしていた。
+ * だが免除の理由は「保存済みの顧客フリーテキストを載せないから」であって、
+ * **貼り付けテキスト（LINE のトーク履歴そのもの）は保存済みメモより PII が濃い**。
+ * 外部モデルに生の電話番号・メールが出ることに変わりはないので、免除は成り立たない。
+ * 抽出スキーマ側に連絡先の項目は無いため、マスクしても機能は落ちない。
  */
-const WRITE_ONLY = [
-  'ai/customer-context-extract/route.ts',
+const PASTED_TEXT_MASKED = [
   'ai/customer-extract/route.ts',
   'ai/learn-from-text/route.ts',
-  'ai/message/analyze/route.ts',
   'ai/parse/route.ts',
+];
+
+/**
+ * 画像だけを送る route。**画像内の PII は機械的にマスクできない**ため、
+ * 同意文言（AI_CONSENT_TEXT）と UI の注意書きで担保する領域として明示的に切り出す。
+ * 「マスクしているつもり」の分類に混ぜないこと。
+ */
+const IMAGE_ONLY = [
+  'ai/customer-context-extract/route.ts',
+  'ai/message/analyze/route.ts',
   'ai/profile-extract/route.ts',
-  'ai/tags/route.ts',
 ];
 
 /**
@@ -69,6 +83,10 @@ function listRouteFiles(dir: string): string[] {
   return out;
 }
 
+// Day127 追加: 「貼り付けテキストなら免除」という分類そのものが穴だった。
+// 免除の根拠は「保存済みの顧客フリーテキストを載せないから」だが、貼り付けられるのは
+// LINE のトーク履歴そのもので、保存済みメモより PII が濃い。分類を作り直した。
+
 describe('AI route の PII マスク網羅（Day12 ポリシー）', () => {
   const touching = listRouteFiles(API_ROOT)
     .filter((f) => FREE_TEXT_FIELDS.test(readFileSync(f, 'utf-8')))
@@ -76,7 +94,7 @@ describe('AI route の PII マスク網羅（Day12 ポリシー）', () => {
     .sort();
 
   it('顧客フリーテキストを扱う route はすべて分類済み（新規 route はここで落ちる）', () => {
-    const classified = new Set([...MASKED, ...WRITE_ONLY]);
+    const classified = new Set([...MASKED, ...PASTED_TEXT_MASKED, ...IMAGE_ONLY]);
     const unclassified = touching.filter((f) => !classified.has(f));
     expect(unclassified).toEqual([]);
   });
@@ -84,13 +102,21 @@ describe('AI route の PII マスク網羅（Day12 ポリシー）', () => {
   it('分類表に実在しないファイルが残っていない（削除・改名の取りこぼし検知）', () => {
     // Day103: 分類対象を「フィールド名が出てくる route」から「AI を呼ぶ全 route」へ広げたため、
     // ここはファイルの実在で判定する（route 単位の網羅は下の Day103 ブロックが担保）。
-    const all = [...MASKED, ...WRITE_ONLY, ...NO_CUSTOMER_TEXT];
+    const all = [...MASKED, ...PASTED_TEXT_MASKED, ...IMAGE_ONLY, ...NO_CUSTOMER_TEXT];
     expect(all.filter((f) => !existsSync(join(API_ROOT, f)))).toEqual([]);
   });
 
-  it.each(MASKED)('%s はマスクヘルパーを import している', (rel) => {
+  it.each([...MASKED, ...PASTED_TEXT_MASKED])('%s はマスクヘルパーを import している', (rel) => {
     const src = readFileSync(join(API_ROOT, rel), 'utf-8');
     expect(src).toMatch(/import\s*\{[^}]*(mask(Deep|ContactInfo)|pickForAi)[^}]*\}\s*from\s*'@\/lib\/ai-privacy'/);
+  });
+
+  // import だけ見ると、マスクした値を**使わずに**生のまま送っても緑になる
+  // （Day122 の教訓: ガードは「呼んでいるか」ではなく「その式が何をしているか」を見る）
+  it.each(PASTED_TEXT_MASKED)('%s は生の貼り付けテキストをプロンプトへ渡していない', (rel) => {
+    const src = readFileSync(join(API_ROOT, rel), 'utf-8');
+    expect(src).not.toMatch(/\$\{(text|content)\}/);
+    expect(src).toMatch(/masked(Text|Content)/);
   });
 
   // --- Day103 追加: フィールド名ベースの検出では拾えない穴を塞ぐ ---
@@ -110,13 +136,13 @@ describe('AI route の PII マスク網羅（Day12 ポリシー）', () => {
       expect(aiRoutes).toContain('ai/sales-message/route.ts');
     });
 
-    it('すべて MASKED / WRITE_ONLY / NO_CUSTOMER_TEXT のどれかに分類されている', () => {
-      const classified = new Set([...MASKED, ...WRITE_ONLY, ...NO_CUSTOMER_TEXT]);
+    it('すべて MASKED / PASTED_TEXT_MASKED / IMAGE_ONLY / NO_CUSTOMER_TEXT のどれかに分類されている', () => {
+      const classified = new Set([...MASKED, ...PASTED_TEXT_MASKED, ...IMAGE_ONLY, ...NO_CUSTOMER_TEXT]);
       expect(aiRoutes.filter((f) => !classified.has(f))).toEqual([]);
     });
 
     it('分類表に実在しない route が残っていない（削除・改名の取りこぼし検知）', () => {
-      const all = [...MASKED, ...WRITE_ONLY, ...NO_CUSTOMER_TEXT];
+      const all = [...MASKED, ...PASTED_TEXT_MASKED, ...IMAGE_ONLY, ...NO_CUSTOMER_TEXT];
       expect(all.filter((f) => !aiRoutes.includes(f))).toEqual([]);
       expect(new Set(all).size).toBe(all.length); // 二重分類なし
     });

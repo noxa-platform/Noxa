@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { maskContactInfo } from '@/lib/ai-privacy';
 import { generateText } from '../ai-provider';
 import { reserveAiCredit, refundAiCredit, logAiLedger } from '../../lib/credits';
 import { estimateAiCost } from '@/lib/ai-cost';
@@ -18,8 +19,10 @@ export async function POST(request: NextRequest) {
       ? `\nワークスペース内で使用中のタグ一覧:\n[${existingTags.join(', ')}]\n\nできるだけ既存タグから選んでください。新しいタグを作る場合は既存タグと表記を統一してください。`
       : '';
 
+    // 来店ログの memo は**保存済みの顧客フリーテキスト**（Day12 ポリシーのマスク対象）。
+    // 旧実装は「書き込み側」として分類され素通しになっていた（Day127 で是正）
     const logsContext = Array.isArray(logs)
-      ? logs.map((l: Record<string, unknown>) => `${l.type}: ${l.memo || ''} (場所: ${l.place || '不明'})`).join('\n')
+      ? maskContactInfo(logs.map((l: Record<string, unknown>) => `${l.type}: ${l.memo || ''} (場所: ${l.place || '不明'})`).join('\n'))
       : 'ログなし';
 
     // タグ生成は軽量なのでベース最小だが、ログ数に比例

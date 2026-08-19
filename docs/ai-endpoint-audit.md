@@ -41,10 +41,14 @@
 
 ## 残っている課題（未対応・要判断）
 
-1. **PII マスクを通していない経路がある**（customer-extract / customer-context-extract /
-   parse / profile-extract / insights-narrative / tags / learn-from-text）。
-   顧客の自由テキストや画像をそのまま外部モデルへ送っている可能性がある。
-   `src/lib/ai-privacy.ts` の適用範囲を経路ごとに確認すること。**法務リスクとして最優先**。
+1. ~~PII マスクを通していない経路がある~~ → **Day127 で対応済み**。
+   分類ガード（`test/lib/ai-pii-mask-coverage.test.ts`）自体は Day99/103 から存在したが、
+   **「ユーザーが貼り付けたテキストは免除」という分類が穴**だった。免除の根拠は
+   「保存済みの顧客フリーテキストを載せないから」なのに、貼り付けられるのは LINE の
+   トーク履歴そのもの＝保存済みメモより PII が濃い。`customer-extract` / `learn-from-text` /
+   `parse` にマスクを適用し、来店ログの memo を素通ししていた `tags` を MASKED へ再分類。
+   画像のみの 3 経路は**機械的にマスク不能**なので `IMAGE_ONLY` として明示的に切り出し、
+   同意文言と UI の注意書きで担保する領域だと分かるようにした。
 2. **画像解析（analyzeImages）が無料のまま**。テキストより原価が 1 桁重い。
    `customer-context-extract` / `profile-extract` は課金対象にするかの判断が要る。
 3. **生成系（サイト・LP）の課金単位**。クレジット（1 ≈ ¥0.1 原価想定）は chat 向けの尺度で、
