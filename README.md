@@ -35,7 +35,7 @@ noxa-delta.vercel.app/account/delete    ← 退会
 
 ## Firebase
 
-**`noxa-platform`** プロジェクトを yorulog / nomishugy と共有（旧 `minami-bar-guide` は legacy エイリアスのみ・未使用）。
+**`noxa-platform`** プロジェクトを yorulog / nomishugy と共有（旧 `minami-bar-guide` は移行完了済み。`.firebaserc` の legacy エイリアスも 2026-08-19 に削除）。
 - account_users / account_subscriptions / account_iap_transactions 等の共通 doc を直接読み書き
 - **firestore.rules / Cloud Functions の正本はこのリポ**（`firestore.rules`・`functions/`）。
   デプロイ: `firebase deploy --only firestore:rules` / `firebase deploy --only functions:<name>`（一括デプロイ禁止・名指しのみ）

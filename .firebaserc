@@ -1,6 +1,5 @@
 {
   "projects": {
-    "default": "noxa-platform",
-    "legacy": "minami-bar-guide"
+    "default": "noxa-platform"
   }
 }
