@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation';
 import { addDoc, collection, doc, serverTimestamp, setDoc } from 'firebase/firestore';
 import type { User } from 'firebase/auth';
 import { db } from '@/lib/firebase/config';
+import { shopCodeFromId } from '@/lib/shop-identity';
 import { AuthGuard } from '@/components/AuthGuard';
 import { AccountShell } from '@/components/AccountShell';
 
@@ -51,6 +52,10 @@ async function createShop(uid: string, name: string, biz: string, area: string, 
     createdAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
   });
+  // 店舗コードを保存（doc id から決定的に導出＝改名しても不変・Day126）。
+  // 保存しておくとコード検索や帳票からの逆引きができる（表示は導出でも出せる）
+  await setDoc(ref, { shopCode: shopCodeFromId(ref.id) }, { merge: true });
+
   // オーナーをメンバーに
   await setDoc(doc(db, `shop_shops/${ref.id}/members/${uid}`), { role: 'owner', joinedAt: serverTimestamp() });
 

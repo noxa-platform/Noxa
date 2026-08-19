@@ -7,6 +7,7 @@ import { AuthGuard } from '@/components/AuthGuard';
 import { AccountShell } from '@/components/AccountShell';
 import { useShopConfig, DEFAULT_MODULES, DEFAULT_TERMS, DEFAULT_TRANSPORT_TYPES, DEFAULT_INVENTORY_CATEGORIES, type ModuleCfg, type RoleWage, type SalesAttribution, type ChoiceItem } from '@/lib/shopConfig';
 import { DEFAULT_NOMINATION_RULE, type NominationBasis, type NominationRule } from '@/lib/lexicon/nomination-rule';
+import { shopCodeFromId } from '@/lib/shop-identity';
 import { MembersSection } from '@/components/store/MembersSection';
 import { describeFirestoreError } from '@/lib/firestore-error';
 
@@ -108,6 +109,18 @@ function SettingsForm({ shopId, myUid, config, save }: {
       <p style={{ color: 'var(--noxa-text-muted)', fontSize: 13, lineHeight: 1.7, margin: '0 0 22px' }}>
         業種・店舗に合わせて呼称・役職・モジュール構成・売上ルールを編集できます。料金/税/メニュー/卓名は <Link href="/pos/settings" style={{ color: 'var(--noxa-accent-primary-ink)' }}>POS設定</Link> で。
       </p>
+
+      {/* 店舗コード（改名しても不変の識別子・Day126） */}
+      <Section title="店舗コード">
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+          <code style={{ fontFamily: 'var(--noxa-font-mono)', fontSize: 18, letterSpacing: 1, padding: '8px 14px', borderRadius: 10, background: 'var(--noxa-surface-card)', border: '1px solid var(--noxa-border)' }}>{shopCodeFromId(shopId)}</code>
+          <button type="button" onClick={() => { void navigator.clipboard?.writeText(shopCodeFromId(shopId)); }}
+            style={{ padding: '8px 14px', borderRadius: 10, cursor: 'pointer', background: 'transparent', border: '1px solid var(--noxa-border)', color: 'var(--noxa-text-muted)', fontSize: 12 }}>コピー</button>
+        </div>
+        <p style={{ fontSize: 11, color: 'var(--noxa-text-faint)', margin: '8px 0 0' }}>
+          店名や業態を変えても変わらない、この店舗の永久的な番号です。サポートへの問い合わせや、店舗を増やしたとき・統合したときの照合に使います。
+        </p>
+      </Section>
 
       {/* メンバー・招待 */}
       <Section title="メンバーと招待">
