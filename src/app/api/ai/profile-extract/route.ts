@@ -10,6 +10,7 @@
 //   - 抽出結果はそのまま保存しない。クライアントが「更新しますか？」ダイアログで
 //     確認させてから saveSelfBaseStyle / updateWorkspace を呼ぶ。
 import { NextRequest, NextResponse } from 'next/server';
+import { logAiUsage } from '@/app/api/lib/credits';
 import { verifyRequest, AuthError } from '../../lib/firebase-admin';
 import { resolveAccessContext } from '../../lib/access-context';
 import { analyzeImages } from '../ai-provider';
@@ -109,6 +110,8 @@ export async function POST(request: NextRequest) {
     });
 
     return await withReservedCredits(uid, cost, async ({ ack, remaining }) => {
+      // 無料機能でも AI 原価はかかる。課金せず利用だけ記録する（Day126）
+      void logAiUsage(uid, 'profile-extract');
       const raw = await analyzeImages(images, '画像から抽出してください。', {
         systemInstruction: EXTRACT_SYSTEM_INSTRUCTION,
         maxOutputTokens: 800,

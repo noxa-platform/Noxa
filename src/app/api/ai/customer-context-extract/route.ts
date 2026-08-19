@@ -10,6 +10,7 @@
 // - 既存顧客リストを受け取れば「nameHint と部分一致する顧客」の候補を返す
 // - 全フィールドが空（= 顧客情報を含まない画像）なら hasContent=false で返す
 import { NextRequest, NextResponse } from 'next/server';
+import { logAiUsage } from '@/app/api/lib/credits';
 import { verifyRequest, AuthError } from '../../lib/firebase-admin';
 import { resolveAccessContext } from '../../lib/access-context';
 import { analyzeImages } from '../ai-provider';
@@ -158,6 +159,8 @@ export async function POST(request: NextRequest) {
     });
 
     return await withReservedCredits(uid, cost, async ({ ack, remaining }) => {
+      // 無料機能でも AI 原価はかかる。課金せず利用だけ記録する（Day126）
+      void logAiUsage(uid, 'customer-context-extract');
       const raw = await analyzeImages(images, 'スクショから抽出してください。', {
         systemInstruction: EXTRACT_SYSTEM_INSTRUCTION,
         maxOutputTokens: 1200,

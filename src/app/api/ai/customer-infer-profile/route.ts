@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { logAiUsage } from '@/app/api/lib/credits';
 import { generateText } from '../ai-provider';
 import { withReservedCredits } from '../with-credits';
 import {
@@ -156,6 +157,8 @@ export async function POST(request: NextRequest) {
     });
 
     return await withReservedCredits(uid, cost, async ({ ack, remaining }) => {
+      // 無料機能でも AI 原価はかかる。課金せず利用だけ記録する（Day126）
+      void logAiUsage(uid, 'customer-infer-profile');
       const raw = await generateText(
         `## 既存プロフィール\n${profileForAi}\n\n## 接触ログ（古い → 新しい）\n${maskedLogsForAi}\n\n上記から、この顧客の AI 学習フィールドを推定してください。判断材料が薄い項目は null / 空配列で返してください。`,
         {

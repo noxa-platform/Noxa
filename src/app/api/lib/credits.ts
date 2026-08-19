@@ -20,13 +20,34 @@ export async function logAiLedger(
   feature: string,
   amount: number,
 ): Promise<void> {
+  return writeLedgerEntry(uid, feature, Math.max(1, Math.floor(amount)), true);
+}
+
+/**
+ * **課金しない AI 利用の記録**（Day126）。
+ *
+ * 「補助機能は無料・生成系は有料」で配る方針だが、無料にしても**原価はかかる**。
+ * 旧実装では 8 経路（briefing / customer-extract / parse / profile-extract /
+ * insights-narrative / seating-suggest / customer-infer-profile / customer-context-extract）が
+ * クレジット消費も台帳記録も無く LLM を呼んでおり、**1 店舗あたりの AI 原価が
+ * 一切見えない**状態だった。無料配布は原価が見えて初めて上限を決められる。
+ *
+ * 課金は行わず、`charged: false` / `amount: 0` で「使われた事実」だけを残す。
+ * 合計は amount の和なので、既存の請求集計には影響しない。
+ */
+export async function logAiUsage(uid: string, feature: string): Promise<void> {
+  return writeLedgerEntry(uid, feature, 0, false);
+}
+
+async function writeLedgerEntry(uid: string, feature: string, amount: number, charged: boolean): Promise<void> {
   try {
     const db = getAdminDb();
     const ref = db.collection(`account_credit_ledger/${uid}/entries`).doc();
     await ref.set({
       service: 'noxa',
       feature,
-      amount: Math.max(1, Math.floor(amount)),
+      amount,
+      charged,
       createdAt: FieldValue.serverTimestamp(),
     });
   } catch (error) {

@@ -4,6 +4,7 @@
 // それを AI に投げて「今週やるべき動き」を short narrative にまとめてもらう。
 // 元の RecommendedAction より絞り込んだ「次の 1 手」を返す設計。
 import { NextRequest, NextResponse } from 'next/server';
+import { logAiUsage } from '@/app/api/lib/credits';
 import { verifyRequest, AuthError } from '../../lib/firebase-admin';
 import { resolveAccessContext } from '../../lib/access-context';
 import { generateText } from '../ai-provider';
@@ -104,6 +105,8 @@ ${(['vip', 'needs_follow', 'growing', 'new_or_dormant'] as const)
     });
 
     return await withReservedCredits(uid, cost, async ({ ack, remaining }) => {
+      // 無料機能でも AI 原価はかかる。課金せず利用だけ記録する（Day126）
+      void logAiUsage(uid, 'insights-narrative');
       const raw = await generateText(userPrompt, {
         systemInstruction,
         maxOutputTokens: 600,

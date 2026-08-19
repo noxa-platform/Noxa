@@ -9,6 +9,7 @@
 // クライアント側でも sanitizeAiPlan（純ロジック）で制約違反（ロック/除外/BOSS/
 // 本指名引き剥がし）を落とすハイブリッド構成。
 import { NextRequest, NextResponse } from 'next/server';
+import { logAiUsage } from '@/app/api/lib/credits';
 import { verifyRequest, AuthError } from '../../lib/firebase-admin';
 import { resolveAccessContext } from '../../lib/access-context';
 import { generateText } from '../ai-provider';
@@ -105,6 +106,8 @@ export async function POST(request: NextRequest) {
     });
 
     return await withReservedCredits(uid, cost, async ({ ack, remaining }) => {
+      // 無料機能でも AI 原価はかかる。課金せず利用だけ記録する（Day126）
+      void logAiUsage(uid, 'seating-suggest');
       const raw = await generateText(userPrompt, {
         systemInstruction: SYSTEM_INSTRUCTION,
         maxOutputTokens: 700,

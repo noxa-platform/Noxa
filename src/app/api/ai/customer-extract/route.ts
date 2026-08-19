@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { logAiUsage } from '@/app/api/lib/credits';
 import { generateText } from '../ai-provider';
 import { estimateAiCost } from '@/lib/ai-cost';
 import { withReservedCredits } from '../with-credits';
@@ -60,6 +61,8 @@ export async function POST(request: NextRequest) {
     });
 
     return await withReservedCredits(uid, extractCost, async ({ ack, remaining }) => {
+      // 無料機能でも AI 原価はかかる。課金せず利用だけ記録する（Day126）
+      void logAiUsage(uid, 'customer-extract');
       const raw = await generateText(
         `## 解析対象テキスト\n${text}\n\n${hint ? `## 補足\n${hint}\n\n` : ''}上記の会話履歴から、相手（顧客）に関する情報を JSON で抽出してください。判断に迷う項目は null を返し、推測で埋めないこと。`,
         {

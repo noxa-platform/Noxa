@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { logAiUsage } from '@/app/api/lib/credits';
 import { generateText } from '../ai-provider';
 import { estimateAiCost } from '@/lib/ai-cost';
 import { withReservedCredits } from '../with-credits';
@@ -46,6 +47,8 @@ export async function POST(request: NextRequest) {
     });
 
     return await withReservedCredits(uid, cost, async ({ ack, remaining }) => {
+      // 無料機能でも AI 原価はかかる。課金せず利用だけ記録する（Day126）
+      void logAiUsage(uid, 'parse');
       const raw = await generateText(
         `## 発話\n${text}\n\n上記の発話を解析し、下記スキーマの JSON のみを返してください（前後の説明文やコードフェンスは禁止）。`,
         {

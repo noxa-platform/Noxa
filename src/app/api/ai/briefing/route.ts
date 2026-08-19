@@ -6,6 +6,7 @@
 //
 // クレジット消費: estimateAiCost で動的算出（featureMultiplier 1.2）
 import { NextRequest, NextResponse } from 'next/server';
+import { logAiUsage } from '@/app/api/lib/credits';
 import { generateText } from '../ai-provider';
 import { estimateAiCost } from '@/lib/ai-cost';
 import { withReservedCredits } from '../with-credits';
@@ -112,6 +113,8 @@ export async function POST(request: NextRequest) {
     });
 
     return await withReservedCredits(uid, cost, async ({ ack, remaining }) => {
+      // 無料機能でも AI 原価はかかる。課金せず利用だけ記録する（Day126）
+      void logAiUsage(uid, 'briefing');
       const raw = await generateText(
         `# 顧客情報\n${context}\n\n上記の顧客について、今日の会話前ブリーフィングを JSON で出力してください。`,
         {
