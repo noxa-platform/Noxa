@@ -45,16 +45,20 @@ type Daily = { dateKey: string; amount: number; count: number };
 function makeDb(seed: Record<string, Doc> = {}) {
   const store: Record<string, Doc | undefined> = { ...seed };
   const entries = () => Object.entries(store) as [string, Doc][];
-  type Cond = { field: string; op: string; value: { toMillis(): number } };
+  type Cond = { field: string; op: string; value: unknown };
   const match = (d: Doc, conds: Cond[]) => conds.every((c) => {
     const v = d[c.field] as { toMillis?: () => number } | undefined;
+    // 等価条件（出所の絞り込み・P128）。時刻でないフィールドも扱えるようにする
+    if (c.op === '==') return d[c.field] === c.value;
     if (!v || typeof v.toMillis !== 'function') return false;
-    return c.op === '>=' ? v.toMillis() >= c.value.toMillis() : v.toMillis() < c.value.toMillis();
+    const bound = (c.value as { toMillis(): number }).toMillis();
+    return c.op === '>=' ? v.toMillis() >= bound : v.toMillis() < bound;
   });
   const inColl = (cp: string) => entries().filter(([k]) => k.startsWith(cp + '/') && !k.slice(cp.length + 1).includes('/'));
   const queryOn = (cp: string, conds: Cond[]) => ({
     where: (field: string, op: string, value: Cond['value']) => queryOn(cp, [...conds, { field, op, value }]),
-    count: () => ({ get: async () => ({ data: () => ({ count: inColl(cp).length }) }) }),
+    // count() にも条件を効かせる（当店由来だけを数えるようになったため・P128）
+    count: () => ({ get: async () => ({ data: () => ({ count: inColl(cp).filter(([, d]) => match(d, conds)).length }) }) }),
     get: async () => ({ docs: inColl(cp).filter(([, d]) => match(d, conds)).map(([k, d]) => ({ id: k.slice(cp.length + 1), ref: { path: k }, data: () => d })) }),
   });
   const groupOn = (name: string, conds: Cond[]) => ({
@@ -199,12 +203,14 @@ describe('team/member-stats POST（キャスト別 当月成績）', () => {
   });
 
   describe('売上・組数の集計', () => {
+    // ログ・日売には出所（shopId）が入る。CF の投影が最初から刻んでいる値で、
+    // これが当店と一致するものだけを成績に数える（P128）
     const logs = {
       // personal_customers/{castUid}/items/{cid}/logs/{lid}
-      'personal_customers/cast1/items/c1/logs/l1': { salesAmount: 10000, type: 'visit', datetime: ts('2026-08-03T21:00') },
-      'personal_customers/cast1/items/c1/logs/l2': { salesAmount: 5000, type: 'outside', datetime: ts('2026-08-03T23:00') },
-      'personal_customers/cast1/items/c1/logs/l3': { salesAmount: 0, type: 'line', datetime: ts('2026-08-04T12:00') },
-      'personal_customers/cast2/items/c9/logs/l1': { salesAmount: 30000, type: 'visit', datetime: ts('2026-08-05T20:00') },
+      'personal_customers/cast1/items/c1/logs/l1': { shopId: 's1', salesAmount: 10000, type: 'visit', datetime: ts('2026-08-03T21:00') },
+      'personal_customers/cast1/items/c1/logs/l2': { shopId: 's1', salesAmount: 5000, type: 'outside', datetime: ts('2026-08-03T23:00') },
+      'personal_customers/cast1/items/c1/logs/l3': { shopId: 's1', salesAmount: 0, type: 'line', datetime: ts('2026-08-04T12:00') },
+      'personal_customers/cast2/items/c9/logs/l1': { shopId: 's1', salesAmount: 30000, type: 'visit', datetime: ts('2026-08-05T20:00') },
     };
 
     it('顧客ログを castUid 別に合算し、組数は visit/outside のみ数える', async () => {
@@ -217,8 +223,8 @@ describe('team/member-stats POST（キャスト別 当月成績）', () => {
     it('対象月の外のログは含めない', async () => {
       mocks.getDb.mockReturnValue(makeDb({
         ...BASE,
-        'personal_customers/cast1/items/c1/logs/old': { salesAmount: 99999, type: 'visit', datetime: ts('2026-07-31T20:00') },
-        'personal_customers/cast1/items/c1/logs/new': { salesAmount: 1000, type: 'visit', datetime: ts('2026-08-10T20:00') },
+        'personal_customers/cast1/items/c1/logs/old': { shopId: 's1', salesAmount: 99999, type: 'visit', datetime: ts('2026-07-31T20:00') },
+        'personal_customers/cast1/items/c1/logs/new': { shopId: 's1', salesAmount: 1000, type: 'visit', datetime: ts('2026-08-10T20:00') },
       }).db);
       const m = await membersOf(await POST(req(body)));
       expect(m.find((x) => x.uid === 'cast1')?.monthSales).toBe(1000);
@@ -227,8 +233,8 @@ describe('team/member-stats POST（キャスト別 当月成績）', () => {
     it('personal_customers 配下でない logs（他モデル）と対象外キャストの logs は混ぜない', async () => {
       mocks.getDb.mockReturnValue(makeDb({
         ...BASE,
-        'shop_shops/s1/customers/c1/logs/l1': { salesAmount: 777777, type: 'visit', datetime: ts('2026-08-03T21:00') },
-        'personal_customers/acc1/items/c1/logs/l1': { salesAmount: 555555, type: 'visit', datetime: ts('2026-08-03T21:00') },
+        'shop_shops/s1/customers/c1/logs/l1': { shopId: 's1', salesAmount: 777777, type: 'visit', datetime: ts('2026-08-03T21:00') },
+        'personal_customers/acc1/items/c1/logs/l1': { shopId: 's1', salesAmount: 555555, type: 'visit', datetime: ts('2026-08-03T21:00') },
       }).db);
       const m = await membersOf(await POST(req(body)));
       expect(m.every((x) => x.monthSales === 0)).toBe(true);
@@ -237,19 +243,19 @@ describe('team/member-stats POST（キャスト別 当月成績）', () => {
     it('顧客なし日売（personal_sales）を合算し、groupCount 未設定は 1 組として数える', async () => {
       mocks.getDb.mockReturnValue(makeDb({
         ...BASE,
-        'personal_sales/cast1/items/s1': { salesAmount: 8000, datetime: ts('2026-08-06T22:00') },
-        'personal_sales/cast1/items/s2': { salesAmount: 2000, groupCount: 3, datetime: ts('2026-08-06T23:00') },
-        'personal_sales/cast1/items/old': { salesAmount: 99999, datetime: ts('2026-07-01T22:00') },
+        'personal_sales/cast1/items/s1': { shopId: 's1', salesAmount: 8000, datetime: ts('2026-08-06T22:00') },
+        'personal_sales/cast1/items/s2': { shopId: 's1', salesAmount: 2000, groupCount: 3, datetime: ts('2026-08-06T23:00') },
+        'personal_sales/cast1/items/old': { shopId: 's1', salesAmount: 99999, datetime: ts('2026-07-01T22:00') },
       }).db);
       const m = await membersOf(await POST(req(body)));
       expect(m.find((x) => x.uid === 'cast1')).toMatchObject({ monthSales: 10000, monthGroupCount: 4 });
     });
 
-    it('顧客数は personal_customers/{castUid}/items の件数（count 集計）', async () => {
+    it('顧客数は personal_customers/{castUid}/items のうち当店から渡した分（count 集計）', async () => {
       mocks.getDb.mockReturnValue(makeDb({
         ...BASE,
-        'personal_customers/cast1/items/c1': { name: 'A' },
-        'personal_customers/cast1/items/c2': { name: 'B' },
+        'personal_customers/cast1/items/c1': { name: 'A', assignedFromShopId: 's1' },
+        'personal_customers/cast1/items/c2': { name: 'B', assignedFromShopId: 's1' },
       }).db);
       const m = await membersOf(await POST(req(body)));
       expect(m.find((x) => x.uid === 'cast1')?.customerCount).toBe(2);
@@ -263,14 +269,87 @@ describe('team/member-stats POST（キャスト別 当月成績）', () => {
     });
   });
 
+  // 掛け持ち（増店）でデータが追従するか（P128）。
+  // 個人台帳は「そのキャストの全部」であって「当店の分」ではない。旧実装は castUid が
+  // 当店のメンバーかしか見ておらず、他店の売上と本人の副業が当店の成績・日次内訳・
+  // 担当顧客数に加算されていた（給与査定と評価の材料）。
+  describe('出所（どの店の記録か）で当店分に絞る', () => {
+    it('★他店の来店ログは当店の売上・組数に入らない', async () => {
+      mocks.getDb.mockReturnValue(makeDb({
+        ...BASE,
+        'personal_customers/cast1/items/c1/logs/mine': { shopId: 's1', salesAmount: 10000, type: 'visit', datetime: ts('2026-08-03T21:00') },
+        'personal_customers/cast1/items/c2/logs/other': { shopId: 's2', salesAmount: 90000, type: 'visit', datetime: ts('2026-08-03T22:00') },
+      }).db);
+      const m = await membersOf(await POST(req(body)));
+      expect(m.find((x) => x.uid === 'cast1')).toMatchObject({ monthSales: 10000, monthGroupCount: 1 });
+    });
+
+    it('★出所の無い来店ログ（店を経由していない個人の記録）も当店に入れない', async () => {
+      mocks.getDb.mockReturnValue(makeDb({
+        ...BASE,
+        'personal_customers/cast1/items/c1/logs/personal': { salesAmount: 50000, type: 'visit', datetime: ts('2026-08-03T21:00') },
+      }).db);
+      const m = await membersOf(await POST(req(body)));
+      expect(m.find((x) => x.uid === 'cast1')?.monthSales).toBe(0);
+    });
+
+    it('★個人ワークスペースの手入力売上（shopId なし）と他店の控えを日売に足さない', async () => {
+      // SalesClient は個人モードで shopId を書かずに personal_sales へ直接 addDoc する。
+      // 本人の副業の数字が店の成績表に載っていた
+      mocks.getDb.mockReturnValue(makeDb({
+        ...BASE,
+        'personal_sales/cast1/items/mine': { shopId: 's1', salesAmount: 8000, datetime: ts('2026-08-06T22:00') },
+        'personal_sales/cast1/items/other': { shopId: 's2', salesAmount: 70000, datetime: ts('2026-08-06T22:30') },
+        'personal_sales/cast1/items/private': { salesAmount: 60000, datetime: ts('2026-08-06T23:00') },
+      }).db);
+      const m = await membersOf(await POST(req(body)));
+      expect(m.find((x) => x.uid === 'cast1')).toMatchObject({ monthSales: 8000, monthGroupCount: 1 });
+    });
+
+    it('★担当顧客数は当店から渡した分だけ（他店の客・本人が個人で登録した客を数えない）', async () => {
+      mocks.getDb.mockReturnValue(makeDb({
+        ...BASE,
+        'personal_customers/cast1/items/c1': { name: 'A', assignedFromShopId: 's1' },
+        'personal_customers/cast1/items/c2': { name: 'B', assignedFromShopId: 's2' },
+        'personal_customers/cast1/items/c3': { name: 'C' },
+      }).db);
+      const m = await membersOf(await POST(req(body)));
+      expect(m.find((x) => x.uid === 'cast1')?.customerCount).toBe(1);
+    });
+
+    it('★日次内訳（全キャスト合算）にも他店・個人の分が乗らない', async () => {
+      mocks.getDb.mockReturnValue(makeDb({
+        ...BASE,
+        'personal_customers/cast1/items/c1/logs/mine': { shopId: 's1', salesAmount: 10000, type: 'visit', datetime: ts('2026-08-05T21:00') },
+        'personal_customers/cast2/items/c9/logs/other': { shopId: 's2', salesAmount: 20000, type: 'visit', datetime: ts('2026-08-05T22:00') },
+        'personal_sales/cast1/items/private': { salesAmount: 5000, datetime: ts('2026-08-05T23:00') },
+      }).db);
+      expect(await dailyOf(await POST(req(body)))).toEqual([
+        { dateKey: '2026-08-05', amount: 10000, count: 1 },
+      ]);
+    });
+
+    it('★範囲外は incomplete（読めなかった）に混ぜない — 集計範囲は scopeNote で伝える', async () => {
+      // 「読めなかったので数字が少ない」と「定義として範囲外」は受け手の取るべき行動が違う
+      mocks.getDb.mockReturnValue(makeDb({
+        ...BASE,
+        'personal_customers/cast1/items/c1/logs/other': { shopId: 's2', salesAmount: 90000, type: 'visit', datetime: ts('2026-08-03T21:00') },
+      }).db);
+      const json = await (await POST(req(body))).json();
+      expect(json.incomplete).toBeUndefined();
+      expect(typeof json.scopeNote).toBe('string');
+      expect(json.scopeNote).toMatch(/当店/);
+    });
+  });
+
   describe('dailyTotals（日次内訳）', () => {
     it('JST 暦日キーで全キャスト合算し、dateKey 昇順で返す', async () => {
       mocks.getDb.mockReturnValue(makeDb({
         ...BASE,
-        'personal_customers/cast1/items/c1/logs/l1': { salesAmount: 10000, type: 'visit', datetime: ts('2026-08-05T21:00') },
-        'personal_customers/cast2/items/c9/logs/l1': { salesAmount: 20000, type: 'visit', datetime: ts('2026-08-05T22:00') },
-        'personal_customers/cast1/items/c1/logs/l2': { salesAmount: 3000, type: 'line', datetime: ts('2026-08-03T13:00') },
-        'personal_sales/cast1/items/s1': { salesAmount: 5000, groupCount: 2, datetime: ts('2026-08-05T23:00') },
+        'personal_customers/cast1/items/c1/logs/l1': { shopId: 's1', salesAmount: 10000, type: 'visit', datetime: ts('2026-08-05T21:00') },
+        'personal_customers/cast2/items/c9/logs/l1': { shopId: 's1', salesAmount: 20000, type: 'visit', datetime: ts('2026-08-05T22:00') },
+        'personal_customers/cast1/items/c1/logs/l2': { shopId: 's1', salesAmount: 3000, type: 'line', datetime: ts('2026-08-03T13:00') },
+        'personal_sales/cast1/items/s1': { shopId: 's1', salesAmount: 5000, groupCount: 2, datetime: ts('2026-08-05T23:00') },
       }).db);
       expect(await dailyOf(await POST(req(body)))).toEqual([
         { dateKey: '2026-08-03', amount: 3000, count: 0 },   // line は組数に数えない
@@ -281,7 +360,7 @@ describe('team/member-stats POST（キャスト別 当月成績）', () => {
     it('深夜（JST 0〜9時）のログは JST 暦日で当日側に入る（UTC 前日にならない）', async () => {
       mocks.getDb.mockReturnValue(makeDb({
         ...BASE,
-        'personal_customers/cast1/items/c1/logs/l1': { salesAmount: 4000, type: 'visit', datetime: ts('2026-08-08T02:30') },
+        'personal_customers/cast1/items/c1/logs/l1': { shopId: 's1', salesAmount: 4000, type: 'visit', datetime: ts('2026-08-08T02:30') },
       }).db);
       expect((await dailyOf(await POST(req(body))))[0].dateKey).toBe('2026-08-08');
     });
@@ -331,8 +410,14 @@ describe('team/member-stats POST（キャスト別 当月成績）', () => {
       db.collection = ((cp: string) => {
         const q = orig(cp);
         if (!cp.startsWith('personal_customers/')) return q;
-        return { ...q, count: () => ({ get: async () => { throw new Error('count failed'); } }) };
-      }) as typeof db.collection;
+        // where() を挟んでも壊れた count() が残るようにする（出所で絞るようになったため・P128）
+        const broken: { where: () => unknown; count: () => { get: () => Promise<never> }; get: typeof q.get } = {
+          where: () => broken,
+          count: () => ({ get: async () => { throw new Error('count failed'); } }),
+          get: q.get,
+        };
+        return broken;
+      }) as unknown as typeof db.collection;
       mocks.getDb.mockReturnValue(db);
       const json = await (await POST(req(body))).json();
       expect(json.incomplete).toContain('顧客数');

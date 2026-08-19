@@ -105,12 +105,22 @@ async function writeCustomerLog(shopId: string, cast: string, customerId: string
         updatedAt: FieldValue.serverTimestamp(),
       }, { merge: true });
     } else {
-      // 既存台帳は差額のみ反映（再発火=0、金額修正=差額、初ログ=満額＋来店+1）
+      // 既存台帳は差額のみ反映（再発火=0、金額修正=差額、初ログ=満額＋来店+1）。
+      // 出所（assignedFromShopId）は**未記入のときだけ**補う（P128）。
+      // オーナー向けの俯瞰は台帳をこのフィールドで当店分に絞るので、刻印が欠けた doc は
+      // 当店の担当顧客数から静かに漏れる。作成経路（この関数と assign-customer）は
+      // 最初から刻んでいるが、外部で作られた doc・統合で移ってきた doc など
+      // 刻印の無い台帳が来店したときに拾えるようにする。
+      // **既存の値は上書きしない**——客が担当キャストを追って別の店に来ても、
+      // その台帳の出自は最初に渡した店のままにする（後から来た店が既存店の顧客数を奪わない）。
+      const hasOrigin = typeof custSnap.data()?.assignedFromShopId === 'string'
+        && (custSnap.data()?.assignedFromShopId as string).trim() !== '';
       tx.set(custRef, {
         totalSales: FieldValue.increment(amount - prevAmount),
         visitCount: FieldValue.increment(prevLogged ? 0 : 1),
         lastContactAt: datetime,
         mainCastUid: cast,
+        ...(hasOrigin ? {} : { assignedFromShopId: shopId }),
         updatedAt: FieldValue.serverTimestamp(),
       }, { merge: true });
     }

@@ -8,6 +8,7 @@ import { useShopId } from '@/lib/useShopId';
 import { useShopRole, hasShopRole } from '@/lib/useShopRole';
 import { rankToStars, starsToRank } from '@/lib/customerRank';
 import { describeFirestoreError } from '@/lib/firestore-error';
+import { SHOP_SCOPE_NOTE } from '@/lib/shop-scope';
 import type { User } from 'firebase/auth';
 
 /**
@@ -355,7 +356,7 @@ function TeamStatsPanel({ shopId, user }: { shopId: string; user: User }) {
               <div style={{ borderTop: '1px solid var(--noxa-divider)', padding: '10px 14px', display: 'flex', flexDirection: 'column', gap: 6 }}>
                 {selBusy ? <span style={{ fontSize: 12, color: 'var(--noxa-text-faint)' }}>読み込み中…</span>
                   : selErr ? <span role="alert" style={{ fontSize: 12, color: 'var(--noxa-status-error)' }}>{selErr}</span>
-                  : (selCustomers ?? []).length === 0 ? <span style={{ fontSize: 12, color: 'var(--noxa-text-faint)' }}>担当顧客はまだいません。</span>
+                  : (selCustomers ?? []).length === 0 ? <span style={{ fontSize: 12, color: 'var(--noxa-text-faint)' }}>当店から渡した担当顧客はまだいません。</span>
                   : (selCustomers ?? []).slice(0, 30).map((c) => (
                     <div key={c.id} style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: 13 }}>
                       <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c.name}</span>
@@ -371,6 +372,7 @@ function TeamStatsPanel({ shopId, user }: { shopId: string; user: User }) {
       </div>
       <p style={{ margin: 0, fontSize: 11, color: 'var(--noxa-text-faint)', lineHeight: 1.6 }}>
         ※ 集計は各キャストの個人顧客台帳＋顧客なし日売（POS会計の自動転記を含む）。顧客の担当割当は「顧客一覧」タブのカード→「担当キャストへ割当」。
+        <br />※ {SHOP_SCOPE_NOTE}
       </p>
     </section>
   );

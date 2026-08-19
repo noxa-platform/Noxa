@@ -4,11 +4,17 @@
 // （rules 迂回のため、呼び出し元が shop の owner/manager かつ castUid がその shop の
 //  メンバーであることをサーバ側で必ず検証する）。
 //
-// POST { shopId, castUid } -> { customers: [{ id, name, colorTag, rank, lastContactAt(ISO), totalSales }] }
+// POST { shopId, castUid } -> { customers: [{ id, name, colorTag, rank, lastContactAt(ISO), totalSales }], scopeNote }
+//
+// 範囲（P128）: **当店から渡った客だけ**を返す。台帳はキャスト個人のもので、
+// 掛け持ち先で作られた客も本人が個人で登録した客も同じ場所に入っている。
+// 旧実装は全件を返しており、オーナーが**他店の顧客名簿（氏名・累計売上・最終接触日）を
+// 閲覧できる**状態だった。これは数字のズレではなく漏洩なので、絞り込みは必須。
 
 import { NextRequest, NextResponse } from 'next/server';
 import { Timestamp } from 'firebase-admin/firestore';
 import { verifyRequest, getAdminDb, AuthError } from '../../lib/firebase-admin';
+import { belongsToShop, SHOP_SCOPE_NOTE } from '@/lib/shop-scope';
 
 export async function POST(request: NextRequest) {
   try {
@@ -45,7 +51,12 @@ export async function POST(request: NextRequest) {
     }
 
     const custSnap = await db.collection(`personal_customers/${castUid}/items`).get();
-    const customers = custSnap.docs.map((c) => {
+    const customers = custSnap.docs
+      // 出所が当店だと確認できたものだけ（P128）。判定は shop-scope に一本化。
+      // 除外件数は返さない——「他店の客が N 件あります」は掛け持ち先の露見で、
+      // 漏洩を別の漏洩に置き換えることになる。範囲は scopeNote で定義だけ伝える。
+      .filter((c) => belongsToShop(c.data() as { assignedFromShopId?: unknown }, shopId))
+      .map((c) => {
       const d = c.data() as {
         name?: string; colorTag?: string; rank?: string;
         lastContactAt?: Timestamp; totalSales?: number;
@@ -61,7 +72,7 @@ export async function POST(request: NextRequest) {
     });
     customers.sort((a, b) => b.totalSales - a.totalSales);
 
-    return NextResponse.json({ customers });
+    return NextResponse.json({ customers, scopeNote: SHOP_SCOPE_NOTE });
   } catch (e) {
     if (e instanceof AuthError) {
       return NextResponse.json({ error: e.message }, { status: 401 });

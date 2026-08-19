@@ -8,6 +8,11 @@
 // POST { shopId, year?, month? }
 //   -> { members: [{ uid, name, role, customerCount, monthSales, monthGroupCount }], dailyTotals, period }
 //   period は実際に集計した年月（クライアントが「頼んだ月」と突き合わせられるように返す・Day103）
+//   scopeNote は集計範囲の説明（当店由来のみ・P128）
+//
+// 集計範囲（P128）: 個人台帳は「そのキャストの全部」であって「当店の分」ではない。
+// 掛け持ちが標準の業界なので、出所（shopId / assignedFromShopId）で当店由来だけに絞る。
+// 判定は src/lib/shop-scope.ts に一本化（ここでインライン判定を書き足さないこと）。
 
 import { NextRequest, NextResponse } from 'next/server';
 import { Timestamp } from 'firebase-admin/firestore';
@@ -15,6 +20,7 @@ import { verifyRequest, getAdminDb, AuthError } from '../../lib/firebase-admin';
 import { isSafeDocId } from '../../lib/doc-id';
 import { pickPeriodPart } from '../../lib/period';
 import { countsAsGroup } from '@/lib/log-metrics';
+import { belongsToShop, SHOP_SCOPE_NOTE } from '@/lib/shop-scope';
 
 // キャスト×顧客の集計は読み取り回数が多いので関数タイムアウトを延長。
 export const maxDuration = 60;
@@ -127,7 +133,13 @@ export async function POST(request: NextRequest) {
       if (segs[0] !== 'personal_customers') continue;
       const castUid = segs[1];
       if (!targets.has(castUid)) continue;
-      const d = l.data() as { salesAmount?: number; countAsGroup?: boolean; type?: string; datetime?: Timestamp };
+      const d = l.data() as { salesAmount?: number; countAsGroup?: boolean; type?: string; datetime?: Timestamp; shopId?: unknown };
+      // 出所が当店だと確認できたログだけ数える（P128）。
+      // 旧実装は castUid が当店のメンバーかしか見ておらず、**掛け持ち先の売上**が
+      // 当店の月間売上・組数・日次内訳に加算されていた（給与査定の材料）。
+      // ログには CF が最初から shopId を刻んでいるので、出所不明＝個人が店を経由せず
+      // 付けた記録と判断できる。範囲外なので incomplete（読めなかった）には数えない。
+      if (!belongsToShop(d, shopId)) continue;
       const cur = logsAgg.get(castUid) ?? { s: 0, g: 0 };
       const amount = d.salesAmount || 0;
       cur.s += amount;
@@ -148,10 +160,16 @@ export async function POST(request: NextRequest) {
         name = (acc?.data() as { displayName?: string } | undefined)?.displayName || castUid.slice(0, 8);
       }
 
-      // 顧客数は count() 集計（全 doc 読み込みを避ける）
+      // 顧客数は count() 集計（全 doc 読み込みを避ける）。
+      // 当店から渡った客だけを数える（P128）。旧実装は台帳の全件で、他店の客も
+      // 本人が個人で登録した客も「当店の担当顧客数」として出していた。
+      // assignedFromShopId は単一フィールドの等価比較なので既定の索引で引ける
+      // （複合インデックスの追加は不要）。
       let customerCount = 0;
       try {
-        const cnt = await db.collection(`personal_customers/${castUid}/items`).count().get();
+        const cnt = await db.collection(`personal_customers/${castUid}/items`)
+          .where('assignedFromShopId', '==', shopId)
+          .count().get();
         customerCount = cnt.data().count;
       } catch (e) {
         // 0 と「数えられなかった」を混ぜない（画面には「顧客0人」と出てしまう）
@@ -175,7 +193,12 @@ export async function POST(request: NextRequest) {
           return null;
         });
       for (const s of ssSnap?.docs ?? []) {
-        const d = s.data() as { salesAmount?: number; groupCount?: number; datetime?: Timestamp };
+        const d = s.data() as { salesAmount?: number; groupCount?: number; datetime?: Timestamp; shopId?: unknown };
+        // 出所が当店のものだけ（P128）。個人ワークスペースの手入力売上（SalesClient が
+        // shopId 無しで書く＝本人の副業）と他店の控えを店の成績から外す。
+        // クエリではなくここで絞るのは、shopId + datetime の複合インデックスを
+        // 増やさないため（1 キャスト 1 か月＝件数が小さく、絞り込みの費用が問題にならない）。
+        if (!belongsToShop(d, shopId)) continue;
         const amount = d.salesAmount || 0;
         const gc = (d.groupCount && d.groupCount > 0) ? d.groupCount : 1;
         monthSales += amount;
@@ -197,7 +220,7 @@ export async function POST(request: NextRequest) {
     // 欠けたまま「0」を成績として見せない。クライアントは incomplete があれば警告を出す
     const uniqueIncomplete = [...new Set(incomplete)];
     return NextResponse.json({
-      members, dailyTotals, period: { year, month },
+      members, dailyTotals, period: { year, month }, scopeNote: SHOP_SCOPE_NOTE,
       ...(uniqueIncomplete.length > 0 ? { incomplete: uniqueIncomplete } : {}),
     });
   } catch (e) {

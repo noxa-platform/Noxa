@@ -79,8 +79,8 @@ describe('team/cast-customers POST（担当客台帳の俯瞰・認可境界）'
   it('owner 呼び出し: マッピングと totalSales 降順ソート', async () => {
     mocks.getDb.mockReturnValue(makeDb({
       ...SHOP,
-      'personal_customers/cast1/items/c1': { name: 'アオイ', colorTag: 'red', rank: 'A', totalSales: 100, lastContactAt: Timestamp.fromMillis(0) },
-      'personal_customers/cast1/items/c2': { totalSales: 300 }, // name/colorTag/rank/lastContact 無し
+      'personal_customers/cast1/items/c1': { assignedFromShopId: 's1', name: 'アオイ', colorTag: 'red', rank: 'A', totalSales: 100, lastContactAt: Timestamp.fromMillis(0) },
+      'personal_customers/cast1/items/c2': { assignedFromShopId: 's1', totalSales: 300 }, // name/colorTag/rank/lastContact 無し
     }).db);
     const list = await custs(await POST(req({ shopId: 's1', castUid: 'cast1' })));
     expect(list.map((c) => c.id)).toEqual(['c2', 'c1']); // 売上降順
@@ -95,6 +95,34 @@ describe('team/cast-customers POST（担当客台帳の俯瞰・認可境界）'
     expect(c2.rank).toBeNull();
     expect(c2.lastContactAt).toBeNull();   // Timestamp でない→null
     expect(c2.totalSales).toBe(300);
+  });
+
+  // 台帳はキャスト個人のもので、掛け持ち先で作られた客も本人が個人で登録した客も同じ場所に入る。
+  // 旧実装は全件を返しており、オーナーが**他店の顧客名簿（氏名・累計売上・最終接触日）を
+  // 閲覧できる**状態だった。これは数字のズレではなく漏洩なので絞り込みは必須（P128）。
+  it('★当店から渡した客だけを返す（他店の客・本人が個人で登録した客を出さない）', async () => {
+    mocks.getDb.mockReturnValue(makeDb({
+      ...SHOP,
+      'personal_customers/cast1/items/mine': { assignedFromShopId: 's1', name: '当店の客', totalSales: 100 },
+      'personal_customers/cast1/items/other': { assignedFromShopId: 's2', name: '他店の客', totalSales: 900 },
+      'personal_customers/cast1/items/private': { name: '本人の客', totalSales: 800 },
+    }).db);
+    const list = await custs(await POST(req({ shopId: 's1', castUid: 'cast1' })));
+    expect(list.map((c) => c.id)).toEqual(['mine']);
+    expect(JSON.stringify(list)).not.toContain('他店の客');
+    expect(JSON.stringify(list)).not.toContain('本人の客');
+  });
+
+  it('★集計範囲を scopeNote で返す（除外件数は返さない＝掛け持ち先の露見にしない）', async () => {
+    mocks.getDb.mockReturnValue(makeDb({
+      ...SHOP,
+      'personal_customers/cast1/items/other': { assignedFromShopId: 's2', name: '他店の客', totalSales: 900 },
+    }).db);
+    const json = await (await POST(req({ shopId: 's1', castUid: 'cast1' }))).json();
+    expect(json.customers).toEqual([]);
+    expect(typeof json.scopeNote).toBe('string');
+    // 「他店の台帳が N 件あります」は掛け持ちの露見。件数の類は返さない
+    expect(Object.keys(json).sort()).toEqual(['customers', 'scopeNote']);
   });
 
   it('manager 呼び出しも許可 / owner 本人を castUid にできる', async () => {
