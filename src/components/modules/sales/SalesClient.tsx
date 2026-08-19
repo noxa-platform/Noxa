@@ -8,6 +8,7 @@ import { useShopId } from '@/lib/useShopId';
 import { businessDayKey } from '@/lib/datetime';
 import { describeFirestoreError, isPermissionDenied } from '@/lib/firestore-error';
 import { describeDelegateRequest } from '@/lib/permission-guidance';
+import { toCsv, withBom, csvFileName, type CsvColumn } from '@/lib/export/csv';
 import type { User } from 'firebase/auth';
 
 /**
@@ -88,6 +89,33 @@ export function SalesClient({ user }: { user: User }) {
     return { today, month, total, count };
   }, [sales, tk, mk]);
   const recent = useMemo(() => [...sales].sort((a, b) => (b.atMs ?? 0) - (a.atMs ?? 0)).slice(0, 40), [sales]);
+
+  /**
+   * 当月の売上を CSV で書き出す（Day126）。会計事務所・税理士へ渡す実需がある。
+   * 画面が購読しているのは当月分なので、出るのも当月分（期間をファイル名に入れて誤解を防ぐ）。
+   * 取消済みも「取消」列付きで残す——消した行が黙って消えると突合できない。
+   */
+  const downloadCsv = () => {
+    const cols: CsvColumn<Sale>[] = [
+      { header: '営業日', value: (s) => s.dayKey },
+      { header: '金額', value: (s) => s.amount },
+      { header: '担当', value: (s) => s.castName ?? '' },
+      { header: '顧客', value: (s) => s.customerName ?? '' },
+      { header: '指名区分', value: (s) => (s.nomination === 'main' ? '本指名' : s.nomination === 'inTable' ? '場内' : s.nomination === 'free' ? 'フリー' : '') },
+      { header: '同伴', value: (s) => (s.dohan ? '有' : '') },
+      { header: '未収', value: (s) => (s.unpaidAmount > 0 ? s.unpaidAmount : '') },
+      { header: '記録元', value: (s) => (s.source === 'pos' ? 'POS会計' : '手入力') },
+      { header: '取消', value: (s) => (s.voided ? '取消済' : '') },
+    ];
+    const rows = [...sales].sort((a, b) => (a.dayKey || '').localeCompare(b.dayKey || '') || (a.atMs ?? 0) - (b.atMs ?? 0));
+    const blob = new Blob([withBom(toCsv(rows, cols))], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = csvFileName(shop.shopId ? 'noxa_sales' : 'noxa_sales_personal', mk);
+    a.click();
+    URL.revokeObjectURL(url);
+  };
   const place = shop.shopId ? '店舗' : '個人';
 
   const custRef = (cid: string) => shop.shopId ? doc(db, `shop_shops/${shop.shopId}/customers/${cid}`) : null;
@@ -182,6 +210,16 @@ export function SalesClient({ user }: { user: User }) {
         {/* 期間クエリ化に伴い累計→今月件数へ（全期間集計は月次レポートで） */}
         <Kpi label="今月件数" value={`${sum.count} 件`} />
       </div>
+
+      {/* 会計事務所・税理士へ渡すための書き出し（当月分） */}
+      {sales.length > 0 && (
+        <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 14 }}>
+          <button type="button" onClick={downloadCsv}
+            style={{ padding: '8px 14px', borderRadius: 10, cursor: 'pointer', background: 'transparent', border: '1px solid var(--noxa-border)', color: 'var(--noxa-text-muted)', fontFamily: mono, fontSize: 12 }}>
+            今月分を CSV で書き出す
+          </button>
+        </div>
+      )}
 
       {loading ? (
         <div className="noxa-eyebrow" style={{ padding: '40px 0' }}>読み込み中…</div>
