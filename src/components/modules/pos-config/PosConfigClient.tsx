@@ -9,6 +9,7 @@ import { getActiveShop, pickShopId } from '@/lib/workspace';
 import { activeMembershipIds } from '@/lib/membership';
 import type { StoreConfig, MenuItemDef, MenuCategoryDef, PinnedOrderDef } from '@/lib/pos/types';
 import { createDefaultStoreConfig } from '@/lib/pos/defaultConfig';
+import { previewConfig, diffPreview } from '@/lib/pos/preview';
 import { describeFirestoreError } from '@/lib/firestore-error';
 import { describeOwnerSettingDenied } from '@/lib/permission-guidance';
 
@@ -24,6 +25,8 @@ export function PosConfigClient({ user }: { user: User }) {
   const [loading, setLoading] = useState(true);
   const [shopId, setShopId] = useState<string | null>(null);
   const [cfg, setCfg] = useState<StoreConfig | null>(null);
+  // 保存済みの設定（編集中の cfg との差額を出すため。Day127）
+  const [savedCfg, setSavedCfg] = useState<StoreConfig | null>(null);
   const [saving, setSaving] = useState(false);
   const [savedAt, setSavedAt] = useState<string | null>(null);
   const [dirty, setDirty] = useState(false);
@@ -68,7 +71,9 @@ export function PosConfigClient({ user }: { user: User }) {
         const shopDoc = shops.docs.find((d) => d.id === id);
         const snap = await getDoc(doc(db, `shop_shops/${id}/pos_config/active`));
         const base = createDefaultStoreConfig('active', shopDoc?.data().name as string | undefined);
-        setCfg(snap.exists() ? ({ ...base, ...(snap.data() as Partial<StoreConfig>) } as StoreConfig) : base);
+        const loaded = snap.exists() ? ({ ...base, ...(snap.data() as Partial<StoreConfig>) } as StoreConfig) : base;
+        setCfg(loaded);
+        setSavedCfg(loaded);
       } catch (e) { if (alive) setErr(describeFirestoreError(e, '料金設定の読み込み')); }
       finally { if (alive) setLoading(false); }
     })();
@@ -84,6 +89,7 @@ export function PosConfigClient({ user }: { user: User }) {
       await setDoc(doc(db, `shop_shops/${shopId}/pos_config/active`), { ...cfg, id: 'active', updatedAt: serverTimestamp() }, { merge: true });
       const d = new Date();
       setSavedAt(`${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`);
+      setSavedCfg(cfg);
       setDirty(false);
     } catch (e) { setErr(describeFirestoreError(e, '料金設定の保存')); }
     finally { setSaving(false); }
@@ -150,6 +156,44 @@ export function PosConfigClient({ user }: { user: User }) {
           <NumF label="閉店時刻(24h+)" value={cfg.closingHour} onChange={(v) => update({ closingHour: v })} hint="例: 翌1時=25" />
           <NumF label="初回0オーダー税率%" value={Math.round(cfg.initialNoOrderTaxRate * 100)} onChange={(v) => update({ initialNoOrderTaxRate: v / 100 })} />
         </Grid>
+      </Section>
+
+      {/* テスト伝票プレビュー（保存前に金額で確かめる・Day127） */}
+      <Section title="この設定だといくらになるか">
+        <p style={{ fontSize: 12, color: 'var(--noxa-text-muted)', margin: '0 0 10px' }}>
+          実際の会計と同じ計算で、代表的なパターンの合計を出しています。保存前にここで確かめてください。
+        </p>
+        {savedCfg && dirty && (() => {
+          const diff = diffPreview(savedCfg, cfg);
+          if (diff.length === 0) return null;
+          return (
+            <div style={{ marginBottom: 12, padding: '10px 12px', borderRadius: 10, background: 'rgba(255,193,7,0.10)', border: '1px solid var(--noxa-status-warning)' }}>
+              <div style={{ fontSize: 12, fontWeight: 700, marginBottom: 6 }}>保存すると会計金額が変わります</div>
+              {diff.map((d) => (
+                <div key={d.id} style={{ display: 'flex', justifyContent: 'space-between', gap: 10, fontSize: 12, fontFamily: mono }}>
+                  <span>{d.label}</span>
+                  <span>¥{d.before.toLocaleString('ja-JP')} → ¥{d.after.toLocaleString('ja-JP')}（{d.delta > 0 ? '+' : ''}{d.delta.toLocaleString('ja-JP')}）</span>
+                </div>
+              ))}
+            </div>
+          );
+        })()}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          {previewConfig(cfg).map((p) => (
+            <div key={p.id} style={{ padding: '10px 12px', borderRadius: 10, background: 'var(--noxa-bg-base)', border: '1px solid var(--noxa-border)' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 10 }}>
+                <span style={{ fontSize: 13, fontWeight: 700 }}>{p.label}</span>
+                <span style={{ fontSize: 15, fontFamily: mono }}>¥{p.result.currentTotal.toLocaleString('ja-JP')}</span>
+              </div>
+              <div style={{ fontSize: 11, color: 'var(--noxa-text-faint)', marginTop: 2 }}>{p.note}</div>
+              <div style={{ fontSize: 11, color: 'var(--noxa-text-muted)', marginTop: 6, display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                {p.result.breakdown.filter((b) => !b.isTotal).map((b, i) => (
+                  <span key={i}>{b.label} ¥{b.amount.toLocaleString('ja-JP')}</span>
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
       </Section>
 
       {/* 料金 */}

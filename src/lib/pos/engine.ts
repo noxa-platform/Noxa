@@ -5,7 +5,6 @@
  * 状態は NOXA 側（PosClient / Firestore）が保持する。
  */
 import type { StoreConfig } from './types';
-import { createDefaultStoreConfig } from './defaultConfig';
 
 export type CustomerType = 'initial' | 'r_within' | 'r_after' | 'regular';
 
@@ -543,7 +542,7 @@ function genId(): string {
   return `o_${__idSeq}_${Math.random().toString(36).slice(2, 8)}`;
 }
 
-// 既定 config を使った計算（呼び出し側が config を持たない場面の保険）
-export function calculateWithDefault(state: CalculatorState): CalculationResult {
-  return calculateResult(state, createDefaultStoreConfig());
-}
+// 旧 `calculateWithDefault`（既定 config での計算）は Day127 で削除した。
+// 「config を持たない場面の保険」として置かれていたが、呼び出し元はゼロで、
+// **既定料金のまま伝票を作る**入口そのものだった（Day115 / 123 で塞いだ事故と同じ形）。
+// 料金は必ずその店舗の設定で計算する。設定が読めないときは会計を止める（Day110）。
