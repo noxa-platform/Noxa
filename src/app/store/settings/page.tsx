@@ -6,12 +6,21 @@ import type { User } from 'firebase/auth';
 import { AuthGuard } from '@/components/AuthGuard';
 import { AccountShell } from '@/components/AccountShell';
 import { useShopConfig, DEFAULT_MODULES, DEFAULT_TERMS, DEFAULT_TRANSPORT_TYPES, DEFAULT_INVENTORY_CATEGORIES, type ModuleCfg, type RoleWage, type SalesAttribution, type ChoiceItem } from '@/lib/shopConfig';
+import { DEFAULT_NOMINATION_RULE, type NominationBasis, type NominationRule } from '@/lib/lexicon/nomination-rule';
 import { MembersSection } from '@/components/store/MembersSection';
 import { describeFirestoreError } from '@/lib/firestore-error';
 
 const TERM_KEYS: { key: string; label: string }[] = [
   { key: 'cast', label: 'スタッフの呼称' },
-  { key: 'nomination', label: '指名' },
+  { key: 'nomination', label: '指名（総称）' },
+  { key: 'nominationPrimary', label: '本指名' },
+  { key: 'nominationInhouse', label: '場内指名' },
+  { key: 'nominationFree', label: 'フリー' },
+  { key: 'dohan', label: '同伴' },
+  { key: 'extension', label: '延長' },
+  { key: 'escortHome', label: '送り' },
+  { key: 'closingRound', label: '締め' },
+  { key: 'restart', label: '飲み直し' },
   { key: 'displayName', label: '表示名' },
   { key: 'table', label: '卓 / 席' },
   { key: 'checkout', label: '会計' },
@@ -49,6 +58,8 @@ function SettingsForm({ shopId, myUid, config, save }: {
   const [roles, setRoles] = useState<RoleWage[]>(() => config.roles);
   const [modules, setModules] = useState<ModuleCfg[]>(() => config.modules);
   const [attr, setAttr] = useState<SalesAttribution>(() => config.salesAttribution);
+  // 本指名の判定規則（呼び名ではなく「意味」の設定・Day126）
+  const [nomRule, setNomRule] = useState<NominationRule>(() => config.nominationRule ?? DEFAULT_NOMINATION_RULE);
   const [setLen, setSetLen] = useState(() => config.setTimeLength);
   const [rotLen, setRotLen] = useState(() => config.rotationTimeLength);
   const [transportTypes, setTransportTypes] = useState<ChoiceItem[]>(() => config.transportTypes?.length ? config.transportTypes : DEFAULT_TRANSPORT_TYPES);
@@ -60,7 +71,7 @@ function SettingsForm({ shopId, myUid, config, save }: {
 
   // 未保存インジケータ: マウント時の内容と比較して導出（PosConfig の Day15 事故対策の横展開。
   // 保存成功でベースラインを更新）
-  const draftJson = JSON.stringify({ terms, roles, modules, attr, setLen, rotLen, transportTypes, invCats });
+  const draftJson = JSON.stringify({ terms, roles, modules, attr, nomRule, setLen, rotLen, transportTypes, invCats });
   const [baselineJson, setBaselineJson] = useState(() => draftJson);
   const dirty = draftJson !== baselineJson;
 
@@ -80,7 +91,7 @@ function SettingsForm({ shopId, myUid, config, save }: {
   const onSave = async () => {
     setSaving(true); setSaved(false); setSaveError(null);
     try {
-      await save({ terminology: terms, roles: roles.filter((r) => r.name.trim()), modules, salesAttribution: attr, setTimeLength: Math.max(1, setLen), rotationTimeLength: Math.max(1, rotLen), transportTypes: transportTypes.filter((t) => t.label.trim()), inventoryCategories: invCats.filter((t) => t.label.trim()) });
+      await save({ terminology: terms, roles: roles.filter((r) => r.name.trim()), modules, salesAttribution: attr, nominationRule: nomRule, setTimeLength: Math.max(1, setLen), rotationTimeLength: Math.max(1, rotLen), transportTypes: transportTypes.filter((t) => t.label.trim()), inventoryCategories: invCats.filter((t) => t.label.trim()) });
       setBaselineJson(draftJson);
       setSaved(true); setTimeout(() => setSaved(false), 2000);
     } catch (e) {
@@ -182,6 +193,37 @@ function SettingsForm({ shopId, myUid, config, save }: {
             <button key={v} type="button" onClick={() => setAttr(v)} style={{ flex: 1, padding: '10px 14px', borderRadius: 12, cursor: 'pointer', background: attr === v ? 'var(--noxa-accent-primary)' : 'var(--noxa-surface-card)', color: attr === v ? '#fff' : 'var(--noxa-text-primary)', border: `1px solid ${attr === v ? 'var(--noxa-accent-primary)' : 'var(--noxa-border)'}`, fontSize: 13 }}>{label}</button>
           ))}
         </div>
+      </Section>
+
+      {/* 本指名の判定（呼び名ではなく意味の設定・Day126） */}
+      <Section title="本指名の判定（この店では何を本指名と数えるか）">
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          {([
+            ['tableMainHost', '卓の本指名に入っている担当', '席回しで「本指名」に指定した担当だけを本指名として数えます。'],
+            ['customerMainCast', '顧客カルテの担当と同じ', '前回から同じ担当が続いている客を本指名として数えます。'],
+            ['either', 'どちらかを満たせば本指名', '上の2つのどちらかに当てはまれば本指名として数えます。'],
+          ] as const).map(([v, label, desc]) => (
+            <button key={v} type="button" onClick={() => setNomRule((p) => ({ ...p, basis: v as NominationBasis }))}
+              style={{ textAlign: 'left', padding: '10px 14px', borderRadius: 12, cursor: 'pointer', background: nomRule.basis === v ? 'var(--noxa-accent-primary)' : 'var(--noxa-surface-card)', color: nomRule.basis === v ? '#fff' : 'var(--noxa-text-primary)', border: `1px solid ${nomRule.basis === v ? 'var(--noxa-accent-primary)' : 'var(--noxa-border)'}`, fontSize: 13 }}>
+              <span style={{ fontWeight: 700 }}>{label}</span>
+              <span style={{ display: 'block', fontSize: 11, opacity: 0.85, marginTop: 2 }}>{desc}</span>
+            </button>
+          ))}
+        </div>
+        {nomRule.basis !== 'tableMainHost' && (
+          <div style={{ marginTop: 10 }}>
+            <span style={{ fontSize: 12, color: 'var(--noxa-text-muted)' }}>顧客カルテが無い（初回など、続きかどうか確かめられない）とき</span>
+            <div style={{ display: 'flex', gap: 8, marginTop: 6 }}>
+              {([['inhouse', '場内指名として数える'], ['primary', '本指名として数える']] as const).map(([v, label]) => (
+                <button key={v} type="button" onClick={() => setNomRule((p) => ({ ...p, firstVisitAs: v }))}
+                  style={{ flex: 1, padding: '8px 12px', borderRadius: 10, cursor: 'pointer', background: nomRule.firstVisitAs === v ? 'var(--noxa-accent-primary)' : 'var(--noxa-surface-card)', color: nomRule.firstVisitAs === v ? '#fff' : 'var(--noxa-text-primary)', border: `1px solid ${nomRule.firstVisitAs === v ? 'var(--noxa-accent-primary)' : 'var(--noxa-border)'}`, fontSize: 12 }}>{label}</button>
+              ))}
+            </div>
+          </div>
+        )}
+        <p style={{ fontSize: 11, color: 'var(--noxa-text-faint)', margin: '8px 0 0' }}>
+          同じ「本指名」でも数え方は店によって違い、指名料とバックが変わります。ここを間違えると数字は出るのに金額だけが静かにズレるため、実際の運用に合わせてください。
+        </p>
       </Section>
 
       {/* 席回し既定 */}

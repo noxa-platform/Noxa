@@ -16,6 +16,10 @@ import { db } from '@/lib/firebase/config';
 import { useShopId } from '@/lib/useShopId';
 import { describeFirestoreError } from '@/lib/firestore-error';
 import { valueForScope, type ScopedSnapshot } from '@/lib/scoped-snapshot';
+import { CONCEPT_DEFAULT_TERMS, type ConceptId } from '@/lib/lexicon/concepts';
+import {
+  DEFAULT_NOMINATION_RULE, normalizeNominationRule, type NominationRule,
+} from '@/lib/lexicon/nomination-rule';
 
 /** 業種が未取得・別店舗のときの空値（前の店の業種を持ち越さない） */
 const EMPTY_INDUSTRY: { industry?: string; error: string | null } = { industry: undefined, error: null };
@@ -28,6 +32,11 @@ export type ChoiceItem = { id: string; label: string; color?: string };
 
 export type ShopConfig = {
   terminology: Record<string, string>;
+  /**
+   * 「本指名」を何をもって本指名とするか（Day126）。呼び名（terminology）と違い、
+   * これは**金額とバックが変わる意味の設定**なので別に持つ。
+   */
+  nominationRule: NominationRule;
   roles: RoleWage[];
   modules: ModuleCfg[];
   salesAttribution: SalesAttribution;
@@ -62,21 +71,23 @@ export const DEFAULT_ROLES: RoleWage[] = [
   { name: '新人', wage: 3000 },
 ];
 
-/** 用語キーの既定（夜職一般） */
-export const DEFAULT_TERMS: Record<string, string> = {
-  cast: 'キャスト',
-  nomination: '指名',
-  displayName: '源氏名',
-  table: '卓',
-  checkout: '会計',
-  customer: 'お客様',
-};
+/** 用語キーの既定（概念 ID ベース・lexicon/concepts.ts が正本） */
+export const DEFAULT_TERMS: Record<string, string> = CONCEPT_DEFAULT_TERMS;
 
-/** 業種プリセット（storeTypeName → 用語上書き） */
+/**
+ * 業種プリセット（storeTypeName → 呼び名の上書き）。
+ *
+ * ⚠ 旧実装はホストクラブで `nomination: '本指名'` としていたが、これは**概念の取り違え**。
+ * `nomination` は指名の総称（初回案内の「指名を選ぶ」等で使う）で、本指名は
+ * `nominationPrimary` という別概念。総称に本指名を入れると、場内指名の客にも
+ * 「本指名を選んでください」と出る。概念を分けたうえで呼び名を当てる（Day126）。
+ */
 export const INDUSTRY_TERMS: Record<string, Record<string, string>> = {
-  ホストクラブ: { cast: 'ホスト', nomination: '本指名' },
-  コンカフェ: { cast: 'キャスト', nomination: '推し', displayName: 'キャラ名', table: '席', checkout: 'お会計' },
-  ガールズバー: { cast: 'キャスト', table: '席' },
+  ホストクラブ: { cast: 'ホスト', nominationPrimary: '本指名', nominationInhouse: '場内', closingRound: '締め' },
+  キャバクラ: { cast: 'キャスト', nominationPrimary: '本指名', nominationInhouse: '場内指名' },
+  ラウンジ: { cast: 'キャスト', nominationPrimary: '指名', nominationInhouse: '場内' },
+  コンカフェ: { cast: 'キャスト', nomination: '推し', nominationPrimary: '本推し', displayName: 'キャラ名', table: '席', checkout: 'お会計' },
+  ガールズバー: { cast: 'キャスト', table: '席', nominationPrimary: '指名' },
   スナック: { cast: 'ママ・キャスト', table: '席' },
 };
 
@@ -95,6 +106,7 @@ export const DEFAULT_INVENTORY_CATEGORIES: ChoiceItem[] = [
 
 export const DEFAULT_CONFIG: ShopConfig = {
   terminology: {},
+  nominationRule: DEFAULT_NOMINATION_RULE,
   roles: DEFAULT_ROLES,
   modules: DEFAULT_MODULES.map((m) => ({ key: m.key, enabled: CORE_MODULE_KEYS.has(m.key) })),
   salesAttribution: 'mainCast',
@@ -104,8 +116,8 @@ export const DEFAULT_CONFIG: ShopConfig = {
   inventoryCategories: DEFAULT_INVENTORY_CATEGORIES,
 };
 
-/** 用語解決: 店舗上書き → 業種プリセット → 既定 → key */
-export function resolveTerm(config: ShopConfig | null, industry: string | undefined, key: string): string {
+/** 用語解決: 店舗上書き → 業種プリセット → 既定 → key（key は概念 ID・concepts.ts） */
+export function resolveTerm(config: ShopConfig | null, industry: string | undefined, key: ConceptId | string): string {
   return config?.terminology?.[key]
     ?? (industry ? INDUSTRY_TERMS[industry]?.[key] : undefined)
     ?? DEFAULT_TERMS[key]
@@ -181,6 +193,7 @@ export function useShopConfig(user: User): UseShopConfig {
       const d = snap.exists() ? (snap.data() as Partial<ShopConfig>) : {};
       setCfgSnap({ shopId: sid, error: undefined, config: {
         terminology: d.terminology ?? {},
+        nominationRule: normalizeNominationRule(d.nominationRule),
         roles: d.roles?.length ? d.roles : DEFAULT_ROLES,
         modules: mergeModules(d.modules),
         salesAttribution: d.salesAttribution ?? 'mainCast',

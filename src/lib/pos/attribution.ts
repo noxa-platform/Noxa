@@ -13,8 +13,11 @@
  * 崩すため行わない）。
  */
 import type { PosSlip } from './engine';
+import {
+  DEFAULT_NOMINATION_RULE, resolveNominationKind, type NominationRule,
+} from '@/lib/lexicon/nomination-rule';
 
-/** 指名区分: main=本指名（卓の mainHostIds に担当が居る） / inTable=場内（担当指定あり） / free=担当なし */
+/** 指名区分: main=本指名 / inTable=場内（担当指定あり） / free=担当なし */
 export type NominationKind = 'main' | 'inTable' | 'free';
 
 export type CastLike = { id: string; name: string; uid?: string | null };
@@ -32,12 +35,20 @@ export function resolveSaleAttribution(opts: {
   /** 店舗設定 salesAttribution（operator=常に操作者へ付ける） */
   mode: 'mainCast' | 'operator';
   operatorUid: string;
-  slip: Pick<PosSlip, 'castUid' | 'castId' | 'castName' | 'state'>;
+  slip: Pick<PosSlip, 'castUid' | 'castId' | 'castName' | 'state' | 'customerId'>;
   casts: CastLike[];
   /** 会計フォームで担当名を上書きした場合（castName 手入力） */
   overrideCastName?: string;
   /** 卓の本指名（指名区分の判定用） */
   mainHostIds?: string[];
+  /**
+   * 本指名の判定規則（店舗設定・Day126）。省略時は従来どおり「卓の本指名リスト」基準。
+   * 旧実装はこの 1 つの定義を全店に強制しており、「前回から同じ担当なら本指名」で
+   * 回している店では指名料もバックも静かに間違っていた。
+   */
+  nominationRule?: NominationRule;
+  /** 伝票に紐付いた顧客カルテの担当（規則が customerMainCast のときに使う） */
+  customerMainCastId?: string | null;
 }): SaleAttribution {
   const { mode, operatorUid, slip, casts, overrideCastName, mainHostIds } = opts;
 
@@ -61,9 +72,15 @@ export function resolveSaleAttribution(opts: {
     : (slip.castUid ?? cast?.uid ?? null);
   const castUid = mode === 'operator' ? operatorUid : (resolvedUid ?? operatorUid);
 
-  const nomination: NominationKind = !castId
-    ? 'free'
-    : (mainHostIds ?? []).includes(castId) ? 'main' : 'inTable';
+  const nomination: NominationKind = resolveNominationKind(
+    opts.nominationRule ?? DEFAULT_NOMINATION_RULE,
+    {
+      castId,
+      mainHostIds,
+      customerMainCastId: opts.customerMainCastId,
+      hasCustomer: !!slip.customerId,
+    },
+  );
 
   return { castUid, castId, castName, nomination, dohan: !!slip.state.dohan };
 }

@@ -38,6 +38,7 @@ import {
 import type { FloorTable, Cast } from '@/lib/seating/types';
 import { createEmptyTable } from '@/lib/seating/types';
 import { resolveSaleAttribution } from './attribution';
+import { DEFAULT_NOMINATION_RULE, normalizeNominationRule, type NominationRule } from '@/lib/lexicon/nomination-rule';
 import { buildUnpaidEntry } from './unpaid';
 
 const SLIP_NAMES = ['①', '②', '③', '④', '⑤', '⑥', '⑦', '⑧', '⑨', '⑩'];
@@ -178,13 +179,18 @@ export function usePosStore(user: User): UsePosStore {
   const configRef = useRef(config);
   // 売上の付け方（店舗設定 config/settings.salesAttribution）。会計時の帰属に使用
   const attributionRef = useRef<'mainCast' | 'operator'>('mainCast');
+  // 本指名の判定規則（店舗設定 config/settings.nominationRule・Day126）。
+  // 店ごとに「何をもって本指名か」が違うため、会計時にこの規則で区分を決める。
+  const nominationRuleRef = useRef<NominationRule>(DEFAULT_NOMINATION_RULE);
 
   // 店舗設定（売上の付け方）を購読
   useEffect(() => {
     if (!shopId) return;
     const unsub = onSnapshot(doc(db, `shop_shops/${shopId}/config/settings`), (snap) => {
-      const a = snap.exists() ? (snap.data() as { salesAttribution?: string }).salesAttribution : undefined;
-      attributionRef.current = a === 'operator' ? 'operator' : 'mainCast';
+      const d = snap.exists() ? (snap.data() as { salesAttribution?: string; nominationRule?: unknown }) : undefined;
+      attributionRef.current = d?.salesAttribution === 'operator' ? 'operator' : 'mainCast';
+      // 未設定・型崩れは既定（従来の卓ベース判定）へ正規化する
+      nominationRuleRef.current = normalizeNominationRule(d?.nominationRule);
       // 売上の付け方（担当 or 記録者）が読めないまま既定 mainCast で会計すると、
       // **誰の売上になるかが静かに変わる**（給与・成績まで波及する・Day115）
     }, (e) => setDataError(describeFirestoreError(e, '売上の付け方（店舗設定）の読み込み')));
@@ -386,6 +392,10 @@ export function usePosStore(user: User): UsePosStore {
         casts,
         overrideCastName: opts.castName,
         mainHostIds: Array.isArray(data.mainHostIds) ? (data.mainHostIds as string[]) : [],
+        nominationRule: nominationRuleRef.current,
+        customerMainCastId: slip.customerId
+          ? (customers.find((c) => c.id === slip.customerId)?.mainCastId ?? null)
+          : undefined,
       });
       const saleRef = doc(collection(db, `shop_shops/${shopId}/sales`));
       // ツケ（未収）会計: 同一トランザクションで unpaid 台帳へ起票（二重管理の解消）。
@@ -430,7 +440,7 @@ export function usePosStore(user: User): UsePosStore {
       const nextSlips = JSON.parse(JSON.stringify(slips.filter((s) => s.id !== slipId)));
       tx.set(ref, { slips: nextSlips, updatedAt: serverTimestamp() }, { merge: true });
     });
-  }, [shopId, tableRef, user.uid, casts]);
+  }, [shopId, tableRef, user.uid, casts, customers]);
 
   // render 中に呼ばれるため ref ではなく config を直接参照する。
   // （configRef は effect 同期＝設定変更後の最初の re-render では1世代古く、
