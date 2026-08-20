@@ -56,10 +56,28 @@ Web 版          = NOXA に完全統合（全機能 = 個人 + 店舗運営す�
 │  └─────────────────────────────────────────────────┘   │
 │                                                       │
 │  共通基盤: Firebase Auth (SSO)、Firestore、Storage、 │
-│            Stripe (課金共有)、Vercel (Web)、         │
+│            IAP (課金共有 / Apple・Google Play)、     │
+│            Vercel (Web)、                            │
 │            Capacitor (Android)、SwiftUI (iOS 別リポ)│
 └──────────────────────────────────────────────────────┘
 ```
+
+---
+
+## 課金設計（2026-08-21 確定）
+
+> 図中の「Stripe（課金共有）」は 2026-05-18 の Stripe 廃止・IAP 移行以降**実態と違っていた**ため是正した
+> （経緯は `src/app/api/lib/credits.ts` 冒頭）。以下が現行の確定仕様。
+
+- 器（アカウント / 決済 / サブスク状態 / AI クレジット残高）は NOXA に 1 つ
+  （account_users / account_subscriptions / account_credit_ledger）
+- 売り物（SKU）はサービスごとに分けてよい
+  （account_credit_ledger の service フィールドが既にマルチサービス前提）
+- サブモジュール（のみシュギ等）に独自の決済実装を持たせない
+- 決済手段は 2 つ: 個人向け = IAP / 店舗（法人）向け = Stripe（法人契約・請求書・
+  インボイス対応のため IAP では代替不可。将来必要になった時点で NOXA 側に実装）
+- 当面 AI 機能課金は封印。ただし logAiUsage による使用実績の記録は継続する
+  （無料枠の上限を決めるための実データ収集。原価が見えないと上限を決められない）
 
 ---
 
