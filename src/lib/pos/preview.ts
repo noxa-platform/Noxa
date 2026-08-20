@@ -29,23 +29,26 @@ export type PreviewScenario = {
 
 export type PreviewResult = PreviewScenario & { result: CalculationResult };
 
-/** 入店 20:00 を基準に、経過分から現在時刻を作る（跨ぎも扱えるよう 24h 表記で正規化） */
-function timeAfter(minutes: number): string {
-  const base = 20 * 60;
+/** 入店時刻を基準に、経過分から現在時刻を作る（跨ぎも扱えるよう 24h 表記で正規化） */
+function timeAfter(minutes: number, entryHour = 20): string {
+  const base = entryHour * 60;
   const t = base + minutes;
   const h = Math.floor(t / 60) % 24;
   const m = t % 60;
   return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
 }
 
-function scenarioState(config: StoreConfig, customerType: CustomerType, minutes: number, over: Partial<CalculatorState> = {}): CalculatorState {
+function scenarioState(
+  config: StoreConfig, customerType: CustomerType, minutes: number,
+  over: Partial<CalculatorState> = {}, entryHour = 20,
+): CalculatorState {
   const base = createInitialState(config);
   return {
     ...base,
     customerType,
     orders: createPinnedOrders(config, customerType),
-    entryTime: '20:00',
-    currentTime: timeAfter(minutes),
+    entryTime: `${String(entryHour).padStart(2, '0')}:00`,
+    currentTime: timeAfter(minutes, entryHour),
     ...over,
   };
 }
@@ -85,6 +88,37 @@ export function buildPreviewScenarios(config: StoreConfig): PreviewScenario[] {
       label: '同伴・60分',
       note: '同伴料金の設定が効きます',
       state: scenarioState(config, 'regular', 60, { dohan: true }),
+    },
+    // ここから下は P129 で追加。**AI が書ける項目は、この表に金額として現れるものだけ**
+    // という制約を置いたため、料金表の全体（初回・通常・R内・R後 × セット/延長、
+    // 早セット/遅セットの境界）を確認できる並びにする。
+    // 「網羅ではなく最小セット」の方針は維持しつつ、承認の材料が無い項目を
+    // AI に書かせないための下限がここまで、という位置づけ。
+    {
+      id: 'initial-90',
+      label: '初回のお客様・90分（延長あり）',
+      note: '初回の延長料金の設定が効きます',
+      state: scenarioState(config, 'initial', 90),
+    },
+    {
+      id: 'regular-late-60',
+      label: '通常のお客様・遅い時間の入店（23時）・60分',
+      note: '遅セットと「早/遅の境界時刻」の設定が効きます',
+      state: scenarioState(config, 'regular', 60, {}, 23),
+    },
+    // R内 / R後 はセットに 2 時間が含まれる（engine の initialSetHours）。
+    // 90 分だと延長が 1 度も発生せず、延長料金を確かめられない
+    {
+      id: 'r-within-180',
+      label: 'R内のお客様・3時間（延長あり）',
+      note: 'R内（再来店・時間内）のセットと延長の設定が効きます（セットに2時間込み）',
+      state: scenarioState(config, 'r_within', 180),
+    },
+    {
+      id: 'r-after-180',
+      label: 'R後のお客様・3時間（延長あり）',
+      note: 'R後（再来店・時間外）のセットと延長の設定が効きます（セットに2時間込み）',
+      state: scenarioState(config, 'r_after', 180),
     },
   ];
 }

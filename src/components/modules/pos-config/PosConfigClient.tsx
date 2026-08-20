@@ -12,6 +12,7 @@ import { createDefaultStoreConfig } from '@/lib/pos/defaultConfig';
 import { previewConfig, diffPreview } from '@/lib/pos/preview';
 import { describeFirestoreError } from '@/lib/firestore-error';
 import { describeOwnerSettingDenied } from '@/lib/permission-guidance';
+import { describeField } from '@/lib/pos/config-schema';
 
 /**
  * POS 設定エディタ — 店舗ごとの料金・メニュー・税/手数料・クイック・カテゴリ・半額ルールを
@@ -158,6 +159,10 @@ export function PosConfigClient({ user }: { user: User }) {
         </Grid>
       </Section>
 
+      {/* AI 料金設定ビルダー（P129）。生成は提案までで、反映も保存も人の操作。
+          この直下がテスト伝票プレビューなので、提案を反映するとそのまま金額差が見える並びにしている */}
+      <AiBuilderSection shopId={shopId} user={user} cfg={cfg} onApply={(patch) => update(patch)} />
+
       {/* テスト伝票プレビュー（保存前に金額で確かめる・Day127） */}
       <Section title="この設定だといくらになるか">
         <p style={{ fontSize: 12, color: 'var(--noxa-text-muted)', margin: '0 0 10px' }}>
@@ -298,6 +303,115 @@ export function PosConfigClient({ user }: { user: User }) {
         <button type="button" onClick={save} disabled={saving} className="noxa-btn noxa-btn-primary" style={{ ...primaryBtn, width: 'auto', padding: '0 22px' }}>{saving ? '保存中…' : '保存'}</button>
       </div>
     </Shell>
+  );
+}
+
+// ───────────────────────── AI 料金設定ビルダー（P129）
+
+/**
+ * 日本語の要望から料金設定の**提案**を受け取り、承認して編集中の設定へ反映する。
+ *
+ * 3 段構え（順序が要点）:
+ *   生成 → **何が変わるかを項目名で見せる** → 反映 → 直下のプレビューで**いくら変わるか**を見せる
+ *   → 既存の保存ボタン。サーバは Firestore に書かないので、途中でやめれば何も起きない。
+ *
+ * 「捨てられた提案」を必ず出す。AI が 10 項目返して 3 項目しか通らなかったことを
+ * 知らないまま承認するのが一番危ない（画面には「反映しました」しか出ないため）。
+ */
+function AiBuilderSection({ shopId, user, cfg, onApply }: {
+  shopId: string; user: User; cfg: StoreConfig; onApply: (patch: Partial<StoreConfig>) => void;
+}) {
+  const [text, setText] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const [result, setResult] = useState<{
+    patch: Partial<StoreConfig>; accepted: string[]; rejected: { path: string; reason: string }[]; message?: string;
+  } | null>(null);
+
+  const generate = async () => {
+    setBusy(true); setErr(null); setResult(null);
+    try {
+      const token = await user.getIdToken();
+      const res = await fetch('/api/ai/pos-config', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ workspaceId: shopId, requestText: text, current: cfg }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        // クレジット不足（429）は「失敗」ではなく残量の問題。理由をそのまま出す（Day125）
+        setErr(typeof data?.error === 'string' ? data.error : `生成に失敗しました（${res.status}）`);
+        return;
+      }
+      setResult({
+        patch: (data.patch ?? {}) as Partial<StoreConfig>,
+        accepted: Array.isArray(data.accepted) ? data.accepted : [],
+        rejected: Array.isArray(data.rejected) ? data.rejected : [],
+        message: typeof data.message === 'string' ? data.message : undefined,
+      });
+    } catch (e) {
+      setErr(e instanceof Error ? `生成に失敗しました: ${e.message}` : '生成に失敗しました');
+    } finally { setBusy(false); }
+  };
+
+  return (
+    <Section title="AI に料金設定を作らせる">
+      <p style={{ fontSize: 12, color: 'var(--noxa-text-muted)', margin: 0, lineHeight: 1.7 }}>
+        いまの料金を日本語で書くと、変更する項目だけを提案します。<strong>反映しても保存はされません</strong>——
+        提案を反映したあと、下のテスト伝票で金額を確かめてから保存してください。
+        メニュー・卓名・半額ルールは金額を試算できないため対象外です（この画面で編集してください）。
+      </p>
+      <textarea
+        value={text} onChange={(e) => setText(e.target.value)} rows={3}
+        placeholder="例：初回はセット3000円・指名2000円。通常の延長は30分3000円。同伴は5000円にして。"
+        style={{ ...cell, minHeight: 78, resize: 'vertical', lineHeight: 1.7, fontFamily: 'var(--noxa-font-sans-jp)' }}
+      />
+      <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+        <button type="button" onClick={generate} disabled={busy || !text.trim()}
+          style={{ ...primaryBtn, width: 'auto', padding: '0 20px', minHeight: 40, opacity: busy || !text.trim() ? 0.6 : 1 }}>
+          {busy ? '生成中…' : '提案を作る'}
+        </button>
+        <span style={{ fontSize: 11, color: 'var(--noxa-text-faint)' }}>AI クレジットを消費します</span>
+      </div>
+
+      {err && <p role="alert" style={{ margin: 0, fontSize: 12, color: 'var(--noxa-status-error)' }}>{err}</p>}
+
+      {result && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+          {result.accepted.length > 0 ? (
+            <div style={{ padding: '10px 12px', borderRadius: 10, background: 'var(--noxa-bg-base)', border: '1px solid var(--noxa-border)' }}>
+              <div style={{ fontSize: 12, fontWeight: 700, marginBottom: 6 }}>この {result.accepted.length} 項目を変更します</div>
+              {result.accepted.map((path) => (
+                <div key={path} style={{ fontSize: 12, fontFamily: mono, color: 'var(--noxa-text-muted)' }}>・{describeField(path)}</div>
+              ))}
+              <button type="button" onClick={() => { onApply(result.patch); setResult(null); setText(''); }}
+                style={{ ...primaryBtn, width: 'auto', padding: '0 18px', minHeight: 38, marginTop: 10 }}>
+                反映する（保存はまだしない）
+              </button>
+            </div>
+          ) : (
+            <p role="status" style={{ margin: 0, fontSize: 12, color: 'var(--noxa-status-warning)' }}>
+              {result.message ?? '変更できる項目を読み取れませんでした。'}
+            </p>
+          )}
+
+          {result.rejected.length > 0 && (
+            <details>
+              <summary style={{ cursor: 'pointer', fontSize: 12, color: 'var(--noxa-text-muted)' }}>
+                反映しなかった提案 {result.rejected.length} 件
+              </summary>
+              <div style={{ marginTop: 6, display: 'flex', flexDirection: 'column', gap: 4 }}>
+                {result.rejected.map((r, i) => (
+                  <div key={i} style={{ fontSize: 11, color: 'var(--noxa-text-faint)' }}>
+                    <span style={{ fontFamily: mono }}>{r.path}</span> — {r.reason}
+                  </div>
+                ))}
+              </div>
+            </details>
+          )}
+        </div>
+      )}
+    </Section>
   );
 }
 

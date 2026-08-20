@@ -51,6 +51,11 @@ const PASTED_TEXT_MASKED = [
   'ai/customer-extract/route.ts',
   'ai/learn-from-text/route.ts',
   'ai/parse/route.ts',
+  // P129（生成系の 1 本目）: 入力は料金表の写しや店長のメモ。顧客のフリーテキストを
+  // 載せる経路ではないが、**貼り付けテキストである以上マスクを通す**——
+  // Day127 で崩れたのは「載せないはずだから免除」という前提そのものだった。
+  // 料金設定に連絡先は不要なので、マスクしても機能は落ちない
+  'ai/pos-config/route.ts',
 ];
 
 /**

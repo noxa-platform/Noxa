@@ -16,7 +16,23 @@ const cfg = () => createDefaultStoreConfig('active');
 describe('buildPreviewScenarios', () => {
   it('主要な会計パターンを網羅しすぎず並べる（間違いに気づける最小セット）', () => {
     const ids = buildPreviewScenarios(cfg()).map((s) => s.id);
-    expect(ids).toEqual(['initial-60', 'regular-60', 'regular-90', 'regular-nomination', 'dohan-60']);
+    // R内 / R後 は P129 で追加。AI が書ける範囲を「プレビューに金額として現れる項目」に
+    // 限る設計にしたため、客層別料金の表全体を確認できる必要がある
+    expect(ids).toEqual(['initial-60', 'regular-60', 'regular-90', 'regular-nomination', 'dohan-60', 'initial-90', 'regular-late-60', 'r-within-180', 'r-after-180']);
+  });
+
+  it('★客層別料金（初回 / 通常 / R内 / R後）がすべて確認できる（AI に書かせる範囲の前提・P129）', () => {
+    const ids = buildPreviewScenarios(cfg()).map((s) => s.id);
+    for (const need of ['initial-60', 'regular-60', 'r-within-180', 'r-after-180']) {
+      expect(ids).toContain(need);
+    }
+  });
+
+  it('★R内 / R後 の料金を変えると、その客層のプレビュー金額が動く（確かめる手段が実在する）', () => {
+    const base = cfg();
+    const raised = { ...base, rWithinPricing: { ...base.rWithinPricing, set: base.rWithinPricing.set + 5000 } };
+    const ids = diffPreview(base, raised).map((d) => d.id);
+    expect(ids).toContain('r-within-180');
   });
 
   it('各シナリオに「どの設定が効くか」の説明がある（数字だけ見せない）', () => {
