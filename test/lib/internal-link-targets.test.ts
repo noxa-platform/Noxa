@@ -79,8 +79,10 @@ const TARGETS = collectTargets();
 // まだ作られていないページ（内容が事業判断のため grind では作らない）。
 // **ここに足すのは「作らない理由」を書けるものだけ**。作ったら必ずこの一覧から消す。
 const KNOWN_MISSING: Record<string, string> = {
-  '/terms': '利用規約。本文は事業判断のため要ユーザー（Day112 で起票）',
-  '/privacy': 'プライバシーポリシー。同上',
+  // /terms と /privacy は 2026-08-21 に実体を作った（`src/app/{terms,privacy}/page.tsx`）。
+  // 未作成のまま放置していた間、ランディングと会員登録から 404 へリンクしており、
+  // yorulog-ios の App Store 提出もこの 404 で止まっていた。
+  // このテストは「作ったのに一覧に残っている」を検出して、実際にここへ導いた。
 };
 
 describe('内部リンクの遷移先が実在する', () => {
