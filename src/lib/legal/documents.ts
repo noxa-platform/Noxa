@@ -55,13 +55,18 @@ export const AD_CLAUSE_THIRD_PARTY = `当社は、法令に基づく場合を除
  * これは App Store のプライバシー開示で求められる事実の記載であり、
  * 消すと別の不備になる。**正本の文面には手を入れず、委託先の開示を併記する**形にした
  * （この判断はユーザー確認事項として LOG に記録）。
+ *
+ * 併記の文面は yorulog-ios `YoruLog/Legal/LegalView.swift`（別セッションが同日に適用）と
+ * **1 文字も違わない形に揃えてある**。3 サービスで文言がズレると、どれが正本か
+ * 分からなくなる。「委託は本節にいう第三者提供には該当しない」と明示するのは
+ * 個人情報保護法 27 条 5 項 1 号の整理で、こちらの当初案より正確だったので採用した。
  */
-const PROCESSORS = `また、以下の業務委託先に限り、業務遂行上必要な範囲でデータが処理されます。
-
-・Google LLC（Firebase: 認証・データベース・クラッシュ解析）
-・Apple Inc.（APNs / In-App Purchase 課金処理）
-・OpenRouter, Inc. および同社が中継する LLM プロバイダ（AI 解析機能のため、チャット・タグ生成等の入力内容を送信）
-・Functional Software, Inc.（Sentry 経由のクラッシュレポート）`;
+const PROCESSORS = `なお、以下の業務委託先に限り、業務遂行上必要な範囲でデータが処理されます
+（本節にいう第三者提供には該当しません）:
+- Google LLC（Firebase: 認証・データベース・クラッシュ解析）
+- Apple Inc.（APNs / In-App Purchase 課金処理）
+- OpenRouter, Inc. および同社が中継する LLM プロバイダ（AI 解析機能のため、チャット・タグ生成等の入力内容を送信）
+- Functional Software, Inc.（Sentry 経由のクラッシュレポート）`;
 
 export const PRIVACY_POLICY: LegalDocument = {
   title: 'Noxa プライバシーポリシー',
