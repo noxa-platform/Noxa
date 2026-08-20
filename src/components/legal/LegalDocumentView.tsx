@@ -39,12 +39,24 @@ export function LegalDocumentView({ doc }: { doc: LegalDocument }) {
         </section>
       ))}
 
+      {doc.links && doc.links.length > 0 && (
+        <section aria-label="関連ページ" style={{ display: 'flex', gap: 14, flexWrap: 'wrap', marginTop: 8 }}>
+          {doc.links.map((l) => (
+            <Link key={l.href} href={l.href} style={{ fontSize: 14, color: 'var(--noxa-accent-primary-ink)' }}>
+              {l.label}
+            </Link>
+          ))}
+        </section>
+      )}
+
       <footer style={{ marginTop: 48, paddingTop: 20, borderTop: '1px solid var(--noxa-divider)', fontSize: 12, color: 'var(--noxa-text-faint)', display: 'flex', gap: 12, flexWrap: 'wrap' }}>
         <span>© 2026 Noxa</span>
         <span aria-hidden>·</span>
         <Link href="/terms" style={{ color: 'var(--noxa-text-faint)' }}>利用規約</Link>
         <span aria-hidden>·</span>
         <Link href="/privacy" style={{ color: 'var(--noxa-text-faint)' }}>プライバシーポリシー</Link>
+        <span aria-hidden>·</span>
+        <Link href="/support" style={{ color: 'var(--noxa-text-faint)' }}>サポート</Link>
       </footer>
     </main>
   );
