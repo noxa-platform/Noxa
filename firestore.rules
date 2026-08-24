@@ -185,6 +185,16 @@ service cloud.firestore {
         allow delete: if isShopOwnerLike(shopId) || isSelf(uid);
       }
 
+      // 個別の売上レコード（1 会計 = 1 件）。POS 会計だけでなく、
+      // `entryMode: 'amount'` の**手入力・金額のみ**の売上も最初からここに入る
+      // （noxa web の SalesClient が `source:'manual'` で書いている）。
+      //
+      // 2026-08-25（B-1 の追補）: nomishugy の**顧客紐付き個別売上**もここへ寄せる。
+      // 日次集計だけを daily_close へ分けたのは「1 日 1 件の合計」が伝票ではないからで、
+      // 顧客ひとりの 1 会計はまさに伝票と同じ形。分ける基準は出所ではなく**記録の形**。
+      // ⚠️ nomishugy 側にキャストの紐付けは無いので **castUid は書かないこと**。
+      // 記録者（オーナー）の uid を castUid に入れると syncShopSaleToPersonal が
+      // その人の個人台帳へ投影し、member-stats の成績に他人の売上が乗る。
       match /sales/{saleId} {
         allow read: if isShopMember(shopId);
         // POS 会計は店舗内の共同作業＝メンバー全ロールが登録/修正できる。

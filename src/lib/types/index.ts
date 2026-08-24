@@ -883,6 +883,19 @@ export interface DailyCloseSummary {
   updatedAt?: Timestamp;
 }
 
+/**
+ * shop_shops/{shopId}/members/{uid} に書く role の語彙。
+ *
+ * ⚠️ 上の `MemberRole`（'owner' | 'sub_owner' | 'editor' | 'viewer'）とは**別物**で、
+ * members doc に実際に書かれるのはこちら。`MemberRole` は現状どこからも参照されていない
+ * （2026-08-25 に全 src を実測）。rules の `isShopOwnerLike` は ['owner','manager']、
+ * `isShopMemberWithSalesEdit` は ['owner','manager','accounting'] を見ており、
+ * 招待 API（team/issue-invite の INVITE_ROLES）は ['cast','manager','accounting'] を受ける。
+ * 新しく members doc を作る経路は必ずこの語彙を使うこと（'viewer' 等を書くと
+ * 権限判定は素通りするが、招待経由の既存メンバーと語彙が食い違って集計・画面がズレる）。
+ */
+export type ShopMemberRole = 'owner' | 'manager' | 'accounting' | 'cast';
+
 /** キャスト所属申請の状態（オーナーが申請 → キャスト本人が承認） */
 export type AffiliationStatus = 'pending_cast' | 'active' | 'rejected' | 'revoked';
 
