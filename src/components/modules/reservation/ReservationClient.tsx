@@ -20,6 +20,7 @@ import { businessDayKey } from '@/lib/datetime';
 import { describeFirestoreError } from '@/lib/firestore-error';
 import { valueForScope, type ScopedSnapshot } from '@/lib/scoped-snapshot';
 import { describeMissingShop } from '@/lib/shop-id-state';
+import { stampIrVersion } from '@/lib/ir-version';
 
 /**
  * 予約モジュール（実データ）
@@ -274,7 +275,7 @@ export function ReservationClient({ user }: { user: User }) {
       if (editId) {
         await updateDoc(doc(db, `${resPath}/${editId}`), payload);
       } else {
-        await addDoc(collection(db, resPath), { ...payload, createdAt: serverTimestamp(), createdBy: user.uid });
+        await addDoc(collection(db, resPath), stampIrVersion({ ...payload, createdAt: serverTimestamp(), createdBy: user.uid }));
       }
       closeForm();
     } catch (e) {

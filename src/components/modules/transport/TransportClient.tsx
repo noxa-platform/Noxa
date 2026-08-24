@@ -18,6 +18,7 @@ import { useShopId } from '@/lib/useShopId';
 import { useShopConfig, type ChoiceItem } from '@/lib/shopConfig';
 import { describeFirestoreError } from '@/lib/firestore-error';
 import { describeMissingShop } from '@/lib/shop-id-state';
+import { stampIrVersion } from '@/lib/ir-version';
 
 /**
  * ⑦ 送迎 — 配車ボード + 送迎リクエスト一覧 + 地図プレースホルダ（実データ）
@@ -263,7 +264,7 @@ export function TransportClient({ user }: { user: User }) {
     if (!reqPath || busy) return null;
     setBusy(true); setOpError(null);
     try {
-      await addDoc(collection(db, reqPath), compact({
+      await addDoc(collection(db, reqPath), stampIrVersion(compact({
         time: input.time,
         type: input.type,
         target: input.target.trim(),
@@ -272,7 +273,7 @@ export function TransportClient({ user }: { user: User }) {
         status: 'waiting',
         createdAt: serverTimestamp(),
         createdBy: user.uid,
-      }));
+      })));
       return null;
     } catch (e) {
       return describeFirestoreError(e, '送迎リクエストの登録');
@@ -324,13 +325,13 @@ export function TransportClient({ user }: { user: User }) {
     if (!vehPath || busy) return null;
     setBusy(true); setOpError(null);
     try {
-      await addDoc(collection(db, vehPath), compact({
+      await addDoc(collection(db, vehPath), stampIrVersion(compact({
         name: input.name.trim(),
         driver: input.driver.trim(),
         status: 'standby',
         createdAt: serverTimestamp(),
         createdBy: user.uid,
-      }));
+      })));
       return null;
     } catch (e) {
       return describeFirestoreError(e, '車両の登録');

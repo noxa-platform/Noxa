@@ -80,9 +80,21 @@ describe('nextIrVersion — 移行は単調増加のみ', () => {
 // 規則そのものが破られていないかをソースで見張る。
 // 「更新のたびに書き手の版を刻む」と、最後に書いた一番古いクライアントの版が残る（版の巻き戻り）。
 describe('版の巻き戻りを作らない（更新経路で刻まない）', () => {
+  // 版を刻む経路の一覧。**すべて新規作成点であること**を確認したうえで載せる。
+  // （addDoc は常に新規／POS 会計は毎回新しい伝票）
   const files = [
     'src/lib/pos/store.ts',
     'src/components/modules/sales/SalesClient.tsx',
+    'src/components/modules/customers/CustomersClient.tsx',
+    'src/components/modules/schedule/ScheduleClient.tsx',
+    'src/components/modules/attendance/AttendanceClient.tsx',
+    'src/components/modules/business-card/BusinessCardClient.tsx',
+    'src/components/modules/unpaid/UnpaidClient.tsx',
+    'src/components/modules/risk/RiskClient.tsx',
+    'src/components/modules/inventory/InventoryClient.tsx',
+    'src/components/modules/transport/TransportClient.tsx',
+    'src/components/modules/reservation/ReservationClient.tsx',
+    'src/components/modules/trial/TrialClient.tsx',
   ];
 
   it.each(files)('%s は stampIrVersion を使っている', (f) => {
@@ -108,5 +120,16 @@ describe('版の巻き戻りを作らない（更新経路で刻まない）', (
       const src = readFileSync(f, 'utf8');
       expect(src).not.toMatch(/ir_version\s*:/);
     }
+  });
+
+  // 版を刻むのは新規作成だけ、という規則をリポジトリ全体で見張る。
+  // updateDoc に stampIrVersion が現れたら、それは更新経路に刻んでいる＝版の巻き戻りの種
+  it('updateDoc に stampIrVersion を渡している箇所が無い', () => {
+    const offenders: string[] = [];
+    for (const f of files) {
+      const src = readFileSync(f, 'utf8');
+      if (/updateDoc\([^)]*stampIrVersion/.test(src)) offenders.push(f);
+    }
+    expect(offenders).toEqual([]);
   });
 });

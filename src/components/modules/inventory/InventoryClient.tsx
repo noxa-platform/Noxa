@@ -21,6 +21,7 @@ import { stockStatus, keepExpiryStatus, type StockStatus, type ExpiryStatus } fr
 import { nextStockQty, nextRemainingPct, parseRemainingPct } from '@/lib/inventory/adjust';
 import { describeFirestoreError } from '@/lib/firestore-error';
 import { describeMissingShop } from '@/lib/shop-id-state';
+import { stampIrVersion } from '@/lib/ir-version';
 
 /**
  * ⑧ 在庫管理 — Noxa OS（実データ）
@@ -241,7 +242,7 @@ export function InventoryClient({ user }: { user: User }) {
       if (editor.id) {
         await updateDoc(doc(db, `${invPath}/${editor.id}`), payload);
       } else {
-        await addDoc(collection(db, invPath), { ...payload, createdAt: serverTimestamp() });
+        await addDoc(collection(db, invPath), stampIrVersion({ ...payload, createdAt: serverTimestamp() }));
       }
       setEditor(null);
     } catch (e) {
@@ -267,7 +268,7 @@ export function InventoryClient({ user }: { user: User }) {
       const remaining = keepForm.remaining.trim();
       if (expiresAt) payload.expiresAt = expiresAt; // undefined は書き込まない
       if (remaining) payload.remaining = remaining;
-      await addDoc(collection(db, keepPath), payload);
+      await addDoc(collection(db, keepPath), stampIrVersion(payload));
       setKeepForm(null);
     } catch (e) {
       setOpError(describeFirestoreError(e, 'ボトルキープの保存'));

@@ -6,6 +6,7 @@ import { addDoc, collection, deleteDoc, doc, getDoc, getDocs, setDoc, serverTime
 import { describeFirestoreError } from '@/lib/firestore-error';
 import type { User } from 'firebase/auth';
 import { db } from '@/lib/firebase/config';
+import { stampIrVersion } from '@/lib/ir-version';
 
 /**
  * スケジュール — Noxa OS 個人機能（実データ）
@@ -97,7 +98,7 @@ export function ScheduleClient({ user }: { user: User }) {
     if (!title.trim()) return;
     setBusy(true); setOpError(null);
     try {
-      await addDoc(collection(db, `personal_reminders/${user.uid}/items`), { title: title.trim(), date, kind, createdAt: serverTimestamp() });
+      await addDoc(collection(db, `personal_reminders/${user.uid}/items`), stampIrVersion({ title: title.trim(), date, kind, createdAt: serverTimestamp() }));
       setTitle(''); await reload();
     } catch (e) {
       // catch が無いと、登録できていないのに入力が残るだけで成功と区別がつかない

@@ -10,6 +10,7 @@ import { rankToStars, starsToRank } from '@/lib/customerRank';
 import { describeFirestoreError } from '@/lib/firestore-error';
 import { SHOP_SCOPE_NOTE } from '@/lib/shop-scope';
 import type { User } from 'firebase/auth';
+import { stampIrVersion } from '@/lib/ir-version';
 
 /**
  * 顧客台帳（最小版・yorulog ベースを最低限で移植）。
@@ -130,7 +131,7 @@ export function CustomersClient({ user }: { user: User }) {
   const place = shop.shopId ? '店舗' : '個人';
 
   const addCustomer = async (name: string, stars: number) => {
-    await addDoc(collection(db, colPath), { name: name.trim(), rank: starsToRank(stars), totalSales: 0, visitCount: 0, tags: [], createdAt: serverTimestamp(), updatedAt: serverTimestamp() });
+    await addDoc(collection(db, colPath), stampIrVersion({ name: name.trim(), rank: starsToRank(stars), totalSales: 0, visitCount: 0, tags: [], createdAt: serverTimestamp(), updatedAt: serverTimestamp() }));
   };
   const saveCustomer = async (id: string, name: string, stars: number) => {
     await updateDoc(doc(db, `${colPath}/${id}`), { name: name.trim(), rank: starsToRank(stars), updatedAt: serverTimestamp() });

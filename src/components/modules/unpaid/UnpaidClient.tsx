@@ -21,6 +21,7 @@ import { describeFirestoreError } from '@/lib/firestore-error';
 import { APPLIED, UNCHANGED, assertWriteApplied, missing, type WriteOutcome } from '@/lib/write-outcome';
 import { describeMissingShop } from '@/lib/shop-id-state';
 import { SALES_EDIT_ROLES, SALES_EDIT_ROLE_LABEL, describeSalesEditDenied } from '@/lib/permission-guidance';
+import { stampIrVersion } from '@/lib/ir-version';
 
 /**
  * 売掛管理モジュール（機微・実データ）
@@ -218,7 +219,7 @@ export function UnpaidClient({ user }: { user: User }) {
       if (fDue) payload.due = fDue;
       const memo = fMemo.trim();
       if (memo) payload.memo = memo;
-      await addDoc(collection(db, path), payload);
+      await addDoc(collection(db, path), stampIrVersion(payload));
       setFName('');
       setFAmount('');
       setFDate(today());

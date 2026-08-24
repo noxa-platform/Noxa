@@ -17,6 +17,7 @@ import { useShopRole, hasShopRole } from '@/lib/useShopRole';
 import { describeFirestoreError } from '@/lib/firestore-error';
 import { describeMissingShop } from '@/lib/shop-id-state';
 import { SALES_EDIT_ROLES, SALES_EDIT_ROLE_LABEL, describeSalesEditDenied } from '@/lib/permission-guidance';
+import { stampIrVersion } from '@/lib/ir-version';
 
 /**
  * リスク客共有 — Noxa OS モジュール（機微）
@@ -195,7 +196,7 @@ export function RiskClient({ user }: { user: User }) {
         date: fDate || today(),
         createdAt: serverTimestamp(),
       };
-      await addDoc(collection(db, path), payload);
+      await addDoc(collection(db, path), stampIrVersion(payload));
       resetForm();
       setShowForm(false);
     } catch (e) {

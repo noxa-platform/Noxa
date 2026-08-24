@@ -13,6 +13,7 @@ import { summarizeTeamShifts, type TeamShift } from '@/lib/attendance/summary';
 import { resolveOvernightEndMs } from '@/lib/attendance/shift-time';
 import { describeFirestoreError } from '@/lib/firestore-error';
 import { Shell, Section, Empty, Eyebrow, chip } from '@/components/modules/schedule/ScheduleClient';
+import { stampIrVersion } from '@/lib/ir-version';
 
 /**
  * shifts.date の日付キー規約: 打刻側（clockIn）が書く `toISOString().slice(0,10)`（UTC 暦日）。
@@ -115,7 +116,7 @@ export function AttendanceClient({ user }: { user: User }) {
   // 給与の元データなので、打てなかったことは必ず本人に見せる。
   const clockIn = async () => {
     if (!shopId || busy) return; setBusy(true); setOpError(null);
-    try { await addDoc(collection(db, `shop_shops/${shopId}/shifts`), { castUid: user.uid, date: today, startAt: serverTimestamp(), createdAt: serverTimestamp() }); await reload(shopId); }
+    try { await addDoc(collection(db, `shop_shops/${shopId}/shifts`), stampIrVersion({ castUid: user.uid, date: today, startAt: serverTimestamp(), createdAt: serverTimestamp() })); await reload(shopId); }
     catch (e) { setOpError(describeFirestoreError(e, '出勤の打刻')); }
     finally { setBusy(false); }
   };

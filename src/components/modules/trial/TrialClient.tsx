@@ -19,6 +19,7 @@ import { db } from '@/lib/firebase/config';
 import { useShopId } from '@/lib/useShopId';
 import { describeFirestoreError } from '@/lib/firestore-error';
 import { describeMissingShop } from '@/lib/shop-id-state';
+import { stampIrVersion } from '@/lib/ir-version';
 
 /**
  * 体験入店 — Noxa OS モジュール（実データ）
@@ -758,7 +759,7 @@ export function TrialClient({ user }: { user: User }) {
       if (d.note.trim()) payload.note = d.note.trim();
 
       if (key === 'new') {
-        await addDoc(collection(db, path), { ...payload, createdAt: serverTimestamp(), createdBy: user.uid });
+        await addDoc(collection(db, path), stampIrVersion({ ...payload, createdAt: serverTimestamp(), createdBy: user.uid }));
       } else {
         await updateDoc(doc(db, `${path}/${key}`), payload);
       }

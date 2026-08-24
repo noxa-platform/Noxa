@@ -15,6 +15,7 @@ import {
 import type { User } from 'firebase/auth';
 import { db } from '@/lib/firebase/config';
 import { describeFirestoreError } from '@/lib/firestore-error';
+import { stampIrVersion } from '@/lib/ir-version';
 
 /**
  * ⑨ 名刺発注 — オリシャン名刺デザイン・印刷発注（Noxa OS 個人機能・実データ）
@@ -180,7 +181,7 @@ export function BusinessCardClient({ user }: { user: User }) {
       if (shopName.trim()) payload.title = shopName.trim();
       if (sns.trim()) payload.contact = sns.trim();
       if (catchcopy.trim()) payload.finish = catchcopy.trim();
-      await addDoc(collection(db, colPath), payload);
+      await addDoc(collection(db, colPath), stampIrVersion(payload));
       // 押した瞬間の手応えが無かったので、成否を必ず出す
       setOrdered(true);
     } catch (e) {
