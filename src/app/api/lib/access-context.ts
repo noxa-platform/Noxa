@@ -128,6 +128,23 @@ export function pathAiFeedback(ctx: AccessContext, customerId: string): string {
   return `${pathCustomer(ctx, customerId)}/ai_feedback`;
 }
 
+/**
+ * ワークスペース設定の置き場（2026-08-25・ユーザー決定）。
+ *
+ * shop は従来どおり shop_shops/{shopId} 本体のフィールド。
+ * 個人（MyDeck）は shop_shops/{uid} の実体が無いため account_users/{uid}/settings/workspace。
+ * shop_shops/{uid} を作る案は Web の useShopContext で hasShop が true になり、
+ * 個人ユーザーに店舗 UI が出る副作用があるので採っていない。
+ *
+ * ⚠️ 個人側は shop 本体と違い**サブドキュメント**なので、shop の設定と同じ感覚で
+ * ワークスペース doc を直接 update しないこと（親は PII を持つ account_users）。
+ */
+export function pathWorkspaceSettings(ctx: AccessContext): string {
+  return ctx.kind === 'shop'
+    ? `shop_shops/${ctx.shopId}`
+    : `account_users/${ctx.uid}/settings/workspace`;
+}
+
 export function pathAiProfile(ctx: AccessContext): string {
   // personal の場合 personal_self_styles 経由。shop の場合 ai_profile/self
   return ctx.kind === 'shop'

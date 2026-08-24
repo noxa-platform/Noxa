@@ -70,6 +70,25 @@ service cloud.firestore {
         allow read: if isSelf(uid);
         allow write: if false;
       }
+
+      // 個人ワークスペース（MyDeck）の設定置き場（2026-08-25・ユーザー決定）。
+      //
+      // 背景: fetchMyWorkspaces は個人ユーザーに docID == uid の MyDeck を必ず足すが、
+      // shop_shops/{uid} の実体は無い。一方で設定はすべて shop_shops/{workspaceId} への
+      // updateData / getDocument なので、個人ユーザーは目標・AI 学習の opt-out・
+      // よく行く場所・来店種別の追加が**どれも保存できない**（読みは isShopMember で
+      // 拒否、書きは not-found）。
+      //
+      // shop_shops/{uid} の実体を作る案は、Web の useShopContext で hasShop が true になり
+      // 個人ユーザーに店舗 UI が出てしまう副作用があるため採らない。
+      // 個人設定は uid 単位でここに閉じる。
+      //
+      // PII（lineLoginUserId / platformRole）を持つ親 doc とは別 doc にする。
+      // 設定の保存が親のフィールドを巻き込む形にしないため（platformRole は
+      // 親側のルールで守っているが、そもそも同じ doc を触らせない方が安全）。
+      match /settings/{settingId} {
+        allow read, write: if isSelf(uid);
+      }
     }
 
     match /account_subscriptions/{uid} {

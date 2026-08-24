@@ -4,7 +4,7 @@ import {
   pathCustomers, pathCustomer, pathCustomerLogs, pathCustomerSubcollection,
   pathSales, pathStandaloneSales, pathAiThreads, pathAiThread,
   pathSelfStyle, pathReminders, pathTemplates, pathGoals,
-  pathAiFeedback, pathAiProfile,
+  pathAiFeedback, pathAiProfile, pathWorkspaceSettings,
 } from '../../src/app/api/lib/access-context';
 
 // テナント隔離のパスビルダー（情報漏洩防止の境界・Admin SDK は rules を迂回するため
@@ -23,6 +23,7 @@ describe('access-context path helpers — shop コンテキスト', () => {
     expect(pathTemplates(shop)).toBe('shop_shops/S1/templates');
     expect(pathGoals(shop)).toBe('shop_shops/S1/goals');
     expect(pathAiProfile(shop)).toBe('shop_shops/S1/ai_profile/self');
+    expect(pathWorkspaceSettings(shop)).toBe('shop_shops/S1');
   });
 });
 
@@ -36,6 +37,8 @@ describe('access-context path helpers — personal コンテキスト', () => {
     expect(pathTemplates(personal)).toBe('personal_templates/U1/items');
     expect(pathGoals(personal)).toBe('personal_goals/U1/items');
     expect(pathAiProfile(personal)).toBe('personal_self_styles/U1');
+    // 個人は shop_shops/{uid} が実体を持たないため account_users 配下（2026-08-25 決定）
+    expect(pathWorkspaceSettings(personal)).toBe('account_users/U1/settings/workspace');
   });
 });
 
@@ -101,4 +104,24 @@ describe('access-context path helpers — テナント越境しない不変条�
     // shop の顧客/売上系は personal_ コレクションに漏れない
     for (const p of shopPaths) expect(p.startsWith('shop_shops/S1/')).toBe(true);
   });
+
+// 個人ワークスペースの設定が shop_shops 側へ漏れない（実体の無い doc を書きに行かない）
+describe('pathWorkspaceSettings — 個人と店舗の分離', () => {
+  const shop = { kind: 'shop', shopId: 'S1', uid: 'U1' } as never;
+  const personal = { kind: 'personal', uid: 'U1' } as never;
+
+  it('個人の設定先は shop_shops を指さない', () => {
+    expect(pathWorkspaceSettings(personal).startsWith('shop_shops/')).toBe(false);
+    expect(pathWorkspaceSettings(personal)).not.toBe('shop_shops/U1');
+  });
+
+  it('店舗と個人で同じ uid でも別の場所になる', () => {
+    expect(pathWorkspaceSettings(shop)).not.toBe(pathWorkspaceSettings(personal));
+  });
+
+  it('個人の設定は PII を持つ親 doc 自体ではなくサブドキュメント', () => {
+    expect(pathWorkspaceSettings(personal)).not.toBe('account_users/U1');
+    expect(pathWorkspaceSettings(personal).split('/').length).toBe(4);
+  });
+});
 });
