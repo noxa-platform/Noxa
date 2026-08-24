@@ -893,7 +893,11 @@ export const PLAN_LIMITS: Record<PlanTier, {
 }> = {
   free: {
     maxCustomers: Infinity,
-    maxAiCredits: 50,
+    // 無料の月次 AI 枠は廃止（2026-08-25 ユーザー決定「AI 機能は割高にして利用者を絞る /
+    // 無料枠は廃止 / 無料機能と有料機能を完全に分離」）。
+    // 0 にしても reserveAiCredit は monthlyRemaining=0 として購入クレジットへ回るだけで、
+    // account_subscriptions.purchasedCredits（購入済み残高）には一切触れない。
+    maxAiCredits: 0,
     maxWorkspaces: 1,
     maxMembers: 1,
     hasAds: true,

@@ -114,25 +114,28 @@ describe('grantBonusCredits（used カウンタ減算方式）', () => {
 describe('getAiCreditsRemaining（月次残＋購入クレジット合算）', () => {
   beforeEach(() => mocks.getAdminDb.mockReset());
 
-  it('free: 月次残(50-used) と purchased を合算', async () => {
+  // 2026-08-25: 無料の月次枠を廃止（free.maxAiCredits 50 → 0）。
+  // free は「購入クレジットがある分だけ AI が使える」形になった。
+  it('free: 月次枠ゼロ＝残は purchased のみ（購入済み残高は消えない）', async () => {
     const { db } = makeDb({ usage: { count: 10 }, sub: { purchasedCredits: 20 } });
     mocks.getAdminDb.mockReturnValue(db);
     const r = await getAiCreditsRemaining('u1');
-    expect(r).toEqual({ remaining: 60, total: 70, monthlyRemaining: 40, monthlyTotal: 50, purchasedCredits: 20 });
+    expect(r).toEqual({ remaining: 20, total: 20, monthlyRemaining: 0, monthlyTotal: 0, purchasedCredits: 20 });
   });
 
   it('used が月次上限超: monthlyRemaining は 0 でクランプ（残は purchased のみ）', async () => {
-    const { db } = makeDb({ usage: { count: 60 }, sub: { purchasedCredits: 5 } });
+    // 月次枠のクランプ機構そのものは有料プランで見る（free は上限 0 で自明に 0 になるため）
+    const { db } = makeDb({ usage: { count: 1100 }, sub: { planTier: 'pro', purchasedCredits: 5 } });
     mocks.getAdminDb.mockReturnValue(db);
     const r = await getAiCreditsRemaining('u1');
-    expect(r).toEqual({ remaining: 5, total: 55, monthlyRemaining: 0, monthlyTotal: 50, purchasedCredits: 5 });
+    expect(r).toEqual({ remaining: 5, total: 1005, monthlyRemaining: 0, monthlyTotal: 1000, purchasedCredits: 5 });
   });
 
-  it('doc 無し: free 上限 50 をそのまま残数に', async () => {
+  it('doc 無し: free は残 0（無料枠廃止後）', async () => {
     const { db } = makeDb({});
     mocks.getAdminDb.mockReturnValue(db);
     const r = await getAiCreditsRemaining('u1');
-    expect(r).toEqual({ remaining: 50, total: 50, monthlyRemaining: 50, monthlyTotal: 50, purchasedCredits: 0 });
+    expect(r).toEqual({ remaining: 0, total: 0, monthlyRemaining: 0, monthlyTotal: 0, purchasedCredits: 0 });
   });
 
   it('pro プラン: 上限 1000 が反映される', async () => {
@@ -148,7 +151,7 @@ describe('getAiCreditsRemaining（月次残＋購入クレジット合算）', (
     mocks.getAdminDb.mockReturnValue(db);
     const r = await getAiCreditsRemaining('u1');
     expect(r.purchasedCredits).toBe(0);
-    expect(r.remaining).toBe(50);
+    expect(r.remaining).toBe(0);
   });
 });
 

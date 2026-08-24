@@ -70,7 +70,8 @@ describe('reserveAiCredit の消費内訳', () => {
   beforeEach(() => mocks.getAdminDb.mockReset());
 
   it('月次枠で賄える: 全額 monthly から消費（consumedPurchased=0）', async () => {
-    const { db, store } = makeDb(); // free=50・used0・purchased0
+    // 無料枠廃止（free=0）後、月次枠の消費機構は有料プランで見る
+    const { db, store } = makeDb({ sub: { planTier: 'pro' } }); // pro=1000・used0・purchased0
     mocks.getAdminDb.mockReturnValue(db);
     const r = await reserveAiCredit('u1', 5);
     expect(r.ok).toBe(true);
@@ -80,14 +81,34 @@ describe('reserveAiCredit の消費内訳', () => {
   });
 
   it('月次不足: 月次を使い切り不足分を purchased から消費（内訳を返す）', async () => {
-    const { db, store } = makeDb({ usage: { count: 48 }, sub: { purchasedCredits: 10 } }); // 残 monthly2
+    const { db, store } = makeDb({ usage: { count: 998 }, sub: { planTier: 'pro', purchasedCredits: 10 } }); // 残 monthly2
     mocks.getAdminDb.mockReturnValue(db);
     const r = await reserveAiCredit('u1', 5);
     expect(r.ok).toBe(true);
     expect(r.consumedMonthly).toBe(2);
     expect(r.consumedPurchased).toBe(3);
-    expect(count(store)).toBe(50);      // 月次は上限まで
+    expect(count(store)).toBe(1000);    // 月次は上限まで
     expect(purchased(store)).toBe(7);   // purchased から3
+  });
+
+  // 無料枠廃止（2026-08-25）の要点: 月次を 0 にしても購入済み残高には触れない。
+  // ここが壊れると「課金したのに使えない / 残高が消えた」になる
+  it('free（月次 0）でも購入クレジットだけで消費できる', async () => {
+    const { db, store } = makeDb({ sub: { purchasedCredits: 10 } }); // planTier 無し = free
+    mocks.getAdminDb.mockReturnValue(db);
+    const r = await reserveAiCredit('u1', 4);
+    expect(r.ok).toBe(true);
+    expect(r.consumedMonthly).toBe(0);   // 月次からは 1cr も引かない
+    expect(r.consumedPurchased).toBe(4);
+    expect(purchased(store)).toBe(6);
+  });
+
+  it('free で購入クレジットが無ければ ok:false（購入済み残高は不変）', async () => {
+    const { db, store } = makeDb({ sub: { purchasedCredits: 0 } });
+    mocks.getAdminDb.mockReturnValue(db);
+    const r = await reserveAiCredit('u1', 1);
+    expect(r.ok).toBe(false);
+    expect(purchased(store)).toBe(0);
   });
 
   it('purchased でも足りなければ ok:false（消費なし）', async () => {
@@ -123,11 +144,11 @@ describe('refundAiCredit の内訳対称払い戻し（Day39 の核）', () => {
   });
 
   it('reserve→refund の往復（内訳受け渡し）で完全に元へ戻る', async () => {
-    const { db, store } = makeDb({ usage: { count: 48 }, sub: { purchasedCredits: 10 } });
+    const { db, store } = makeDb({ usage: { count: 998 }, sub: { planTier: 'pro', purchasedCredits: 10 } });
     mocks.getAdminDb.mockReturnValue(db);
     const r = await reserveAiCredit('u1', 5);
-    expect([count(store), purchased(store)]).toEqual([50, 7]); // 消費後
+    expect([count(store), purchased(store)]).toEqual([1000, 7]); // 消費後
     await refundAiCredit('u1', 5, r);
-    expect([count(store), purchased(store)]).toEqual([48, 10]); // 完全復元
+    expect([count(store), purchased(store)]).toEqual([998, 10]); // 完全復元
   });
 });
