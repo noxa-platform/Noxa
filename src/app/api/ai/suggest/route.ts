@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { generateText } from '../ai-provider';
+import { withInjectionGuard, wrapUntrustedInput } from '@/lib/ai-knowledge/injection-guard';
 import { reserveAiCredit, refundAiCredit, logAiLedger } from '../../lib/credits';
 import { estimateAiCost } from '@/lib/ai-cost';
 import { getAdminDb, verifyRequest, AuthError } from '../../lib/firebase-admin';
@@ -57,10 +58,12 @@ export async function POST(request: NextRequest) {
 
     let content: string;
     try {
+      // 顧客の保存済みフリーテキストと、learn-from-text が相手の LINE 履歴から機械抽出して
+      // 書き戻した値を読む。攻撃者の書いた文字列が 1 ホップ挟んで届く経路（P130）
       content = await generateText(
-        `顧客データ:\n${context}\n\n直前のログ種別: ${lastLogType || '不明'}\n\n次のアクションを提案してください。`,
+        `${wrapUntrustedInput(context, '顧客データ')}\n\n直前のログ種別: ${lastLogType || '不明'}\n\n次のアクションを提案してください。`,
         {
-          systemInstruction: `あなたはNoxaのAIアドバイザーです。
+          systemInstruction: withInjectionGuard(`あなたはNoxaのAIアドバイザーです。
 ログ入力後に次のアクションを提案します。
 
 出力形式（JSON）:
@@ -69,7 +72,7 @@ export async function POST(request: NextRequest) {
   "timing": "推奨タイミング（例: 3日後、来週、今週末）",
   "reason": "提案理由（30文字以内）",
   "messageIdea": "LINEメッセージのアイデア（50文字以内、省略可）"
-}`,
+}`),
           maxOutputTokens: 300,
           temperature: 0.7,
           responseMimeType: 'application/json',

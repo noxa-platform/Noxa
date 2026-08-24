@@ -23,6 +23,7 @@ import { generateText } from '../ai-provider';
 import { withReservedCredits } from '../with-credits';
 import { estimateAiCost } from '@/lib/ai-cost';
 import { maskContactInfo } from '@/lib/ai-privacy';
+import { withInjectionGuard, wrapUntrustedInput } from '@/lib/ai-knowledge/injection-guard';
 import { safeParseJson } from '@/lib/ai-knowledge/safe-json';
 import { validateConfigPatch, WRITABLE_FIELDS, describeField } from '@/lib/pos/config-schema';
 import type { StoreConfig } from '@/lib/pos/types';
@@ -38,7 +39,7 @@ interface PosConfigRequestBody {
   current: StoreConfig;
 }
 
-const SYSTEM_INSTRUCTION = `あなたはナイトワーク店舗の料金設定を組み立てる担当者です。
+const SYSTEM_INSTRUCTION = withInjectionGuard(`あなたはナイトワーク店舗の料金設定を組み立てる担当者です。
 店長の日本語の要望から、POS の料金設定の**変更したい項目だけ**を JSON で返してください。
 
 厳守:
@@ -60,7 +61,7 @@ ${WRITABLE_FIELDS.join(', ')}
 - taxRate=税・サービス料 / initialNoOrderTaxRate=初回で追加注文が無いときの税率
 
 出力例:
-{"initialPricing":{"set":3000,"nom":2000},"regularPricing":{"ext":3000}}`;
+{"initialPricing":{"set":3000,"nom":2000},"regularPricing":{"ext":3000}}`);
 
 export async function POST(request: NextRequest) {
   try {
@@ -103,7 +104,9 @@ export async function POST(request: NextRequest) {
       additionalNominationFee: current.additionalNominationFee,
       closingHour: current.closingHour,
     });
-    const userPrompt = `# 現在の料金設定\n${currentDigest}\n\n# 店長の要望\n${maskedText}\n\n上記の要望で**変更する項目だけ**を JSON で返してください。`;
+    // 要望文は店長が書く想定だが、料金表の写しや他店資料の貼り付けが混ざる。
+    // 出力先が**伝票の金額**である以上、指示として読ませない（P130）
+    const userPrompt = `# 現在の料金設定\n${currentDigest}\n\n${wrapUntrustedInput(maskedText, '店長の要望')}\n\n上記の要望で**変更する項目だけ**を JSON で返してください。`;
 
     const cost = estimateAiCost({
       inputText: userPrompt,

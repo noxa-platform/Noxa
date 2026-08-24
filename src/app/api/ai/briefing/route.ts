@@ -8,6 +8,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { logAiUsage } from '@/app/api/lib/credits';
 import { generateText } from '../ai-provider';
+import { withInjectionGuard, wrapUntrustedInput } from '@/lib/ai-knowledge/injection-guard';
 import { estimateAiCost } from '@/lib/ai-cost';
 import { withReservedCredits } from '../with-credits';
 import { getAdminDb, verifyRequest, AuthError } from '../../lib/firebase-admin';
@@ -71,7 +72,10 @@ async function getCustomerContext(ctx: AccessContext, customerId: string): Promi
   }
 }
 
-const SYSTEM_INSTRUCTION = `あなたは Noxa の AI ブリーフィング担当です。
+// 顧客の保存済みフリーテキスト（メモ・好み・NG）と、learn-from-text が相手の LINE 履歴から
+// 機械抽出して書き戻した値を読む。**攻撃者が書いた文字列が 1 ホップ挟んで届く経路**なので
+// System 側でデータ境界を宣言する（P130）
+const SYSTEM_INSTRUCTION = withInjectionGuard(`あなたは Noxa の AI ブリーフィング担当です。
 顧客一人を 30 秒で再把握できるサマリを作ります。
 
 ルール:
@@ -91,7 +95,7 @@ JSON 出力形式（必ず厳密 JSON のみ、説明文不要）:
   "topicCandidates": ["話題1", "話題2", "話題3"],
   "avoidTopics": ["避けるべき1", ...],
   "tipForToday": "今日の接客アドバイス 50 字以内"
-}`;
+}`);
 
 export async function POST(request: NextRequest) {
   try {
@@ -116,7 +120,7 @@ export async function POST(request: NextRequest) {
       // 無料機能でも AI 原価はかかる。課金せず利用だけ記録する（Day126）
       void logAiUsage(uid, 'briefing');
       const raw = await generateText(
-        `# 顧客情報\n${context}\n\n上記の顧客について、今日の会話前ブリーフィングを JSON で出力してください。`,
+        `${wrapUntrustedInput(context, '顧客情報')}\n\n上記の顧客について、今日の会話前ブリーフィングを JSON で出力してください。`,
         {
           systemInstruction: SYSTEM_INSTRUCTION,
           maxOutputTokens: 600,

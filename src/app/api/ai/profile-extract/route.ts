@@ -14,6 +14,7 @@ import { logAiUsage } from '@/app/api/lib/credits';
 import { verifyRequest, AuthError } from '../../lib/firebase-admin';
 import { resolveAccessContext } from '../../lib/access-context';
 import { analyzeImages } from '../ai-provider';
+import { withInjectionGuard } from '@/lib/ai-knowledge/injection-guard';
 import { estimateAiCost } from '@/lib/ai-cost';
 import { withReservedCredits } from '../with-credits';
 
@@ -43,7 +44,9 @@ interface ExtractedProfile {
   notes?: string | null; // 抽出 AI から人間向けメモ
 }
 
-const EXTRACT_SYSTEM_INSTRUCTION = `あなたはホスト/キャバクラ業界のプロフィール情報抽出 AI です。
+// 解析対象は相手の LINE / プロフィール画面のスクショ＝**相手が書いた文字列が写る**。
+// 囲えないぶん System 側でデータ境界を宣言する（P130）
+const EXTRACT_SYSTEM_INSTRUCTION = withInjectionGuard(`あなたはホスト/キャバクラ業界のプロフィール情報抽出 AI です。
 ユーザーが投稿した画像（名刺・SNS スクショ・出勤表・店舗看板・自分の LINE 送信履歴
 など）から、以下のグループに分けて項目をできる範囲で抽出してください。
 
@@ -86,7 +89,7 @@ const EXTRACT_SYSTEM_INSTRUCTION = `あなたはホスト/キャバクラ業界�
   "businessHours": string | null,
   "phoneNumber": string | null,
   "notes": string | null
-}`;
+}`, 'image');
 
 export async function POST(request: NextRequest) {
   try {

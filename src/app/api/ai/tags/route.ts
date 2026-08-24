@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { maskContactInfo } from '@/lib/ai-privacy';
+import { withInjectionGuard, wrapUntrustedInput } from '@/lib/ai-knowledge/injection-guard';
 import { generateText } from '../ai-provider';
 import { reserveAiCredit, refundAiCredit, logAiLedger } from '../../lib/credits';
 import { estimateAiCost } from '@/lib/ai-cost';
@@ -14,9 +15,11 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'パラメータ不足' }, { status: 400 });
     }
 
-    // 既存タグ一覧をプロンプトに含めるための文字列を構築
+    // 既存タグ一覧。**クライアントから来る値なので system 側には置かない**（P130）。
+    // 旧実装は systemInstruction にそのまま埋めており、タグ名に指示文を仕込めば
+    // ルール本体と同じ重みで読まれる形だった。ユーザープロンプト側へ移し、囲って渡す。
     const existingTagsPrompt = Array.isArray(existingTags) && existingTags.length > 0
-      ? `\nワークスペース内で使用中のタグ一覧:\n[${existingTags.join(', ')}]\n\nできるだけ既存タグから選んでください。新しいタグを作る場合は既存タグと表記を統一してください。`
+      ? `\n\n${wrapUntrustedInput(existingTags.map(String).join(', '), 'ワークスペース内で使用中のタグ一覧')}`
       : '';
 
     // 来店ログの memo は**保存済みの顧客フリーテキスト**（Day12 ポリシーのマスク対象）。
@@ -24,6 +27,10 @@ export async function POST(request: NextRequest) {
     const logsContext = Array.isArray(logs)
       ? maskContactInfo(logs.map((l: Record<string, unknown>) => `${l.type}: ${l.memo || ''} (場所: ${l.place || '不明'})`).join('\n'))
       : 'ログなし';
+
+    // 顧客名・メモとも、相手が名乗った文字列や相手の発言の書き写しが入る。
+    // 指示ではなくデータであることをマーカーで固定する（P130）
+    const userPrompt = `${wrapUntrustedInput(`顧客名: ${customerName}\nログ内容:\n${logsContext}`, '解析対象')}${existingTagsPrompt}`;
 
     // タグ生成は軽量なのでベース最小だが、ログ数に比例
     const tagsCost = estimateAiCost({
@@ -38,16 +45,17 @@ export async function POST(request: NextRequest) {
     let content: string;
     try {
       content = await generateText(
-        `顧客名: ${customerName}\nログ内容:\n${logsContext}`,
+        userPrompt,
         {
-          systemInstruction: `あなたはNoxaの自動タグ付けAIです。
+          systemInstruction: withInjectionGuard(`あなたはNoxaの自動タグ付けAIです。
 顧客のログ（メモ、場所、種別）から嗜好や特徴を自動抽出し、タグを提案してください。
-${existingTagsPrompt}
+既存タグ一覧が渡されていれば、できるだけそこから選び、新規タグも既存の表記に揃えてください。
+
 ルール:
 - 5個以内のタグを提案
 - 既存のNoxaタグ形式に合わせる（短く、わかりやすい）
 - JSON配列で出力: ["タグ1", "タグ2", ...]
-- 例: ["お酒好き", "話し上手", "シャンパン派", "週末常連", "記念日重視"]`,
+- 例: ["お酒好き", "話し上手", "シャンパン派", "週末常連", "記念日重視"]`),
           maxOutputTokens: 200,
           temperature: 0.5,
           responseMimeType: 'application/json',

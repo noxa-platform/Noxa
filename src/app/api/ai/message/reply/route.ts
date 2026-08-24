@@ -7,6 +7,7 @@ import { resolveAccessContext, pathCustomer, pathCustomerSubcollection } from '.
 import { resolveWorkspaceContext, composePlaybookAndSelf, buildSelfBaseBlock } from '@/lib/ai-knowledge/prompt-helpers';
 import { getGlobalSuccessPatterns, getAggregateHint } from '@/lib/ai-knowledge/global-patterns';
 import { AI_CONFIG } from '@/lib/ai-knowledge/constants';
+import { buildInjectionGuardBlock, wrapUntrustedInput } from '@/lib/ai-knowledge/injection-guard';
 import { safeParseStringArray } from '@/lib/ai-knowledge/safe-json';
 import { maskDeep } from '@/lib/ai-privacy';
 
@@ -255,15 +256,18 @@ JSON配列で3つの返信案:
 
     // システムインストラクション構築。プレイブックは composePlaybookAndSelf で統一
     const { playbookBlock, storeBlock } = composePlaybookAndSelf({ storeType, scene, compact: false, selfData: null, storeProfile });
+    // この route は**スクショ（相手の LINE 画面）と会話本文の両方**を渡す。
+    // どちらも相手が自由に書ける文字列なので、System の先頭でデータ境界を宣言する（P130）
     const systemParts = [
+      buildInjectionGuardBlock('both'),
+      '',
       'あなたはナイトワーク（ホスト・ホステス・キャバ嬢）専門のLINE返信アドバイザーです。',
       '以下の業界プレイブックを最優先で遵守してください。',
       '',
       playbookBlock,
       storeBlock,
       '',
-      '## 顧客情報',
-      customerInfo,
+      wrapUntrustedInput(customerInfo, '顧客情報'),
     ];
 
     // 手入力の AI 学習プロファイル
@@ -289,7 +293,8 @@ JSON配列で3つの返信案:
 
     // スクショ解析で学習済みの情報
     if (customerData.customerPersonality) {
-      systemParts.push('', '## 相手の性格（スクショ解析）', customerData.customerPersonality);
+      // スクショ解析の出力＝相手の文面から機械生成した値。原文の混入を前提に囲う
+      systemParts.push('', wrapUntrustedInput(customerData.customerPersonality, '相手の性格（スクショ解析）'));
     }
     if (customerData.myMessageStyle) {
       systemParts.push('', '## 自分の文体の特徴（この人向け）', customerData.myMessageStyle);
@@ -324,7 +329,9 @@ JSON配列で3つの返信案:
     }
 
     if (recentChat.length > 0) {
-      systemParts.push('', '## 過去のやり取り（参考）', chatHistoryText);
+      // 相手が書いた LINE 本文そのもの。囲わずに system へ入れると、
+      // 相手の一言がプレイブックと同じ重みの指示として読まれる
+      systemParts.push('', wrapUntrustedInput(chatHistoryText, '過去のやり取り（参考）'));
     }
 
     // 過去の 👍👎 フィードバック

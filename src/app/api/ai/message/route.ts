@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { generateText } from '../ai-provider';
+import { withInjectionGuard, wrapUntrustedInput } from '@/lib/ai-knowledge/injection-guard';
 import { reserveAiCredit, refundAiCredit, logAiLedger } from '../../lib/credits';
 import { estimateAiCost } from '@/lib/ai-cost';
 import { getAdminDb, verifyRequest, AuthError } from '../../lib/firebase-admin';
@@ -240,10 +241,13 @@ export async function POST(request: NextRequest) {
       ? `${purposePrompt}\n\n追加の指示: ${customPrompt}`
       : purposePrompt;
 
+      // customerContext には chatHistory（**相手が書いた LINE 本文**）が丸ごと入る。
+      // ＝ 顧客側が自由に書ける文字列がプロンプトに載る唯一の常設経路なので囲う（P130）。
+      // customPrompt は操作者本人の追加指示なので囲いの外（指示として読ませてよい）
       result = await generateText(
-        `顧客データ:\n${customerContext}${selfBaseBlock}${feedbackBlock}${globalBlock}\n\nメッセージの目的: ${requestPrompt}`,
+        `${wrapUntrustedInput(customerContext, '顧客データ')}${selfBaseBlock}${feedbackBlock}${globalBlock}\n\nメッセージの目的: ${requestPrompt}`,
       {
-        systemInstruction: `あなたはナイトワーク（ホスト・ホステス・キャバ嬢）専門のLINEメッセージ作成AIです。
+        systemInstruction: withInjectionGuard(`あなたはナイトワーク（ホスト・ホステス・キャバ嬢）専門のLINEメッセージ作成AIです。
 お客様との関係構築・来店促進・リピート率向上を目的としたメッセージを作成します。
 以下の業界プレイブックを最優先で遵守してください。
 
@@ -278,7 +282,7 @@ ${playbookBlock}${storeBlock}
 
 ## 出力形式
 JSON配列で3つのメッセージを出力:
-["メッセージ1", "メッセージ2", "メッセージ3"]`,
+["メッセージ1", "メッセージ2", "メッセージ3"]`),
           maxOutputTokens: 1500,
           temperature: 0.8,
           responseMimeType: 'application/json',

@@ -113,18 +113,23 @@ describe('ai/sales-message POST（営業メッセージ生成）', () => {
   });
 
   describe('プロンプト構成', () => {
-    it('context / hint 未指定なら該当行を出さない（空行だけの背景を作らない）', async () => {
+    // P130: 顧客名・背景は「相手の文面の書き写し」なのでマーカーで囲う形に変わった
+    // （`背景: <値>` → `## 背景` + 囲い）。載る／載らないの判定はそのまま。
+    it('context / hint 未指定なら該当節を出さない（空の背景を作らない）', async () => {
       await POST(req({ customerName: 'あい' }));
       const prompt = lastPrompt();
-      expect(prompt).toContain('顧客名: あい');
-      expect(prompt).not.toContain('背景:');
+      expect(prompt).toContain('## 顧客名');
+      expect(prompt).toContain('あい');
+      expect(prompt).not.toContain('## 背景');
       expect(prompt).not.toContain('追加の指示:');
     });
 
     it('context / hint があれば両方載る', async () => {
       await POST(req({ customerName: 'あい', context: '誕生日が近い', hint: 'カジュアルめ' }));
       const prompt = lastPrompt();
-      expect(prompt).toContain('背景: 誕生日が近い');
+      expect(prompt).toContain('## 背景');
+      expect(prompt).toContain('誕生日が近い');
+      // hint は操作者本人の指示なので囲わない（指示として読ませてよい側）
       expect(prompt).toContain('追加の指示: カジュアルめ');
     });
 

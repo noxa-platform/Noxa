@@ -6,6 +6,7 @@ import { withReservedCredits } from '../with-credits';
 import { verifyRequest, AuthError } from '../../lib/firebase-admin';
 import { resolveAccessContext } from '../../lib/access-context';
 import { maskContactInfo } from '@/lib/ai-privacy';
+import { withInjectionGuard, wrapUntrustedInput } from '@/lib/ai-knowledge/injection-guard';
 
 const MAX_BYTES = 16 * 1024; // 短い発話想定。16KB 上限。
 
@@ -19,6 +20,9 @@ const MAX_BYTES = 16 * 1024; // 短い発話想定。16KB 上限。
  *   - 金額計算・日付確定はしない（whenText は表現のまま。amount は数値抽出のみ）
  *
  * iOS の ParsedEntryData と同一スキーマ。
+ *
+ * 安全性: 発話は本人が打った文字列だが、**読み上げや貼り付けで相手の文面がそのまま
+ * 入る**ため信頼できる入力とは扱わない。マーカーで囲い System 側のガードを載せる（P130）。
  */
 export async function POST(request: NextRequest) {
   try {
@@ -55,9 +59,9 @@ export async function POST(request: NextRequest) {
       // 無料機能でも AI 原価はかかる。課金せず利用だけ記録する（Day126）
       void logAiUsage(uid, 'parse');
       const raw = await generateText(
-        `## 発話\n${maskedText}\n\n上記の発話を解析し、下記スキーマの JSON のみを返してください（前後の説明文やコードフェンスは禁止）。`,
+        `${wrapUntrustedInput(maskedText, '発話')}\n\n上記の発話を解析し、下記スキーマの JSON のみを返してください（前後の説明文やコードフェンスは禁止）。`,
         {
-          systemInstruction: `あなたは夜職（ホスト/キャバ等）向け顧客管理アプリの入力アシスタントです。
+          systemInstruction: withInjectionGuard(`あなたは夜職（ホスト/キャバ等）向け顧客管理アプリの入力アシスタントです。
 ユーザーの短い発話を、売上記録・顧客なし日売・予定のいずれかに構造化します。
 金額の計算や日付の確定はしません（日時は表現のまま whenText に入れる。amount は数値のみ）。
 
@@ -78,7 +82,7 @@ export async function POST(request: NextRequest) {
 - 顧客名があり過去/当日の来店・売上 → visitLog
 - 顧客名なし＋組数や「フリー/日売」 → standaloneSale
 - 「明日/今度/予定/約束」等の未来 → reminder
-- 判別不能 → unknown`,
+- 判別不能 → unknown`),
           responseMimeType: 'application/json',
         },
       );

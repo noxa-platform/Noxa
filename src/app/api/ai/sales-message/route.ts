@@ -15,6 +15,7 @@
 // クライアントの実装に依存せずサーバで伏字化する。
 import { NextRequest, NextResponse } from 'next/server';
 import { generateText } from '../ai-provider';
+import { withInjectionGuard, wrapUntrustedInput } from '@/lib/ai-knowledge/injection-guard';
 import { reserveAiCredit, refundAiCredit, logAiLedger } from '../../lib/credits';
 import { estimateAiCost } from '@/lib/ai-cost';
 import { maskContactInfo } from '@/lib/ai-privacy';
@@ -26,7 +27,10 @@ interface SalesMessageBody {
   hint?: string | null;
 }
 
-const SYSTEM_INSTRUCTION = `あなたはナイトワーク（ホスト・ホステス・キャバ嬢）専門の LINE 営業メッセージ作成 AI です。
+// 顧客の保存済みフリーテキスト（メモ・好み・NG）と、learn-from-text が相手の LINE 履歴から
+// 機械抽出して書き戻した値を読む。**攻撃者が書いた文字列が 1 ホップ挟んで届く経路**なので
+// System 側でデータ境界を宣言する（P130）
+const SYSTEM_INSTRUCTION = withInjectionGuard(`あなたはナイトワーク（ホスト・ホステス・キャバ嬢）専門の LINE 営業メッセージ作成 AI です。
 お客様への営業（来店促進・関係構築）を目的とした自然で押し付けがましくないメッセージを 3 パターン作成します。
 
 ## ルール
@@ -46,7 +50,7 @@ const SYSTEM_INSTRUCTION = `あなたはナイトワーク（ホスト・ホス�
 
 ## 出力形式
 JSON 配列で 3 つのメッセージを出力:
-["メッセージ1", "メッセージ2", "メッセージ3"]`;
+["メッセージ1", "メッセージ2", "メッセージ3"]`);
 
 export async function POST(request: NextRequest) {
   try {
@@ -66,8 +70,10 @@ export async function POST(request: NextRequest) {
     const promptParts = [
       // 氏名自体は送る方針（ポリシー方針4・源氏名運用を推奨）だが、名前欄に連絡先を
       // 書き込む運用者がいるため sibling（ai/message）と同じくマスクを通す。
-      `顧客名: ${maskContactInfo(customerName)}`,
-      context ? `背景: ${context}` : '',
+      // 顧客名・背景は iOS が customer.importantMemo を詰めて送る経路（Day103）＝
+      // 相手の文面の書き写しが入る。hint は操作者本人の指示なので囲いの外（P130）
+      wrapUntrustedInput(maskContactInfo(customerName), '顧客名'),
+      context ? wrapUntrustedInput(context, '背景') : '',
       hint ? `追加の指示: ${hint}` : '',
       '上記をもとに営業 LINE メッセージを 3 パターン生成してください。',
     ].filter(Boolean);

@@ -14,6 +14,7 @@ import { logAiUsage } from '@/app/api/lib/credits';
 import { verifyRequest, AuthError } from '../../lib/firebase-admin';
 import { resolveAccessContext } from '../../lib/access-context';
 import { analyzeImages } from '../ai-provider';
+import { withInjectionGuard } from '@/lib/ai-knowledge/injection-guard';
 import { estimateAiCost } from '@/lib/ai-cost';
 import { withReservedCredits } from '../with-credits';
 
@@ -63,7 +64,9 @@ interface ExtractResponse {
   creditsRemaining: number;
 }
 
-const EXTRACT_SYSTEM_INSTRUCTION = `あなたはホスト/キャバクラ業界のチャット解析 AI です。
+// 解析対象は相手の LINE / プロフィール画面のスクショ＝**相手が書いた文字列が写る**。
+// 囲えないぶん System 側でデータ境界を宣言する（P130）
+const EXTRACT_SYSTEM_INSTRUCTION = withInjectionGuard(`あなたはホスト/キャバクラ業界のチャット解析 AI です。
 ユーザーが投稿した LINE / DM のスクショから「相手（顧客）」の情報を読み取って、
 JSON で構造化してください。
 
@@ -94,7 +97,7 @@ JSON で構造化してください。
 }
 
 データが顧客との会話と判定できない（看板・商品写真・自分のプロフィール等）場合は、
-すべて null / 空配列を返してください。`;
+すべて null / 空配列を返してください。`, 'image');
 
 function isPlausibleCustomerContent(e: CustomerContextExtracted): boolean {
   // 1 つでも非空のフィールドがあれば「中身あり」扱い

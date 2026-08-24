@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { logAiUsage } from '@/app/api/lib/credits';
 import { generateText } from '../ai-provider';
+import { withInjectionGuard, wrapUntrustedInput } from '@/lib/ai-knowledge/injection-guard';
 import { withReservedCredits } from '../with-credits';
 import {
   getAdminDb,
@@ -160,9 +161,11 @@ export async function POST(request: NextRequest) {
       // 無料機能でも AI 原価はかかる。課金せず利用だけ記録する（Day126）
       void logAiUsage(uid, 'customer-infer-profile');
       const raw = await generateText(
-        `## 既存プロフィール\n${profileForAi}\n\n## 接触ログ（古い → 新しい）\n${maskedLogsForAi}\n\n上記から、この顧客の AI 学習フィールドを推定してください。判断材料が薄い項目は null / 空配列で返してください。`,
+        // プロフィールもログも、元は相手の発言の書き写し／learn-from-text の機械抽出値。
+        // 攻撃者の書いた文字列が 1 ホップ挟んで届く経路なので囲う（P130）
+        `${wrapUntrustedInput(profileForAi, '既存プロフィール')}\n\n${wrapUntrustedInput(maskedLogsForAi, '接触ログ（古い → 新しい）')}\n\n上記から、この顧客の AI 学習フィールドを推定してください。判断材料が薄い項目は null / 空配列で返してください。`,
         {
-          systemInstruction: `あなたはホスト・キャバ嬢の顧客台帳ナレッジ抽出 AI です。
+          systemInstruction: withInjectionGuard(`あなたはホスト・キャバ嬢の顧客台帳ナレッジ抽出 AI です。
 過去の接触ログと既存プロフィールから、顧客の人物像と返信文体の方針を推定して JSON で返します。
 
 ルール:
@@ -198,7 +201,7 @@ export async function POST(request: NextRequest) {
   },
   "confidence": "low|medium|high (ログが少なければ low)",
   "summary": "なぜこの推定になったか 1 文"
-}`,
+}`),
           maxOutputTokens: 1500,
           temperature: 0.5,
           responseMimeType: 'application/json',

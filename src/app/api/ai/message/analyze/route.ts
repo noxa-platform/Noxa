@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { analyzeImages } from '../../ai-provider';
+import { withInjectionGuard } from '@/lib/ai-knowledge/injection-guard';
 import { estimateAiCost } from '@/lib/ai-cost';
 import { withReservedCredits } from '../../with-credits';
 import { getAdminDb, verifyRequest, AuthError } from '../../../lib/firebase-admin';
@@ -84,7 +85,8 @@ export async function POST(request: NextRequest) {
 - 日本語で出力`;
 
       const result = await analyzeImages(images, prompt, {
-        systemInstruction: 'LINEやDMのスクリーンショットから会話内容を正確に読み取る画像解析AIです。指定されたJSON形式で出力してください。',
+        // スクショに写るのは相手が書いた文面。読み取った命令に従わせない（P130）
+        systemInstruction: withInjectionGuard('LINEやDMのスクリーンショットから会話内容を正確に読み取る画像解析AIです。指定されたJSON形式で出力してください。', 'image'),
         maxOutputTokens: 3000,
         temperature: 0.2,
         responseMimeType: 'application/json',

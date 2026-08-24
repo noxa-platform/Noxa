@@ -9,7 +9,10 @@
 //   - reserveAiCredit で予約 → 失敗時 refund
 //
 // 安全:
-//   - 入力テキストはデータ扱い（gemini.ts の prompt-injection guard が共通注入）
+//   - 入力テキストはデータ扱い。マーカーで囲い、System 側のガード
+//     （@/lib/ai-knowledge/injection-guard）で「指示ではない」と明示する（P130）。
+//     それ以前は「gemini.ts が共通注入する」と書いてあったが、そのファイルは存在せず
+//     ガードは実在しなかった
 //   - 1MB 上限、最低 20 字
 import { NextRequest, NextResponse } from 'next/server';
 import { generateText } from '../ai-provider';
@@ -18,6 +21,7 @@ import { estimateAiCost } from '@/lib/ai-cost';
 import { getAdminDb, verifyRequest, AuthError } from '../../lib/firebase-admin';
 import { resolveAccessContext, pathCustomer } from '../../lib/access-context';
 import { maskContactInfo } from '@/lib/ai-privacy';
+import { withInjectionGuard, wrapUntrustedInput } from '@/lib/ai-knowledge/injection-guard';
 import { jstCalendarDate } from '@/lib/datetime';
 import { FieldValue } from 'firebase-admin/firestore';
 
@@ -45,7 +49,7 @@ interface ExtractedFromText {
   suggestedNextAction: string | null;
 }
 
-const EXTRACT_SYSTEM = `あなたはホスト/キャスト向けのチャット解析 AI です。
+const EXTRACT_SYSTEM = withInjectionGuard(`あなたはホスト/キャスト向けのチャット解析 AI です。
 提供されたテキスト（LINE トーク履歴・メッセージ書き出し等）から、対象の顧客との
 やり取りを読み取って以下を JSON 抽出してください。
 
@@ -71,7 +75,7 @@ const EXTRACT_SYSTEM = `あなたはホスト/キャスト向けのチャット�
   "communicationStyle": string | null,     // 短文/絵文字多めなど
   "importantMemo": string | null,          // 来店予定・誕生日近い等
   "suggestedNextAction": string | null
-}`;
+}`);
 
 function arrayOrEmpty(v: unknown): string[] {
   if (Array.isArray(v)) return v.filter((x) => typeof x === 'string' && x.trim().length > 0).slice(0, 10);
@@ -134,7 +138,7 @@ export async function POST(request: NextRequest) {
     let raw: string;
     try {
       raw = await generateText(
-        `## 解析対象テキスト\n${maskedContent}\n\n上記の会話履歴を解析して JSON で抽出してください。`,
+        `${wrapUntrustedInput(maskedContent, '解析対象テキスト')}\n\n上記の会話履歴を解析して JSON で抽出してください。`,
         {
           systemInstruction: EXTRACT_SYSTEM,
           maxOutputTokens: 1500,

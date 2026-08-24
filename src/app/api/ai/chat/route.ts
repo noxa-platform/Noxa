@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { generateChatStream, analyzeImages, type ChatHistoryEntry } from '../ai-provider';
+import { buildInjectionGuardBlock, wrapUntrustedInput } from '@/lib/ai-knowledge/injection-guard';
 import { generateOpenRouterStream, type OpenRouterChatMessage } from '../openrouter';
 import { reserveAiCredit, refundAiCredit, logAiLedger } from '../../lib/credits';
 import { computeChatCost } from '@/lib/ai-cost';
@@ -498,12 +499,16 @@ export async function POST(request: NextRequest) {
         selfHeading: '## ユーザー（送信者）自身のプロファイル',
         storeProfile,
       });
-      fullSystemPrompt = `${SYSTEM_PROMPT}\n\n${playbookAndSelf}`;
+      // 顧客データには保存済みフリーテキストと、learn-from-text が相手の LINE 履歴から
+      // 機械抽出して書き戻した値が入る。画像経路ではスクショの文字も読む。
+      // どちらも攻撃者が書ける文字列なので System の先頭で境界を宣言する（P130）
+      fullSystemPrompt = `${buildInjectionGuardBlock('both')}\n\n${SYSTEM_PROMPT}\n\n${playbookAndSelf}`;
 
       const standaloneSection = standaloneSalesContext
         ? `\n\n${standaloneSalesContext}`
         : '';
-      prompt = `今日は${today}（${dayOfWeek}曜日）です。\n\n以下は現在のワークスペースの顧客データです:\n${customerContext}${standaloneSection}\n\nユーザーの質問: ${message}`;
+      // message はユーザー本人の質問＝指示として読ませてよいので囲いの外に置く
+      prompt = `今日は${today}（${dayOfWeek}曜日）です。\n\n${wrapUntrustedInput(`${customerContext}${standaloneSection}`, '現在のワークスペースの顧客データ')}\n\nユーザーの質問: ${message}`;
     } catch (err) {
       await refundAiCredit(uid, chatCost, reserved);
       throw err;

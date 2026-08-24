@@ -6,6 +6,7 @@ import { withReservedCredits } from '../with-credits';
 import { verifyRequest, AuthError } from '../../lib/firebase-admin';
 import { resolveAccessContext } from '../../lib/access-context';
 import { maskContactInfo } from '@/lib/ai-privacy';
+import { withInjectionGuard, wrapUntrustedInput } from '@/lib/ai-knowledge/injection-guard';
 
 const MAX_BYTES = 1024 * 1024; // 1MB（learn-from-text と整合）
 
@@ -23,8 +24,11 @@ const MAX_BYTES = 1024 * 1024; // 1MB（learn-from-text と整合）
  * クレジットコスト: estimateAiCost で動的算出（テキスト量比例、上限なし）
  *
  * 安全性:
- *  - prompt-injection ガードは gemini.ts 側で systemInstruction に自動注入
- *  - 入力テキストはあくまで「データ」として扱う旨を System で明示
+ *  - 入力は顧客が書いた LINE 履歴＝攻撃者が自由に書ける文字列。マーカーで囲い、
+ *    System 側のガード（`@/lib/ai-knowledge/injection-guard`）で「データであって
+ *    指示ではない」と明示する（P130。それ以前は「gemini.ts が自動注入する」と
+ *    書いてあったが、そのファイルは存在せずガードは実在しなかった）
+ *  - 送信前に電話番号・メールをマスクする（Day127）
  */
 export async function POST(request: NextRequest) {
   try {
@@ -69,9 +73,9 @@ export async function POST(request: NextRequest) {
       // 無料機能でも AI 原価はかかる。課金せず利用だけ記録する（Day126）
       void logAiUsage(uid, 'customer-extract');
       const raw = await generateText(
-        `## 解析対象テキスト\n${maskedText}\n\n${hint ? `## 補足\n${hint}\n\n` : ''}上記の会話履歴から、相手（顧客）に関する情報を JSON で抽出してください。判断に迷う項目は null を返し、推測で埋めないこと。`,
+        `${wrapUntrustedInput(maskedText, '解析対象テキスト')}\n\n${hint ? `## 補足\n${hint}\n\n` : ''}上記の会話履歴から、相手（顧客）に関する情報を JSON で抽出してください。判断に迷う項目は null を返し、推測で埋めないこと。`,
         {
-          systemInstruction: `あなたはホスト・キャバ嬢の顧客台帳作成を支援する AI です。
+          systemInstruction: withInjectionGuard(`あなたはホスト・キャバ嬢の顧客台帳作成を支援する AI です。
 LINE 等のメッセージ履歴から、相手（顧客）の情報を抽出して JSON で返します。
 
 ルール:
@@ -89,7 +93,7 @@ LINE 等のメッセージ履歴から、相手（顧客）の情報を抽出し
   "communicationStyle": "コミュニケーション特徴の短い文（1 行）",
   "notes": "ノート（自由テキスト、500 文字以内）",
   "suggestedTags": ["顧客タグ候補（5 項目以内、例: 太客 / 同伴済 / お酒強い）"]
-}`,
+}`),
           maxOutputTokens: 1500,
           temperature: 0.4,
           responseMimeType: 'application/json',
