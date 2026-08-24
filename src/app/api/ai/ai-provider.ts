@@ -10,6 +10,7 @@
 //
 // 2026-06-02 NOXA へ移設・OpenRouter 専用化。
 
+import { assertAiEnabled } from '../lib/ai-kill-switch';
 import {
   generateOpenRouterText,
   generateOpenRouterStream,
@@ -70,6 +71,9 @@ export async function generateText(
     modelTier?: ModelTier;
   },
 ): Promise<string> {
+  // 緊急停止スイッチ（2026-08-25）。**外部 API を叩く手前**で止めるので原価が発生しない。
+  // ルート側の入口チェックを足し忘れてもここで確実に止まる（最後の砦）
+  await assertAiEnabled();
   const model = resolveOpenRouterModel(options?.modelTier);
   return generateOpenRouterText({
     model,
@@ -92,6 +96,9 @@ export async function generateChat(
     modelTier?: ModelTier;
   },
 ): Promise<string> {
+  // 緊急停止スイッチ（2026-08-25）。**外部 API を叩く手前**で止めるので原価が発生しない。
+  // ルート側の入口チェックを足し忘れてもここで確実に止まる（最後の砦）
+  await assertAiEnabled();
   const model = resolveOpenRouterModel(options.modelTier);
   return generateOpenRouterText({
     model,
@@ -115,6 +122,9 @@ export async function generateChatStream(
     onChunk: (text: string) => void;
   },
 ): Promise<string> {
+  // 緊急停止スイッチ（2026-08-25）。**外部 API を叩く手前**で止めるので原価が発生しない。
+  // ルート側の入口チェックを足し忘れてもここで確実に止まる（最後の砦）
+  await assertAiEnabled();
   const model = resolveOpenRouterModel(options.modelTier);
   return generateOpenRouterStream(
     {
@@ -143,6 +153,9 @@ export async function analyzeImages(
     modelTier?: ModelTier;
   },
 ): Promise<string> {
+  // 緊急停止スイッチ（2026-08-25）。**外部 API を叩く手前**で止めるので原価が発生しない。
+  // ルート側の入口チェックを足し忘れてもここで確実に止まる（最後の砦）
+  await assertAiEnabled();
   const model = resolveOpenRouterModel(options?.modelTier);
   const messages: OpenRouterChatMessage[] = [];
   if (options?.systemInstruction) messages.push({ role: 'system', content: options.systemInstruction });

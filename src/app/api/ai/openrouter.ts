@@ -1,8 +1,10 @@
 // OpenRouter 経由で各種 LLM を呼ぶラッパ。
 //
 // OpenRouter は OpenAI 互換 API なので、fetch ベースで簡潔に書ける。
-// Provider 切替（gemini.ts vs openrouter.ts）の判断はクライアントから受け取った
-// model 文字列（"openrouter:provider/model" 形式）で各 API route が行う。
+// モデルの選択はクライアント/env から受け取った model 文字列
+// （"openrouter:provider/model" 形式）で各 API route が行う。
+// （旧コメントは「gemini.ts vs openrouter.ts の切替」と書いていたが、
+//   gemini.ts はこのリポの履歴に一度も存在しない。P130 で是正した同型の記述）
 //
 // 環境変数:
 //   OPENROUTER_API_KEY - 必須
@@ -11,6 +13,8 @@
 //
 // 「openrouter:」のプレフィックスは API route 側で剥がして、ここに渡されるのは
 // 純粋なモデル ID（"anthropic/claude-sonnet-4" など）。
+
+import { assertAiEnabled } from '../lib/ai-kill-switch';
 
 const OR_ENDPOINT = 'https://openrouter.ai/api/v1/chat/completions';
 
@@ -55,6 +59,10 @@ interface OpenRouterChatOptions {
  * 失敗時は例外で投げる（API route 側で reserveAiCredit 連動の refund を実施）。
  */
 export async function generateOpenRouterText(options: OpenRouterChatOptions): Promise<string> {
+  // 緊急停止スイッチ（2026-08-25）。**OpenRouter を叩く直前**の最後の砦。
+  // chat/route.ts は ai-provider を経由せずここを直接呼ぶため、ここに置かないと
+  // 一番の支出源が素通りする
+  await assertAiEnabled();
   const body: Record<string, unknown> = {
     model: options.model,
     messages: options.messages,
@@ -94,6 +102,10 @@ export async function generateOpenRouterStream(
   options: OpenRouterChatOptions,
   onChunk: (text: string) => void,
 ): Promise<string> {
+  // 緊急停止スイッチ（2026-08-25）。**OpenRouter を叩く直前**の最後の砦。
+  // chat/route.ts は ai-provider を経由せずここを直接呼ぶため、ここに置かないと
+  // 一番の支出源が素通りする
+  await assertAiEnabled();
   const body: Record<string, unknown> = {
     model: options.model,
     messages: options.messages,

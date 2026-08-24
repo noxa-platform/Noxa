@@ -19,6 +19,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { verifyRequest, AuthError, getAdminAuth } from '../../lib/firebase-admin';
 import { isAdmin } from '@/lib/admin';
 import { OPENROUTER_MODELS } from '../openrouter';
+import { aiKillSwitchResponse } from '@/app/api/lib/ai-kill-switch';
 
 interface BenchRequest {
   model: string; // "provider/model" 形式（OpenRouter モデル ID）
@@ -41,6 +42,11 @@ export async function POST(request: NextRequest) {
     if (!body.model || !body.system || !body.user) {
       return NextResponse.json({ error: 'model / system / user が必要' }, { status: 400 });
     }
+    // benchmark は ai-provider / openrouter.ts を経由せず OpenRouter を直接叩くため
+    // 安全網が効かない。ここで個別に止める（2026-08-25 緊急停止）
+    const killed = await aiKillSwitchResponse();
+    if (killed) return killed;
+
     const apiKey = process.env.OPENROUTER_API_KEY;
     if (!apiKey) {
       return NextResponse.json({ error: 'OPENROUTER_API_KEY が未設定' }, { status: 500 });

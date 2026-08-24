@@ -9,6 +9,7 @@
 // クライアント側でも sanitizeAiPlan（純ロジック）で制約違反（ロック/除外/BOSS/
 // 本指名引き剥がし）を落とすハイブリッド構成。
 import { NextRequest, NextResponse } from 'next/server';
+import { aiKillSwitchResponse } from '@/app/api/lib/ai-kill-switch';
 import { logAiUsage } from '@/app/api/lib/credits';
 import { verifyRequest, AuthError } from '../../lib/firebase-admin';
 import { resolveAccessContext } from '../../lib/access-context';
@@ -69,6 +70,13 @@ const SYSTEM_INSTRUCTION = `あなたはナイトワーク店舗の席回し（�
 export async function POST(request: NextRequest) {
   try {
     const uid = await verifyRequest(request);
+
+    // AI 緊急停止（2026-08-25）。**クレジット予約より手前**で弾く
+    // （予約→拒否→返金の往復を作らない）。停止中は 503 + 日本語文言を返し、
+    // iOS の APIError.serverError がその文字列をそのまま画面に出す。
+    // ⚠️ 429 は使わない（iOS が insufficientCredits として残高表示を書き換えるため）
+    const killed = await aiKillSwitchResponse(uid);
+    if (killed) return killed;
     const body = (await request.json().catch(() => ({}))) as SuggestRequestBody;
     if (!body.workspaceId) {
       return NextResponse.json({ error: 'workspaceId が必要です' }, { status: 400 });

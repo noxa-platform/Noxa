@@ -15,6 +15,7 @@
 //     ガードは実在しなかった
 //   - 1MB 上限、最低 20 字
 import { NextRequest, NextResponse } from 'next/server';
+import { aiKillSwitchResponse } from '@/app/api/lib/ai-kill-switch';
 import { generateText } from '../ai-provider';
 import { reserveAiCredit, refundAiCredit, logAiLedger } from '../../lib/credits';
 import { estimateAiCost } from '@/lib/ai-cost';
@@ -100,6 +101,13 @@ export async function POST(request: NextRequest) {
   let pendingRefund: { consumedMonthly: number; consumedPurchased: number } | null = null;
   try {
     uid = await verifyRequest(request);
+
+    // AI 緊急停止（2026-08-25）。**クレジット予約より手前**で弾く
+    // （予約→拒否→返金の往復を作らない）。停止中は 503 + 日本語文言を返し、
+    // iOS の APIError.serverError がその文字列をそのまま画面に出す。
+    // ⚠️ 429 は使わない（iOS が insufficientCredits として残高表示を書き換えるため）
+    const killed = await aiKillSwitchResponse(uid);
+    if (killed) return killed;
     const body = (await request.json().catch(() => ({}))) as LearnFromTextBody;
     const { workspaceId, customerId, content } = body;
     if (!workspaceId || !customerId) {

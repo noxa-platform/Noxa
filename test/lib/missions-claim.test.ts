@@ -107,6 +107,24 @@ describe('tryClaimMission（受領→付与の順序と巻き戻し）', () => {
   });
 });
 
+// 無料クレジットの配布停止（2026-08-25・予算逼迫）。ミッション報酬も紹介報酬も
+// tryClaimMission を通るので、ここを止めれば両方止まる。
+describe('配布停止スイッチ', () => {
+  it('停止中は付与せず、**claimed も立てない**（再開後に受け取れる）', async () => {
+    process.env.AI_KILL_SWITCH = '1';
+    try {
+      const before = mocks.grantBonusCredits.mock.calls.length;
+      const r = await tryClaimMission('u1', 'beta_profile');
+      expect(r.granted).toBe(0);
+      // alreadyClaimed=false ＝「まだ受領していない」。再開後に受け取れる状態
+      expect(r.alreadyClaimed).toBe(false);
+      expect(mocks.grantBonusCredits.mock.calls.length).toBe(before); // 付与は呼ばれない
+    } finally {
+      process.env.AI_KILL_SWITCH = '0';
+    }
+  });
+});
+
 describe('getClaimedMissionIds（受領済み一覧）', () => {
   beforeEach(() => {
     mocks.grantBonusCredits.mockReset();

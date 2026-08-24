@@ -16,6 +16,7 @@
 // （Day127＝「書込み側だから免除」という分類の前提が実態と違っていた件の再発防止）。
 // 料金設定に連絡先は不要なので、マスクしても機能は落ちない。
 import { NextRequest, NextResponse } from 'next/server';
+import { aiKillSwitchResponse } from '@/app/api/lib/ai-kill-switch';
 import { logAiUsage } from '@/app/api/lib/credits';
 import { verifyRequest, AuthError } from '../../lib/firebase-admin';
 import { resolveAccessContext } from '../../lib/access-context';
@@ -66,6 +67,13 @@ ${WRITABLE_FIELDS.join(', ')}
 export async function POST(request: NextRequest) {
   try {
     const uid = await verifyRequest(request);
+
+    // AI 緊急停止（2026-08-25）。**クレジット予約より手前**で弾く
+    // （予約→拒否→返金の往復を作らない）。停止中は 503 + 日本語文言を返し、
+    // iOS の APIError.serverError がその文字列をそのまま画面に出す。
+    // ⚠️ 429 は使わない（iOS が insufficientCredits として残高表示を書き換えるため）
+    const killed = await aiKillSwitchResponse(uid);
+    if (killed) return killed;
     const body = (await request.json().catch(() => ({}))) as PosConfigRequestBody;
     if (!body.workspaceId) {
       return NextResponse.json({ error: 'workspaceId が必要です' }, { status: 400 });
