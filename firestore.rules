@@ -236,9 +236,60 @@ service cloud.firestore {
         allow write: if isShopOwnerLike(shopId);
       }
 
+      // 日締めの「店舗合計」1 日 1 件（docId = YYYY-MM-DD）。
+      //
+      // 2026-08-25 決定（B-1 / nomishugy v2 移行の申し送りへの回答）:
+      // **nomishugy の日次手入力売上はここに置く**（`sales` には置かない）。理由:
+      //  (1) `shop_shops/{shopId}/sales` は POS の会計伝票（会計ごと 1 件）で、
+      //      `functions/src/sales-sync.ts` の `syncShopSaleToPersonal` が**全書込みに反応**して
+      //      personal_* へ投影する。日次集計を混ぜると、投影経路に「伝票ではないもの」が乗る。
+      //  (2) `source: 'manual_daily'` フラグで除外する案は、**今ある集計だけでなく
+      //      これから増える集計すべてがフラグを見続けること**を前提にする。noxa は
+      //      「新しい経路が分類を素通りする」型の事故を繰り返し踏んでいるので、
+      //      構造で分ける方を採る（混ざらないなら数え間違えようがない）。
+      //  (3) docId が日付で nomishugy の `${barId}_${date}` と構造が一致する。
+      //      本コレクションは noxa web / noxa-ios / yorulog-ios のいずれからも未使用で衝突しない
+      //      （2026-08-25 に 3 リポを実測確認。iOS が使うのは daily_close_rows のみ）。
+      // 型は src/lib/types/index.ts の DailyCloseSummary。
       match /daily_close/{date} {
         allow read: if isShopMember(shopId);
         allow write: if isShopOwnerLike(shopId);
+      }
+
+      // キャスト所属の申請フロー（2026-08-25 決定・B-2 への回答）。
+      //
+      // **`members/{uid}` に統合しない。** `members` の doc が存在すること自体が
+      // `isShopMember()` の判定＝**認可の一次情報**なので、`status: 'pending_cast'` の行を
+      // 置いた瞬間に、キャストが承認する前から店のデータが読める。
+      // 申請の状態は認可の外に置き、承認が通ったときに初めて members を作る。
+      //
+      // ⚠️ 承認時の `members/{uid}` 作成は**サーバ側（Admin SDK）でしか行えない**
+      // （members の create は isShopOwnerLike か招待 redeem API 経由のみ）。
+      // キャスト本人がここで status を active にしても、それだけでは入店にならない。
+      // 実体化する CF / API Route が要る（未実装・デプロイは人間ゲート）。
+      match /affiliations/{castUid} {
+        // 申請の宛先本人は「まだメンバーではない」ので isShopMember では読めない
+        allow read: if isSelf(castUid) || isShopMember(shopId);
+        // 申請は店側から出す。必ず pending_cast で始まる（active では作らせない）
+        allow create: if isShopOwnerLike(shopId)
+          && request.resource.data.status == 'pending_cast'
+          && request.resource.data.castUid == castUid;
+        // 本人は「承認 / 拒否」だけできる。表示名・権限・可視性には触らせない
+        allow update: if (isSelf(castUid)
+            && resource.data.status == 'pending_cast'
+            && (request.resource.data.status == 'active' || request.resource.data.status == 'rejected')
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'respondedAt']))
+          || isShopOwnerLike(shopId);
+        allow delete: if isShopOwnerLike(shopId);
+      }
+
+      // 在店状況（docId = キャストの uid）。2026-08-25 決定・B-2 への回答。
+      // `account_users/{uid}` 配下ではなく**店舗配下**に置く。在店は「どの店にいるか」の
+      // 情報であって個人の属性ではなく、移行の狙い（テナント配下にデータを持つ）とも揃う。
+      // 一般公開の在店表示は Admin SDK の Route 経由で投影する（ここを public read にしない）。
+      match /availability/{castUid} {
+        allow read: if isShopMember(shopId);
+        allow write: if (isSelf(castUid) && isShopMember(shopId)) || isShopOwnerLike(shopId);
       }
 
       // Daily Close の明細行（店舗が記録した確定数字。iOS: DailyCloseView / DailyCloseAdminView）。

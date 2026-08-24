@@ -854,6 +854,77 @@ export interface DailyCloseRow {
   updatedAt: Timestamp;
 }
 
+/**
+ * 日締めの「店舗合計」（1 日 1 件・docId = YYYY-MM-DD）。
+ *
+ * 2026-08-25 決定（B-1）: nomishugy の日次手入力売上の置き場。
+ * POS 伝票（shop_shops/{shopId}/sales）とは**別コレクション**にする。
+ * sales には syncShopSaleToPersonal が全書込みで反応するため、日次集計を混ぜると
+ * 投影経路に伝票でないものが乗る。フラグで除外する案は「これから増える集計も
+ * ずっとフラグを見続ける」前提になるので採らない（詳細は firestore.rules のコメント）。
+ *
+ * DailyCloseRow（キャスト別の明細）とは別レイヤー。こちらは店舗合計で castUid を持たない。
+ */
+export interface DailyCloseSummary {
+  /** YYYY-MM-DD（docId と同じ） */
+  date: string;
+  /** その日の売上合計（円） */
+  totalSales: number;
+  /** 組数 */
+  groupCount: number;
+  /** 自由メモ */
+  memo?: string;
+  /** 売上カテゴリの内訳（任意。キーは店舗が決めるラベル） */
+  categoryBreakdown?: Record<string, number>;
+  /** 手入力の出所（nomishugy のダッシュボード等）。集計の除外には使わない——分離は構造側で担保する */
+  source?: string;
+  createdBy?: string;
+  createdAt?: Timestamp;
+  updatedAt?: Timestamp;
+}
+
+/** キャスト所属申請の状態（オーナーが申請 → キャスト本人が承認） */
+export type AffiliationStatus = 'pending_cast' | 'active' | 'rejected' | 'revoked';
+
+/**
+ * キャスト所属（shop_shops/{shopId}/affiliations/{castUid}）。
+ *
+ * 2026-08-25 決定（B-2）: members/{uid} には統合しない。
+ * members の doc の存在が isShopMember() の判定＝認可の一次情報なので、
+ * pending の行を members に置くと承認前から店のデータが読める。
+ *
+ * ⚠️ status を active にしても、それだけでは入店にならない。members/{uid} の作成は
+ * サーバ側（Admin SDK）でしか行えないため、実体化する CF / API Route が別途要る（未実装）。
+ */
+export interface Affiliation {
+  castUid: string;
+  status: AffiliationStatus;
+  /** nomishugy の表示ハンドル */
+  castHandle?: string;
+  /** 一般公開の一覧に出すか */
+  isVisible?: boolean;
+  /** キャスト自身が登録したか（オーナー申請と区別する） */
+  isSelfRegistered?: boolean;
+  /** nomishugy 側の機能権限。noxa の MemberPermissions とは別物なので混ぜないこと */
+  permissions?: string[];
+  createdBy?: string;
+  createdAt?: Timestamp;
+  respondedAt?: Timestamp | null;
+  updatedAt?: Timestamp;
+}
+
+/**
+ * 在店状況（shop_shops/{shopId}/availability/{castUid}）。
+ * 2026-08-25 決定（B-2）: 個人属性ではなく「どの店にいるか」なので店舗配下に置く。
+ */
+export interface CastAvailability {
+  castUid: string;
+  isAvailable: boolean;
+  /** 任意の一言（「22時から」等） */
+  note?: string;
+  updatedAt?: Timestamp;
+}
+
 export type DisputeStatus = 'open' | 'resolved' | 'rejected';
 
 export interface DailyCloseDispute {
