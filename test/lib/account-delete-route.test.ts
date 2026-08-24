@@ -6,6 +6,7 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 //   - handle は account_users 削除前に読み、profile_pages/{handle} を削除（handle 無しは触らない）
 //   - 主要 doc（account_users/subscriptions/google_tokens/push_tokens）＋ai_usage サブコレクション削除
 //   - personal_reminders は ownerUid==uid のみ削除（他人の reminder は残す）
+//   - personal_* の個人データツリーを根から再帰削除（Day82。items/standalone/messages まで）
 //   - ワークスペース: member doc は削除、owner なら WS doc も削除・非 owner は WS を残す
 //   - Auth の deleteUser(uid) を呼ぶ / 認証失敗は 401
 
@@ -41,6 +42,12 @@ function makeDb(seed: Record<string, Record<string, unknown>> = {}) {
   const db = {
     doc: (p: string) => ({ path: p, get: async () => snap(p), delete: async () => del(p) }),
     collection: (p: string) => makeColl(p),
+    // Admin SDK の recursiveDelete 相当。doc 自身とその配下（サブコレクション含む）を消す。
+    // フェイクは full-path キーなので「path/ で始まるキー」を落とせば等価になる。
+    recursiveDelete: async (r: { path: string }) => {
+      del(r.path);
+      Object.keys(store).filter((k) => k.startsWith(r.path + '/')).forEach(del);
+    },
     batch: () => {
       const ops: string[] = [];
       return { delete: (r: { path: string }) => ops.push(r.path), commit: async () => ops.forEach(del) };
@@ -171,5 +178,46 @@ describe('account/delete POST（退会の破壊的後始末の境界）', () => 
     expect(store['shop_shops/wsMem']).toBeDefined();              // member WS は残す
     expect(store['shop_shops/wsMem/members/u1']).toBeUndefined(); // member doc は削除
     expect(store['shop_shops/wsNon']).toBeDefined();              // 非member WS 不変
+  });
+
+  // Day82（yorulog からの指摘）: 従来は account_* と personal_reminders のフラット doc しか
+  // 消しておらず、正本である personal_<name>/{uid}/items/... が丸ごと残っていた。
+  // ＝ 退会後も顧客台帳・売上・AI スレッドが残る状態だった。
+  it('personal_* の個人データツリーを items / standalone / messages まで消す', async () => {
+    const { db, store } = makeDb({
+      'account_users/u1': { handle: 'h' },
+      'personal_customers/u1': {},
+      'personal_customers/u1/items/c1': { name: 'あい' },
+      'personal_customers/u1/items/c2': { name: 'ゆい' },
+      'personal_sales/u1/items/s1': { amount: 12000 },
+      'personal_sales/u1/standalone/s2': { amount: 3000 },
+      'personal_ai_threads/u1/items/t1': { title: 'スレ' },
+      'personal_ai_threads/u1/items/t1/messages/m1': { text: 'こんばんは' },
+      'personal_templates/u1/items/tp1': { body: 'テンプレ' },
+      'personal_goals/u1/items/g1': { target: 100 },
+      'personal_business_cards/u1/items/b1': { name: '名刺' },
+      'personal_self_styles/u1': { stageName: 'あい' },
+    });
+    mocks.getDb.mockReturnValue(db);
+    await POST(req());
+    // uid 配下は 1 件も残らない
+    expect(Object.keys(store).filter((k) => /^personal_[a-z_]+\/u1(\/|$)/.test(k))).toEqual([]);
+  });
+
+  it('他ユーザーの personal_* は一切触らない（uid 単位に閉じていること）', async () => {
+    const { db, store } = makeDb({
+      'account_users/u1': {},
+      'personal_customers/u1/items/c1': { name: '自分の客' },
+      'personal_customers/u2/items/c9': { name: '他人の客' },
+      'personal_self_styles/u2': { stageName: '他人' },
+      // uid の前方一致で誤爆しないこと（u1 と u10 は別人）
+      'personal_customers/u10/items/c5': { name: '別人' },
+    });
+    mocks.getDb.mockReturnValue(db);
+    await POST(req());
+    expect(store['personal_customers/u1/items/c1']).toBeUndefined();
+    expect(store['personal_customers/u2/items/c9']).toBeDefined();
+    expect(store['personal_self_styles/u2']).toBeDefined();
+    expect(store['personal_customers/u10/items/c5']).toBeDefined();
   });
 });

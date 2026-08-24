@@ -110,6 +110,17 @@ export function buildStoreProfileBlock(
 import type { AccessContext } from '@/app/api/lib/access-context';
 import { pathAiProfile } from '@/app/api/lib/access-context';
 
+/**
+ * 文体ドキュメントが「実質空」でないか。
+ *
+ * doc が存在するだけ（`{}` や更新時刻だけ）でフォールバックを止めてしまうと、
+ * 空の shop 側が uid 側の実データを覆い隠す。buildSelfBaseBlock が実際に
+ * プロンプトへ載せるフィールドが 1 つでも埋まっているかで判定する。
+ */
+function hasSelfStyleContent(data: SelfBaseStyleDoc | null | undefined): boolean {
+  return Boolean(data && buildSelfBaseBlock(data).length > 0);
+}
+
 // 🔐 ctx (shop / personal) に基づいて適切な path から取得。
 // 個人ユーザーが他人の shop データを覗けない設計。
 export async function resolveWorkspaceContext(ctx: AccessContext) {
@@ -118,12 +129,24 @@ export async function resolveWorkspaceContext(ctx: AccessContext) {
   let selfData: SelfBaseStyleDoc | null = null;
 
   if (ctx.kind === 'shop') {
+    // 文体は 2 箇所に散っている。shop 側の正本は shop_shops/{shopId}/ai_profile/self だが、
+    // **firestore.rules に ai_profile の定義が無いためクライアントからは書けない**。
+    // 一方 iOS の SelfProfileService は personal_self_styles/{uid} 固定で書く。
+    // ＝事業ワークスペースでは iOS で入れた源氏名・職種・文体が AI に一切届いていなかった
+    // （yorulog Day85 の報告。実測で確認）。shop 側が空なら uid 側へフォールバックする。
+    // uid 単位の文体は「その人の文体」であって店舗の秘密ではないので、shop 文脈で読んでも
+    // 他人のデータは混ざらない（ctx.uid は認証済みの本人）。
     const [wsSnap, selfSnap] = await Promise.all([
       db.doc(`shop_shops/${ctx.shopId}`).get(),
       db.doc(`shop_shops/${ctx.shopId}/ai_profile/self`).get(),
     ]);
     wsData = wsSnap.exists ? (wsSnap.data() as Record<string, unknown>) : null;
     selfData = (selfSnap.exists ? selfSnap.data() : null) as SelfBaseStyleDoc | null;
+    if (!hasSelfStyleContent(selfData)) {
+      const personalSnap = await db.doc(`personal_self_styles/${ctx.uid}`).get();
+      const personalData = (personalSnap.exists ? personalSnap.data() : null) as SelfBaseStyleDoc | null;
+      if (hasSelfStyleContent(personalData)) selfData = personalData;
+    }
   } else {
     // personal: shop に紐づかない個人ユーザー。selfStyle のみ持つ。
     const selfSnap = await db.doc(pathAiProfile(ctx)).get();

@@ -43,6 +43,27 @@ export async function POST(request: Request) {
     reminderSnaps.docs.forEach(doc => batch2.delete(doc.ref));
     await batch2.commit();
 
+    // personal_* の個人データツリー（Day82・yorulog からの指摘で是正）。
+    // これまで消していたのは account_* と personal_reminders の「ownerUid 付きフラット doc」
+    // だけで、実際の正本である `personal_<name>/{uid}/items/...` は**丸ごと残っていた**。
+    // ＝ 退会後も顧客台帳・売上・AI スレッドが残る状態だった。
+    // パスは uid 単位に閉じているので、本人の doc を根から再帰削除すれば他人には触れない。
+    // サブコレクション（items / standalone / スレッドの messages）まで消すため
+    // recursiveDelete を使う（doc.delete() はサブコレクションを残す）。
+    const PERSONAL_ROOTS = [
+      'personal_customers',
+      'personal_sales',          // items / standalone の 2 系統
+      'personal_templates',
+      'personal_ai_threads',     // items/{tid}/messages まで
+      'personal_goals',
+      'personal_reminders',
+      'personal_business_cards',
+      'personal_self_styles',    // uid 直下の単一 doc（サブコレクション無し）
+    ];
+    for (const root of PERSONAL_ROOTS) {
+      await db.recursiveDelete(db.doc(`${root}/${uid}`));
+    }
+
     // ワークスペースメンバーから自身を削除
     // owner の場合はワークスペース自体を削除（サブコレクションは残るが MVP 段階では許容）
     const allWsSnaps = await db.collection('shop_shops').get();
