@@ -9,6 +9,7 @@ import { businessDayKey } from '@/lib/datetime';
 import { describeFirestoreError, isPermissionDenied } from '@/lib/firestore-error';
 import { describeDelegateRequest } from '@/lib/permission-guidance';
 import { toCsv, withBom, csvFileName, type CsvColumn } from '@/lib/export/csv';
+import { stampIrVersion } from '@/lib/ir-version';
 import type { User } from 'firebase/auth';
 
 /**
@@ -139,7 +140,8 @@ export function SalesClient({ user }: { user: User }) {
     setOpError(null);
     try {
       // castUid=記録者（店舗ルールの create 条件を満たし、個人売上の帰属にもなる）
-      await addDoc(collection(db, colPath), { source: 'manual', entryMode: 'amount', amount, customerName: customerName.trim() || null, customerId: customerId || null, castName: castName.trim() || null, castUid: user.uid, operatorUid: user.uid, dayKey: tk, checkoutAt: serverTimestamp(), createdAt: serverTimestamp() });
+      // 記録の版は新規作成のときだけ刻む（段 3）。addDoc は常に新規
+      await addDoc(collection(db, colPath), stampIrVersion({ source: 'manual', entryMode: 'amount', amount, customerName: customerName.trim() || null, customerId: customerId || null, castName: castName.trim() || null, castUid: user.uid, operatorUid: user.uid, dayKey: tk, checkoutAt: serverTimestamp(), createdAt: serverTimestamp() }));
     } catch (e) {
       return describeFirestoreError(e, '売上の記録');
     }

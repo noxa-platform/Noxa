@@ -30,6 +30,7 @@ import {
   APPLIED, UNCHANGED, assertWriteApplied, describeMissingWrite, missing, type WriteOutcome,
 } from '@/lib/write-outcome';
 import type { StoreConfig } from './types';
+import { stampIrVersion } from '@/lib/ir-version';
 import { createDefaultStoreConfig } from './defaultConfig';
 import {
   calculatorReducer, calculateResult, createInitialState, createPinnedOrders,
@@ -416,7 +417,8 @@ export function usePosStore(user: User): UsePosStore {
       if (unpaidEntry) {
         tx.set(doc(collection(db, `shop_shops/${shopId}/unpaid`)), { ...unpaidEntry, createdAt: serverTimestamp() });
       }
-      tx.set(saleRef, {
+      // 記録の版は**新規作成のときだけ**刻む（段 3）。会計は毎回新しい伝票なのでここが作成点
+      tx.set(saleRef, stampIrVersion({
         ...(unpaidEntry ? { unpaidAmount: unpaidEntry.amount } : {}),
         source: 'pos', entryMode: 'breakdown', amount: opts.amount, tableId, tableName: (data.name as string) ?? '', slipName: slip.name,
         customerType: slip.state.customerType, customerName: opts.customerName ?? slip.customerName ?? null,
@@ -430,7 +432,7 @@ export function usePosStore(user: User): UsePosStore {
         guests: opts.guests ?? null,
         lineItems,
         entryTime: slip.state.entryTime, checkoutAt: serverTimestamp(), dayKey: dayKey(), createdAt: serverTimestamp(),
-      });
+      }));
       // 会計→顧客実績を同一トランザクションで更新（紐付け顧客がいれば累計売上・来店・最終接触を反映）
       if (slip.customerId) {
         tx.set(doc(db, `shop_shops/${shopId}/customers/${slip.customerId}`),

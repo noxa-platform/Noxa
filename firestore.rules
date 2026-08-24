@@ -339,7 +339,14 @@ service cloud.firestore {
         // 受諾側の検証・使用済みマークは redeem API (Admin SDK) が行う。
         allow read: if isShopOwnerLike(shopId);
         allow create: if isShopOwnerLike(shopId);
-        allow update: if isShopOwnerLike(shopId);
+        // **update は許可しない**（2026-08-25・yorulog からの指摘）。
+        // iOS の MembersView は招待コードを `Int.random(0...999_999)` の 6 桁で採番して
+        // `invites/{code}` へ書くため、同じ店の既存コードと衝突すると
+        // **既存の招待を黙って上書きする**（未使用コードの期限が静かにリセットされる）。
+        // 既存 doc への書込みは rules 上 update になるので、update を落とせば
+        // 衝突が「上書き」ではなく permission-denied として表に出る。
+        // 使用済みマークは redeem API（Admin SDK）が付けるので、これで壊れる経路は無い
+        // （クライアントからの invites 書込みは web の取り消し = delete のみ）。
         allow delete: if isShopOwnerLike(shopId);
       }
 

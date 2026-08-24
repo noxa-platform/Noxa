@@ -70,3 +70,32 @@ describe('invites の閲覧制限', () => {
     await assertSucceeds(getDocs(collection(as(OWNER), `shop_shops/${SHOP}/invites`)));
   });
 });
+
+// 2026-08-25（yorulog からの指摘）: iOS の MembersView は招待コードを
+// `Int.random(0...999_999)` の 6 桁で採番して `invites/{code}` へ書く。
+// 同じ店の既存コードと衝突したとき、update が許可されていると**既存の招待を黙って上書き**し、
+// 未使用コードの期限が静かにリセットされる。update を落として衝突を表に出す。
+describe('invites は作成のみ（衝突を黙って上書きさせない）', () => {
+  it('オーナーは新しいコードを作成できる', async () => {
+    await assertSucceeds(setDoc(doc(as(OWNER), `shop_shops/${SHOP}/invites/NEWCODE1`), {
+      role: 'cast', createdBy: OWNER,
+    }));
+  });
+
+  it('オーナーでも既存コードは上書きできない（＝採番衝突が permission-denied で表に出る）', async () => {
+    await assertFails(setDoc(doc(as(OWNER), `shop_shops/${SHOP}/invites/CODE123`), {
+      role: 'manager', createdBy: OWNER,
+    }));
+  });
+
+  // 使用済みマークは redeem API（Admin SDK）が付ける。クライアントからは付けられない
+  it('オーナーでも使用済みマークを直接は書けない', async () => {
+    await assertFails(setDoc(doc(as(OWNER), `shop_shops/${SHOP}/invites/CODE123`), {
+      usedBy: CAST,
+    }, { merge: true }));
+  });
+
+  it('取り消し（削除）は従来どおりできる', async () => {
+    await assertSucceeds(deleteDoc(doc(as(OWNER), `shop_shops/${SHOP}/invites/NEWCODE1`)));
+  });
+});
