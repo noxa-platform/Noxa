@@ -22,7 +22,8 @@ import { maskContactInfo } from '@/lib/ai-privacy';
 import { withInjectionGuard, wrapUntrustedInput } from '@/lib/ai-knowledge/injection-guard';
 import { safeParseJson } from '@/lib/ai-knowledge/safe-json';
 import { parseRecordSchema } from '@/lib/record-engine/record-schema';
-import { validateRulePack, MAX_PACK_FIELDS, MAX_PACK_DERIVATIONS } from '@/lib/record-engine/rule-pack';
+import { getAdminDb, pathRecordSchema } from '../../record-engine/lib';
+import { validateRulePack, parseStoredDerivations, MAX_PACK_FIELDS, MAX_PACK_DERIVATIONS } from '@/lib/record-engine/rule-pack';
 import type { Expr } from '@/lib/record-engine/derivation';
 
 const MAX_TEXT = 2000;
@@ -101,12 +102,24 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: '記録の仕組みの変更はオーナー専用です' }, { status: 403 });
     }
 
-    // 現行スキーマもクライアント由来なので、そのまま信じずに検証を通してから使う
-    const { schema: currentSchema } = parseRecordSchema(body.currentSchema);
-    const currentDerivations = Array.isArray(body.currentDerivations) ? body.currentDerivations : [];
-    const currentDerivKeys = currentDerivations
-      .map((d) => (typeof d?.key === 'string' ? d.key : ''))
-      .filter(Boolean);
+    // 現行スキーマは**サーバで読み直す**（P153-PM22）。
+    //
+    // ⚠️ クライアントが送ってきた `currentSchema` を土台にすると、**クライアントが
+    // スキーマを読めなかったとき**（通信断・権限エラー）に「項目なし」と区別が付かない。
+    // AI は「このお店には項目がまだ 1 つも無い」を前提に案を作るので、
+    // **既にある項目を新規として提案**し、差分の画面では**既存の項目まで「追加」に見える**。
+    // 段 7 は人が差分を見て承認する設計なので、**承認の材料が事実と違う**のが実害。
+    // （yorulog が iOS の `RulePackSheet.generate()` で同型を踏んだ・`156040c`）
+    // P152 の `apply` が現行スキーマをサーバで読み直すのと同じ理由。生成側も揃える。
+    const schemaSnap = await getAdminDb().doc(pathRecordSchema(ctx)).get();
+    const { schema: currentSchema } = parseRecordSchema(schemaSnap.exists ? schemaSnap.data() : undefined);
+    // 導出も同じ doc にあるので**同じ読みから取る**。クライアント申告だと、
+    // 読めなかったときに「導出は 1 つも無い」に化けて**キーの衝突判定が素通りする**
+    // （＝ 既存の導出と同じキーの式を提案し、適用で上書きしてしまう）
+    const { derivations: currentDerivations } = parseStoredDerivations(
+      schemaSnap.exists ? (schemaSnap.data() as Record<string, unknown>).derivations : undefined,
+    );
+    const currentDerivKeys = currentDerivations.map((d) => d.key);
 
     // 店長が書く想定だが、他店資料や顧客のメッセージが貼られることがある。
     // 出力先が**店全体の集計の切り口と計算式**である以上、指示として読ませない（P130）

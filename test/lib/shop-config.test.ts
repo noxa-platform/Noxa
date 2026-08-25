@@ -34,6 +34,12 @@ describe('resolveTerm — 用語解決のフォールバック連鎖', () => {
     }
   });
 
+  // ⚠️ 呼び名の前後の空白は入力時の取りこぼしで、意図された表示ではない（P153-PM22）
+  it('上書きの前後の空白は落として返す（余白ごと画面に出さない）', () => {
+    const cfg = { terminology: { cast: '  ホスト  ' } } as unknown as ShopConfig;
+    expect(resolveTerm(cfg, undefined, 'cast')).toBe('ホスト');
+  });
+
   it('文字列でない上書きも「無い」扱い（Firestore は型違いを保存できる）', () => {
     for (const bad of [0, 42, true, null, {}, ['ホスト']]) {
       const cfg = { terminology: { cast: bad } } as unknown as ShopConfig;

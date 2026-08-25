@@ -9,11 +9,14 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 //     存在しない項目を参照する式も落とす
 //   - 課金: 使える提案が出たときだけ ack（提案ゼロ・不正 JSON は返金）
 
-const mocks = vi.hoisted(() => ({ verify: vi.fn(), resolve: vi.fn(), gen: vi.fn(), ack: vi.fn(), usage: vi.fn() }));
+const mocks = vi.hoisted(() => ({ verify: vi.fn(), resolve: vi.fn(), gen: vi.fn(), ack: vi.fn(), usage: vi.fn(), schemaGet: vi.fn() }));
 
 vi.mock('../../src/app/api/lib/firebase-admin', () => ({
   verifyRequest: mocks.verify,
   AuthError: class AuthError extends Error {},
+  // ⚠️ 現行スキーマは**サーバが読む**（P153-PM22）。クライアント申告だと、
+  // 読めなかったときに「項目なし」と区別が付かず、既にある項目を新規として提案してしまう
+  getAdminDb: () => ({ doc: () => ({ get: mocks.schemaGet }) }),
 }));
 vi.mock('../../src/app/api/lib/access-context', () => ({ resolveAccessContext: mocks.resolve }));
 vi.mock('../../src/app/api/ai/ai-provider', () => ({ generateText: mocks.gen }));
@@ -51,6 +54,7 @@ describe('ai/rule-pack POST（AI がルールパックを生成）', () => {
     mocks.gen.mockReset().mockResolvedValue(GOOD);
     mocks.ack.mockReset();
     mocks.usage.mockReset();
+    mocks.schemaGet.mockReset().mockResolvedValue({ exists: false, data: () => undefined });
   });
 
   describe('入力検証と認可', () => {
@@ -89,17 +93,42 @@ describe('ai/rule-pack POST（AI がルールパックを生成）', () => {
       expect(prompt).toContain('シャンパン推し');
     });
 
-    it('現行スキーマもクライアント由来なので検証を通してから使う', async () => {
-      await POST(req({
-        ...okBody,
-        currentSchema: { fields: [
+    it('現行スキーマは**サーバが読み**、保存済みの壊れた項目は検証で落とす', async () => {
+      mocks.schemaGet.mockResolvedValue({
+        exists: true,
+        data: () => ({ fields: [
           { key: 'sales', type: 'money', label: '売上' },
           { key: 'ボトル', type: 'count', label: '不正キー' }, // 検証で落ちる
-        ] },
-      }));
+        ] }),
+      });
+      await POST(req(okBody));
       const prompt = mocks.gen.mock.calls[0][0] as string;
       expect(prompt).toContain('sales');
       expect(prompt).not.toContain('ボトル(');
+    });
+
+    // ⚠️ クライアントが「項目なし」と申告しても、**サーバが読んだ実体が優先**される。
+    // 旧実装はクライアント申告を土台にしており、**端末がスキーマを読めなかっただけ**なのに
+    // 「このお店には項目が 1 つも無い」と AI に伝わっていた。結果、既にある項目を新規として
+    // 提案し、承認画面では**既存の項目まで「追加」に見える**（段 7 は人が差分を見て承認する
+    // 設計なので、承認の材料が事実と違うのが実害）。yorulog が iOS で同型を踏んだ（`156040c`）
+    it('クライアントが currentSchema を送ってこなくても、保存済みの項目は重複判定に効く', async () => {
+      mocks.schemaGet.mockResolvedValue({
+        exists: true,
+        data: () => ({ fields: [{ key: 'bottle_count', type: 'count', label: '既存' }] }),
+      });
+      const j = await (await POST(req(okBody))).json(); // currentSchema を送らない
+      expect(j.pack.fields.map((f: { key: string }) => f.key)).toEqual(['unit_price']);
+      expect(j.rejected.map((x: { reason: string }) => x.reason)).toContain('既にある項目です');
+    });
+
+    it('クライアントの申告は無視される（嘘の currentSchema を送っても実体で判定する）', async () => {
+      mocks.schemaGet.mockResolvedValue({
+        exists: true,
+        data: () => ({ fields: [{ key: 'bottle_count', type: 'count', label: '既存' }] }),
+      });
+      const j = await (await POST(req({ ...okBody, currentSchema: { fields: [] } }))).json();
+      expect(j.pack.fields.map((f: { key: string }) => f.key)).toEqual(['unit_price']);
     });
   });
 
@@ -135,19 +164,26 @@ describe('ai/rule-pack POST（AI がルールパックを生成）', () => {
     });
 
     it('既存スキーマと重複するキーは落とす（追加のみ）', async () => {
-      const j = await (await POST(req({
-        ...okBody,
-        currentSchema: { fields: [{ key: 'bottle_count', type: 'count', label: '既存' }] },
-      }))).json();
+      mocks.schemaGet.mockResolvedValue({
+        exists: true,
+        data: () => ({ fields: [{ key: 'bottle_count', type: 'count', label: '既存' }] }),
+      });
+      const j = await (await POST(req(okBody))).json();
       expect(j.pack.fields.map((f: { key: string }) => f.key)).toEqual(['unit_price']);
       expect(j.rejected.map((x: { reason: string }) => x.reason)).toContain('既にある項目です');
     });
 
-    it('現行の導出キーと衝突するものも落とす', async () => {
-      const j = await (await POST(req({
-        ...okBody,
-        currentDerivations: [{ key: 'bottle_sales', label: '既存', expr: { lit: 1 } }],
-      }))).json();
+    // ⚠️ 導出も同じ doc から**サーバが読む**。クライアント申告だと、読めなかったときに
+    // 「導出は 1 つも無い」に化けて**キーの衝突判定が素通りする**（既存の式を上書きしてしまう）
+    it('現行の導出キーと衝突するものも落とす（保存済みの導出を読む）', async () => {
+      mocks.schemaGet.mockResolvedValue({
+        exists: true,
+        data: () => ({
+          fields: [],
+          derivations: [{ key: 'bottle_sales', label: '既存', expr: { lit: 1 } }],
+        }),
+      });
+      const j = await (await POST(req(okBody))).json();
       expect(j.pack.derivations).toEqual([]);
     });
 

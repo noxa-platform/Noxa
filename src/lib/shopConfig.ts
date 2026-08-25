@@ -154,7 +154,12 @@ export function resolveIndustry(shopData: { storeTypeName?: unknown; businessCat
  * 型違いも同じ扱い。Firestore は文字列以外でも保存できてしまうため。
  */
 function usableTerm(v: unknown): string | undefined {
-  return typeof v === 'string' && v.trim() ? v : undefined;
+  // ⚠️ **trim した値を返す**（P153-PM22）。判定だけ trim して元の値を返していたため、
+  // `{ cast: "  ホスト  " }` が前後の空白ごと画面に出ていた。呼び名の前後の空白は
+  // 入力時の取りこぼしで、**意図された表示ではない**。yorulog が逐語移植の途中で見つけた
+  // （向こうも同じ形で写していたので、片側だけ整形すると表示が割れる。両側同時に直す）
+  const t = typeof v === 'string' ? v.trim() : '';
+  return t || undefined;
 }
 
 export function resolveTerm(config: ShopConfig | null, industry: string | undefined, key: ConceptId | string): string {
