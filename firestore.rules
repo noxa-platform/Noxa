@@ -271,6 +271,31 @@ service cloud.firestore {
       }
 
       // 出勤予定（シフトカレンダー）。本人 or オーナーが編集。実績(shifts)とは分離。
+      //
+      // 2026-08-26 決定（B-3 / nomishugy v2 移行の照会への回答）:
+      // **nomishugy の `shifts`（出勤予定）はここへ流す。`shifts` には入れない。**
+      // nomishugy 側の当初案（`shop_shops/{shopId}/shifts` へ流す）は取り違えで、実害を実読確認した:
+      //  (1) `src/lib/attendance/summary.ts:43` の `days.add(s.date)` は **startMs を見ない**ので、
+      //      予定を実績側へ入れると**月間出勤日数が予定ぶん水増し**される。
+      //  (2) 同 :57 は「過去日 かつ endMs 無し」を退勤忘れとして数えるので、
+      //      **過去日の予定が全件 `staleOpenCount` に載る**。
+      //      （`finalize-payroll` の支給額は st/en 無しで 0 分なので動かないが、勤怠画面は壊れる）
+      //  ＝ P46 の「`sales` に castUid を書くと personal_* へ投影されて給与が壊れる」と同じ型。
+      //
+      // docId は **`${castUid}_${date}`**（`AttendanceClient.tsx:352` の書込と同形）。
+      // ⚠️ これは「衝突しない」ではなく「**衝突させるのが正しい**」——形が違うと、キャストが
+      // noxa の UI で同じ日を編集した瞬間に**同じ日の予定が 2 件**になる。
+      // shopId はパスに入るので、同じキャストが複数店に所属していても混ざらない。
+      // ⚠️ ただし **nomishugy の 2 店が同じ noxa shopId に対応付く**場合だけは、
+      // 別の店の予定が同じ doc に畳まれる。移行の dry-run で bar→shop が 1:1 か確認すること。
+      //
+      // 出所フィールドについて: **付けてよいが `source` ではなく `migratedFrom` にする**。
+      // noxa 側の書込は `setDoc(..., { merge: true })` なので、**フィールドは人が編集しても残る**。
+      // `source: 'nomishugy'` は、キャストが noxa で予定を書き換えた瞬間に**嘘になる**。
+      // 「作成時点の出所」という意味なら残っても真のままなので `migratedFrom` / `migratedAt` とする。
+      // ⚠️ **noxa 側のコードはこのフィールドで分岐しない**（B-1 (2) と同じ理由——
+      // これから増える集計すべてがフラグを見続ける前提は、noxa が繰り返し踏んでいる事故の型）。
+      // 用途は移行のトレース・巻き戻しに限る。フィールドの allowlist は無いので rules の変更は不要。
       match /shift_plans/{id} {
         allow read: if isShopMember(shopId);
         allow create, update: if isShopOwnerLike(shopId)
