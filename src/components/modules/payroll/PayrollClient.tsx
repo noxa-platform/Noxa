@@ -39,18 +39,26 @@ async function computeDraft(shopId: string, uid: string): Promise<Period | null>
     const sh = await getDocs(query(collection(db, `shop_shops/${shopId}/shifts`), where('castUid', '==', uid)));
     const cw = await getDocs(query(collection(db, `shop_shops/${shopId}/seating_casts`), where('uid', '==', uid)));
     const wage = cw.empty ? 0 : ((cw.docs[0].data().hourlyWage as number) ?? 0);
-    const { hours, base, staleOpens, minutes } = computeDraftPayroll(
+    const { hours, base, staleOpens, undated, minutes } = computeDraftPayroll(
       sh.docs.map((doc) => doc.data() as { date?: unknown; startAt?: unknown; endAt?: unknown }),
       ym,
       wage,
     );
     // ⚠️ **全部が打刻漏れでも黙って消えない**。旧実装は分数 0 で null を返しており、
     // 「見込み」カードごと出なくなる＝**今月は働いていない**ように見えていた
-    if (minutes <= 0 && staleOpens === 0) return null;
+    if (minutes <= 0 && staleOpens === 0 && undated === 0) return null;
     const breakdown = [{ label: `基本給（勤務 ${hours.toFixed(1)}h × 時給 ¥${wage.toLocaleString('ja-JP')}）`, amount: base }];
     if (staleOpens > 0) {
       breakdown.push({
         label: `⚠ 退勤打刻の無い勤務 ${staleOpens} 件は時間に入っていません（勤怠画面で締めると反映されます）`,
+        amount: 0,
+      });
+    }
+    if (undated > 0) {
+      // 日付が読めない行は「別の月」と一緒に落とされていた（P154-PM2）。
+      // 本人には減った理由が見えないので、件数だけでも出す
+      breakdown.push({
+        label: `⚠ 日付が読めない勤務 ${undated} 件は時間に入っていません（お店にご確認ください）`,
         amount: 0,
       });
     }
@@ -167,7 +175,7 @@ export function PayrollClient({ user }: { user: User }) {
 type FinRow = { castUid: string; name: string; hours: number; wage: number; base: number; total: number; staleOpens?: number };
 type Adj = { back: string; bonus: string; penalty: string };
 
-async function finalizePost(body: unknown): Promise<{ period: string; rows: FinRow[] }> {
+async function finalizePost(body: unknown): Promise<{ period: string; rows: FinRow[]; unattributed?: number }> {
   const token = await auth?.currentUser?.getIdToken();
   if (!token) throw new Error('ログインが必要です');
   const res = await fetch('/api/team/finalize-payroll', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` }, body: JSON.stringify(body) });
@@ -181,6 +189,8 @@ function PayrollFinalize({ user }: { user: User }) {
   const now = new Date();
   const [ym, setYm] = useState(`${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`);
   const [rows, setRows] = useState<FinRow[] | null>(null);
+  // 誰の勤務か判別できず給与に載らなかった件数（明細の行にも出せないので件数でしか伝えられない）
+  const [unattributed, setUnattributed] = useState(0);
   const [adj, setAdj] = useState<Record<string, Adj>>({});
   const [wageOv, setWageOv] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false);
@@ -228,7 +238,7 @@ function PayrollFinalize({ user }: { user: User }) {
 
   const preview = async () => {
     setBusy(true); setErr(null); setMsg(null);
-    try { const r = await finalizePost({ shopId: shop.shopId, year: y, month: m, dryRun: true, adjustments: adjustmentsPayload(), wageOverrides: wageOverridesPayload() }); setRows(r.rows); }
+    try { const r = await finalizePost({ shopId: shop.shopId, year: y, month: m, dryRun: true, adjustments: adjustmentsPayload(), wageOverrides: wageOverridesPayload() }); setRows(r.rows); setUnattributed(r.unattributed ?? 0); }
     catch (e) { setErr(e instanceof Error ? e.message : '計算に失敗しました'); }
     finally { setBusy(false); }
   };
@@ -237,9 +247,12 @@ function PayrollFinalize({ user }: { user: User }) {
     // 打刻漏れ（未計上時間）があるまま確定すると過少額で確定される——件数を明示して判断させる
     const stale = rows.reduce((s, r) => s + (r.staleOpens ?? 0), 0);
     const staleWarn = stale > 0 ? `\n\n⚠ 退勤打刻の無い勤務が ${stale} 件あり、給与時間に入っていません。このまま確定すると少ない額で確定されます（勤怠を締めてから再計算を推奨）。` : '';
-    if (!window.confirm(`${ym} の給与を${rows.length}名分 確定します。よろしいですか？（再確定で上書き）${staleWarn}`)) return;
+    // 誰の勤務か判らない行は**明細の行にも出せない**ので、ここで件数を言わないと
+    // 誰にも見えないまま少ない額で確定される（P154-PM2）
+    const unattrWarn = unattributed > 0 ? `\n\n⚠ 誰の勤務か判別できない記録が ${unattributed} 件あり、どのキャストの給与にも入っていません（勤怠データの castUid が壊れています）。` : '';
+    if (!window.confirm(`${ym} の給与を${rows.length}名分 確定します。よろしいですか？（再確定で上書き）${staleWarn}${unattrWarn}`)) return;
     setBusy(true); setErr(null); setMsg(null);
-    try { const r = await finalizePost({ shopId: shop.shopId, year: y, month: m, adjustments: adjustmentsPayload(), wageOverrides: wageOverridesPayload() }); setMsg(`✓ ${r.period} を ${r.rows.length}名分 確定しました`); setRows(r.rows); }
+    try { const r = await finalizePost({ shopId: shop.shopId, year: y, month: m, adjustments: adjustmentsPayload(), wageOverrides: wageOverridesPayload() }); setMsg(`✓ ${r.period} を ${r.rows.length}名分 確定しました`); setRows(r.rows); setUnattributed(r.unattributed ?? 0); }
     catch (e) { setErr(e instanceof Error ? e.message : '確定に失敗しました'); }
     finally { setBusy(false); }
   };
@@ -299,6 +312,12 @@ function PayrollFinalize({ user }: { user: User }) {
             </tbody>
           </table>
           <p style={{ fontSize: 11, color: 'var(--noxa-text-faint)', margin: '8px 0 0' }}>※ 基本給＝当月の勤務(shifts)×時給。調整を入れたら「確定する」で各キャストの明細に保存されます（再確定で上書き）。</p>
+          {unattributed > 0 && (
+            <p role="alert" style={{ fontSize: 12, color: 'var(--noxa-status-warning)', margin: '6px 0 0' }}>
+              ⚠ 誰の勤務か判別できない記録が {unattributed} 件あり、どのキャストの給与にも入っていません。
+              勤怠データの castUid が壊れているため、この画面では紐付けられません（サポートへご連絡ください）。
+            </p>
+          )}
           {rows.some((r) => (r.staleOpens ?? 0) > 0) && (
             <p role="alert" style={{ fontSize: 12, color: 'var(--noxa-status-warning)', margin: '6px 0 0' }}>
               ⚠ 「打刻漏れ」のあるキャストは退勤打刻の無い勤務が時間に入っていません。本人の勤怠画面（退勤忘れカード）で締めてから再計算すると正確になります。

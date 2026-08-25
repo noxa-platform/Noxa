@@ -241,6 +241,46 @@ describe('team/finalize-payroll POST（月次給与の確定）', () => {
       expect(rows.map((r) => r.castUid)).toEqual(['cast1']);
       expect(f.written.map((w) => w.path)).toEqual(['shop_shops/s1/payrolls/cast1/items/2026-08']);
     });
+
+    // P154-PM2: 上の「その行だけ捨てる」は正しいが、**捨てたことを誰にも言っていなかった**。
+    // 「castUid が壊れている」（欠陥）と「別の月だった」（正しい絞り込み）が
+    // 1 つの guard に畳まれていたため、その人の勤務時間が給与から消えたまま見えなかった。
+    it('捨てた行は unattributed として件数で返す（黙って消さない）', async () => {
+      const f = makeDb({
+        ...BASE,
+        ...Object.fromEntries([
+          shift('bad1', '../../account_users/x', '2026-08-01', T0, T0 + 5 * H),
+          shift('bad2', '', '2026-08-02', T0, T0 + 3 * H),
+          shift('other', 'cast1', '2026-07-31', T0, T0 + 9 * H), // 別の月＝正しい絞り込み
+          shift('ok', 'cast1', '2026-08-01', T0, T0 + 2 * H),
+        ]),
+      });
+      mocks.getDb.mockReturnValue(f.db);
+      const res = await POST(req({ shopId: 's1', year: 2026, month: 8 }));
+      const body = await res.json();
+      expect(body.unattributed).toBe(2);            // 壊れた 2 行だけ
+      expect(body.rows.map((r: { castUid: string }) => r.castUid)).toEqual(['cast1']);
+      expect(body.rows[0].hours).toBe(2);           // 別の月は混ざっていない
+    });
+
+    it('壊れた行が無ければ unattributed は 0（欄が無いのと 0 件は別のこと）', async () => {
+      const f = makeDb({ ...BASE, ...Object.fromEntries([shift('ok', 'cast1', '2026-08-01', T0, T0 + H)]) });
+      mocks.getDb.mockReturnValue(f.db);
+      const body = await (await POST(req({ shopId: 's1', year: 2026, month: 8 }))).json();
+      expect(body.unattributed).toBe(0);
+    });
+
+    it('dryRun でも unattributed を返す（確定前に気づけないと意味が無い）', async () => {
+      const f = makeDb({
+        ...BASE,
+        ...Object.fromEntries([shift('bad', 'a/b', '2026-08-01', T0, T0 + H)]),
+      });
+      mocks.getDb.mockReturnValue(f.db);
+      const body = await (await POST(req({ shopId: 's1', year: 2026, month: 8, dryRun: true }))).json();
+      expect(body.dryRun).toBe(true);
+      expect(body.unattributed).toBe(1);
+      expect(f.written).toEqual([]);
+    });
   });
 
   describe('金額の計算', () => {

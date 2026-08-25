@@ -76,4 +76,35 @@ describe('computeDraftPayroll — 見込み給与', () => {
     expect(r.minutes).toBe(0);
     expect(r.staleOpens).toBe(0);
   });
+
+  // P154-PM2: 「数えていない」の一段手前に「区別していない」がある（yorulog の原則）。
+  // 「別の月だった」＝正しい絞り込み と「日付が読めない」＝欠陥 を 1 つの continue に
+  // 畳んでいたため、**壊れた行が正しい絞り込みに紛れて数えられなかった**。
+  it('日付が読めない勤務は「別の月」と区別して undated に数える', () => {
+    const r = computeDraftPayroll([
+      { date: '2026-08-01', startAt: ts(0), endAt: ts(H) },       // 当月・正常
+      { date: '2026-07-31', startAt: ts(0), endAt: ts(H) },       // 別の月（正しい絞り込み・数えない）
+      { startAt: ts(0), endAt: ts(H) },                            // 日付が無い（欠陥）
+      { date: '   ', startAt: ts(0), endAt: ts(H) },               // 空白だけ（欠陥）
+      { date: 20260801 as unknown as string, startAt: ts(0) },     // 型違い（欠陥）
+    ], '2026-08', 1000);
+    expect(r.minutes).toBe(60);   // 当月の 1 件だけ
+    expect(r.undated).toBe(3);
+    expect(r.staleOpens).toBe(0); // 日付が読めない行は打刻漏れとは別勘定
+  });
+
+  it('日付が読めなくても出勤打刻すら無い行は数えない（勤務の記録が無いだけ）', () => {
+    const r = computeDraftPayroll([{ endAt: ts(H) }, {}], '2026-08', 1000);
+    expect(r.undated).toBe(0);
+    expect(r.staleOpens).toBe(0);
+  });
+
+  it('「別の月」は undated に数えない（正しい絞り込みを欠陥に混ぜない）', () => {
+    const r = computeDraftPayroll([
+      { date: '2026-07-01', startAt: ts(0), endAt: ts(H) },
+      { date: '2026-09-30', startAt: ts(0) },
+    ], '2026-08', 1000);
+    expect(r.undated).toBe(0);
+    expect(r.minutes).toBe(0);
+  });
 });

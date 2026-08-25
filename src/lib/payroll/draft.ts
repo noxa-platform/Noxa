@@ -23,6 +23,12 @@ export interface DraftPayroll {
   minutes: number;
   /** 出勤はあるのに閉じられていない/壊れている勤務の件数（時間に入っていない） */
   staleOpens: number;
+  /**
+   * 日付が読めず**どの月の勤務か判らない**行の件数（時間に入っていない）。
+   * ⚠️ 「別の月だった」＝正しい絞り込みとは**別に数える**（P154-PM2）。
+   * 畳むと、壊れた行が正しい絞り込みに紛れて見えなくなる。
+   */
+  undated: number;
   hours: number;
   /** 基本給（円・四捨五入） */
   base: number;
@@ -34,6 +40,9 @@ export interface DraftPayroll {
  * ⚠️ 出勤打刻すら無い行は**数えない**（「勤務の記録が無い」だけで、打刻漏れではない）。
  * 出勤はあるのに閉じられていない行だけを `staleOpens` に数える
  * （サーバの `finalize-payroll` と同じ数え方）。
+ *
+ * ⚠️ **「別の月だった」と「日付が読めない」を同じ `continue` に畳まない**（P154-PM2）。
+ * 前者は正しい絞り込み、後者は欠陥。畳むと**壊れた行が正しい絞り込みに紛れて数えられない**。
  */
 export function computeDraftPayroll(
   shifts: DraftShiftInput[],
@@ -42,9 +51,16 @@ export function computeDraftPayroll(
 ): DraftPayroll {
   let minutes = 0;
   let staleOpens = 0;
+  let undated = 0;
   for (const sh of shifts) {
-    const date = typeof sh.date === 'string' ? sh.date : '';
-    if (!date.startsWith(yearMonth)) continue;
+    const date = typeof sh.date === 'string' ? sh.date.trim() : '';
+    if (!date) {
+      // 日付が無い＝どの月の勤務か判らない。出勤打刻があるなら**働いた記録**なので、
+      // 「別の月」と一緒に黙って落とすと本人の見込みだけ静かに減る
+      if (toMillis(sh.startAt) !== null) undated += 1;
+      continue;
+    }
+    if (!date.startsWith(yearMonth)) continue; // 正しい絞り込み
     const s = toMillis(sh.startAt);
     const e = toMillis(sh.endAt);
     if (s !== null && e !== null && e > s) {
@@ -55,5 +71,5 @@ export function computeDraftPayroll(
   }
   const wage = Number.isFinite(hourlyWage) && hourlyWage > 0 ? hourlyWage : 0;
   const hours = minutes / 60;
-  return { minutes, staleOpens, hours, base: Math.round(hours * wage) };
+  return { minutes, staleOpens, undated, hours, base: Math.round(hours * wage) };
 }

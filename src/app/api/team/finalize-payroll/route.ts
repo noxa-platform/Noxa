@@ -88,11 +88,22 @@ export async function POST(request: NextRequest) {
       .get();
     const minutesByUid = new Map<string, number>();
     const staleOpensByUid = new Map<string, number>(); // 退勤忘れ（未計上時間）の件数
+    // 誰の勤務か判らず給与に載せられなかった行数。**0 でない時点で異常**（P154-PM2）
+    let unattributed = 0;
     for (const s of shiftsSnap.docs) {
       const x = s.data() as { castUid?: string; date?: string; startAt?: unknown; endAt?: unknown };
-      // castUid は payrolls/{castUid}/items/{period} の doc パスに入る。`/` 入りの壊れた値が
-      // 1件でも混じると db.doc() が throw して**給与確定が丸ごと 500**になるため、行ごと除外する。
-      if (!x.castUid || !isSafeDocId(x.castUid) || !(x.date ?? '').startsWith(period)) continue;
+      // ⚠️ ここは以前、**3 つの別の理由を 1 つの guard に畳んでいた**（P154-PM2）。
+      // 「別の月だった」は正しい絞り込みだが、「誰の勤務か判らない」は**欠陥**で、
+      // 正しい絞り込みに紛れると**その人の勤務時間が給与から消えたまま誰にも見えない**。
+      // 捨てる前に理由を分ける（yorulog の原則: 「数えていない」の一段手前に「区別していない」がある）。
+      if (!(x.date ?? '').startsWith(period)) continue; // 正しい絞り込み（期間クエリの二重確認）
+      if (!x.castUid || !isSafeDocId(x.castUid)) {
+        // castUid は payrolls/{castUid}/items/{period} の doc パスに入る。`/` 入りの壊れた値が
+        // 1件でも混じると db.doc() が throw して**給与確定が丸ごと 500**になるため、行ごと除外する。
+        // ただし**黙って捨てない**——誰にも紐付かない以上、明細の行にも出せず件数でしか伝えられない。
+        unattributed += 1;
+        continue;
+      }
       const st = toMillis(x.startAt), en = toMillis(x.endAt);
       if (st && en && en > st) minutesByUid.set(x.castUid, (minutesByUid.get(x.castUid) ?? 0) + (en - st) / 60000);
       // 退勤打刻が無い(未退勤) or end<=start(日跨ぎを同暦日で締めた旧データ等)の勤務は
@@ -157,7 +168,14 @@ export async function POST(request: NextRequest) {
 
     if (!dryRun) await batch.commit();
     rows.sort((a, b) => b.total - a.total);
-    return NextResponse.json({ period, dryRun, rows });
+    if (unattributed > 0) {
+      console.warn(
+        '[api/team/finalize-payroll] 誰の勤務か判らず給与に載せられなかった行があります',
+        `shopId=${shopId} period=${period} unattributed=${unattributed}`,
+      );
+    }
+    // ⚠️ 落とした件数を必ず載せる。0 でも省略しない（欄が無いのと 0 件は別のこと）
+    return NextResponse.json({ period, dryRun, rows, unattributed });
   } catch (e) {
     if (e instanceof AuthError) return NextResponse.json({ error: e.message }, { status: 401 });
     console.error('[api/team/finalize-payroll] error:', e);
