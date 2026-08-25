@@ -235,6 +235,24 @@ export function applyRulePack(
     existingDerivKeys.add(d.key);
   }
 
+  // ⚠️ **選んだのにパックに無かったキーを黙って消さない**（P153-PM25）。
+  // ここまでの `skipped` は「パックにあったが適用しなかったもの」だけで、
+  // **選択に入っているのにパックのどこにも無いキー**は、適用も拒否もされずに消えていた。
+  // 人が「この 5 つを足す」と承認したのに 3 つしか足されず、**画面には成功しか出ない**。
+  // ＝ 承認した内容と起きたことが食い違い、しかも気づく手がかりが無い。
+  // これで **選んだ数 = 足した数 + 引かなかった数** が必ず合う（検算できる）。
+  if (selected) {
+    const inPack = new Set([...pack.fields.map((f) => f.key), ...pack.derivations.map((d) => d.key)]);
+    for (const key of selected) {
+      if (inPack.has(key)) continue;
+      skipped.push({
+        kind: 'field',
+        key,
+        reason: '選ばれていましたが、今回の提案に含まれていないため何もしていません（画面が古い可能性があります）',
+      });
+    }
+  }
+
   return {
     schema: { ...current, fields: [...current.fields, ...addedFields] },
     derivations: [...currentDerivations, ...addedDerivations],

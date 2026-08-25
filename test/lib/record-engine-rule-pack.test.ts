@@ -142,6 +142,30 @@ describe('applyRulePack — 選ばれたものだけ適用する', () => {
   const pack: RulePack = validateRulePack(packRaw, emptySchema).pack;
   const opts = { token: 't1', now: 1000 };
 
+  // ⚠️ **選んだ数 = 足した数 + 引かなかった数** が必ず合うこと（P153-PM25）。
+  // 選択に入っているのにパックのどこにも無いキーは、以前は**適用も拒否もされず消えていた**。
+  // 人が「この 5 つを足す」と承認したのに 3 つしか足されず、画面には成功しか出ない
+  // ＝ 承認した内容と起きたことが食い違い、しかも気づく手がかりが無い。
+  it('選ばれたのに提案に無いキーは skipped に載る（黙って消さない）', () => {
+    const r = applyRulePack(emptySchema, [], pack, { ...opts, selectedKeys: ['bottle_count', 'nope', 'また_無い'] });
+    expect(r.schema.fields.map((f) => f.key)).toEqual(['bottle_count']);
+    const skippedKeys = r.skipped.map((x) => x.key).sort();
+    expect(skippedKeys).toEqual(['nope', 'また_無い']);
+    for (const x of r.skipped) expect(x.reason).toContain('含まれていない');
+  });
+
+  it('検算: 選んだ数 = 足した数 + 引かなかった数', () => {
+    const selectedKeys = ['bottle_count', 'unit_price', 'bottle_sales', 'ghost'];
+    const r = applyRulePack(emptySchema, [], pack, { ...opts, selectedKeys });
+    const added = r.receipt.fields.length + r.receipt.derivations.length;
+    expect(added + r.skipped.length).toBe(selectedKeys.length);
+  });
+
+  it('全部適用（selectedKeys 無し）のときは無関係なキーを数えない', () => {
+    const r = applyRulePack(emptySchema, [], pack, opts);
+    expect(r.skipped).toEqual([]);
+  });
+
   it('全部適用すると控えに足したものが載る', () => {
     const r = applyRulePack(emptySchema, [], pack, opts);
     expect(r.schema.fields.map((f) => f.key)).toEqual(['bottle_count', 'unit_price']);
