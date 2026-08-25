@@ -1,8 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { aiKillSwitchResponse } from '@/app/api/lib/ai-kill-switch';
-import { generateChatStream, analyzeImages, type ChatHistoryEntry } from '../ai-provider';
+import { generateChatStream, analyzeImages, resolveChatModel, type ChatHistoryEntry } from '../ai-provider';
 import { buildInjectionGuardBlock, wrapUntrustedInput } from '@/lib/ai-knowledge/injection-guard';
-import { generateOpenRouterStream, type OpenRouterChatMessage } from '../openrouter';
 import { reserveAiCredit, refundAiCredit, logAiLedger } from '../../lib/credits';
 import { computeChatCost } from '@/lib/ai-cost';
 import { resolveWorkspaceContext, composePlaybookAndSelf } from '@/lib/ai-knowledge/prompt-helpers';
@@ -376,7 +375,9 @@ export async function POST(request: NextRequest) {
     // AI_PRIMARY_MODEL_FAST / AI_PRIMARY_MODEL_THINK を Vercel 環境変数で設定すると、
     // それぞれの modelMode で OpenRouter 経由のモデルが使われる。
     // 値は "openrouter:provider/model" 形式（例: "openrouter:anthropic/claude-sonnet-4.5"）。
-    // 値が無い / "openrouter:" 接頭辞でないときは Gemini 直叩きを継続。
+    // ⚠️ 値が無い / "openrouter:" 接頭辞でないときの**フォールバック先は無い**。
+    // 旧コメントは「Gemini 直叩きを継続」と書いていたが Gemini 経路は廃止済みで、
+    // 実際は resolveChatModel が throw する（P153 ②で是正）。
     // クライアント送信の overrideModel は admin 限定（後段で email チェック）。
     let overrideModel: string | null = null;
     const imageDataList: { data: string; mimeType: string }[] = [];
@@ -464,6 +465,14 @@ export async function POST(request: NextRequest) {
 
     const ctx = await resolveAccessContext(uid, workspaceId);
 
+    // 実際に呼ぶモデルを**この 1 箇所で**決める（P153 ①③）。
+    // ⚠️ クレジット予約より手前に置く。ここが throw するのは「モデル未設定」という
+    // 運営側の設定漏れなので、予約 → 失敗 → 返金の往復を作らずに 500 で落とす。
+    const model = resolveChatModel({
+      modelTier: modelMode === 'think' ? 'pro' : 'flash',
+      override: overrideModel,
+    });
+
     // 動的クレジットコスト: 入力長 + 画像枚数 × モデル係数（FAST=1, THINK=3）
     // クライアント側 chat-input でも同じ値を計算して送信ボタンに表示する
     const chatCost = computeChatCost(message, imageDataList.length, modelMode);
@@ -531,6 +540,9 @@ export async function POST(request: NextRequest) {
           maxOutputTokens: 2048,
           temperature: 0.7,
           responseMimeType: 'application/json',
+          // 運営者 override は画像経路にも効かせる（従来ここだけ無視され、
+          // override 中でも FAST の env モデルで解析されていた・P153 ①）
+          model,
         });
       } catch (err) {
         await refundAiCredit(uid, chatCost, reserved);
@@ -557,18 +569,20 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({
         reply: reply || '回答を生成できませんでした。',
         actions,
-        model: overrideModel ?? 'openrouter',
+        // 実際に呼んだモデル ID をそのまま返す（従来は override 無しだと
+        //  'openrouter' という実態のない文字列だった・P153 ③）
+        model,
         modelMode,
         creditsRemaining: reserved.remaining,
       });
     }
 
     // テキスト経路: SSE ストリーミング（chunk ごとに client へ流す）
-    const geminiHistory: ChatHistoryEntry[] = [];
+    const chatHistory: ChatHistoryEntry[] = [];
     if (history && Array.isArray(history)) {
       const recentHistory = history.slice(-MAX_HISTORY_MESSAGES);
       for (const h of recentHistory) {
-        geminiHistory.push({
+        chatHistory.push({
           role: h.role === 'assistant' ? 'model' : 'user',
           parts: [{ text: h.content }],
         });
@@ -580,38 +594,18 @@ export async function POST(request: NextRequest) {
       async start(controller) {
         let rawReply = '';
         try {
-          if (overrideModel) {
-            // OpenRouter 経由: Gemini 互換 history を OpenAI messages に変換
-            const messages: OpenRouterChatMessage[] = [
-              { role: 'system', content: fullSystemPrompt },
-              ...geminiHistory.map((h) => ({
-                role: (h.role === 'model' ? 'assistant' : 'user') as 'assistant' | 'user',
-                content: h.parts.map((p) => p.text).join('\n'),
-              })),
-              { role: 'user', content: prompt },
-            ];
-            rawReply = await generateOpenRouterStream(
-              {
-                model: overrideModel,
-                messages,
-                temperature: 0.7,
-                maxTokens: modelMode === 'think' ? 4096 : 2048,
-                responseFormat: 'json_object',
-              },
-              (text) => {
-                controller.enqueue(encoder.encode(
-                  `data: ${JSON.stringify({ type: 'chunk', text })}\n\n`,
-                ));
-              },
-            );
-          } else {
+          // ⚠️ 経路は 1 本だけ（P153 ①）。以前は overrideModel の有無で
+          // 「openrouter.ts 直呼び」と「ai-provider 経由」に分かれており、
+          // 後者は env が設定されていれば必ず override 側に倒れるため**到達しない**
+          // 死んだ実装だった。プロンプト整形や課金の分岐が 2 箇所に増えるだけで、
+          // 片方だけ直す事故のもとになる。
           await generateChatStream(prompt, {
             systemInstruction: fullSystemPrompt,
             maxOutputTokens: modelMode === 'think' ? 4096 : 2048,
             temperature: 0.7,
             responseMimeType: 'application/json',
-            history: geminiHistory,
-            modelTier: modelMode === 'think' ? 'pro' : 'flash',
+            history: chatHistory,
+            model,
             onChunk: (text) => {
               rawReply += text;
               controller.enqueue(encoder.encode(
@@ -619,7 +613,6 @@ export async function POST(request: NextRequest) {
               ));
             },
           });
-          }
 
           const { reply, actions } = parseRawReply(rawReply);
 
@@ -640,7 +633,10 @@ export async function POST(request: NextRequest) {
               type: 'meta',
               reply: reply || '回答を生成できませんでした。',
               actions,
-              model: overrideModel ?? (modelMode === 'think' ? 'gemini-2.5-pro' : 'gemini-2.5-flash'),
+              // 実際に呼んだモデル ID。従来は override 無しのとき
+              // 'gemini-2.5-flash' / 'gemini-2.5-pro' の固定値を返していたが、
+              // Gemini 経路は廃止済みで**呼んでいないモデル名**だった（P153 ③）
+              model,
               modelMode,
               creditsRemaining: reserved.remaining,
             })}\n\n`,

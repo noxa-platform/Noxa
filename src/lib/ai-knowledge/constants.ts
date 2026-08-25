@@ -1,7 +1,7 @@
 // AI 機能の設定値を集約。ハードコードを減らし、チューニングを 1 箇所で済ます。
 export const AI_CONFIG = {
   // チャット履歴
-  maxHistoryMessages: 20,        // Gemini に渡す会話履歴の上限
+  maxHistoryMessages: 20,        // モデルに渡す会話履歴の上限
   fullDataThreshold: 50,         // 顧客全件送信 or サマリ分岐のしきい値
   persistedChatLimit: 100,       // Firestore 永続化の上限
 

@@ -4,11 +4,16 @@
 // 廃止済み（API キー削除）。本ファイルは OpenRouter のみを使う統一インターフェース。
 //
 // モデルは環境変数で指定する（"openrouter:provider/model" 形式）:
-//   AI_PRIMARY_MODEL_FAST  … FAST 系（flash / lite）
-//   AI_PRIMARY_MODEL_THINK … THINK 系（pro）
+//   AI_PRIMARY_MODEL_FAST  … flash（既定）
+//   AI_PRIMARY_MODEL_THINK … pro（推論強め）
+//   AI_PRIMARY_MODEL_LITE  … lite（短文向けの安いモデル・任意）
 // 未設定の場合は明示的にエラーにする（フォールバック先は無い）。
+// ただし lite だけは未設定なら FAST を使う（安くする最適化であって、
+// 落とすほどのものではないため）。⚠️ **黙って落とさず 1 回だけログに出す**（P153）。
 //
 // 2026-06-02 NOXA へ移設・OpenRouter 専用化。
+// 2026-08-25 P153: 呼び出し側が実際のモデル ID を知れるよう resolveChatModel を公開し、
+//            options.model で明示指定できるようにした（chat/route.ts の実装 2 本を 1 本へ）。
 
 import { assertAiEnabled } from '../lib/ai-kill-switch';
 import {
@@ -25,20 +30,74 @@ export interface ChatHistoryEntry {
   parts: { text: string }[];
 }
 
+/** tier に対応する環境変数の名前と値。 */
+function envForTier(tier: ModelTier | undefined): { name: string; value: string | undefined } {
+  switch (tier) {
+    case 'pro':
+      return { name: 'AI_PRIMARY_MODEL_THINK', value: process.env.AI_PRIMARY_MODEL_THINK };
+    case 'lite':
+      return { name: 'AI_PRIMARY_MODEL_LITE', value: process.env.AI_PRIMARY_MODEL_LITE };
+    default:
+      return { name: 'AI_PRIMARY_MODEL_FAST', value: process.env.AI_PRIMARY_MODEL_FAST };
+  }
+}
+
+/** "openrouter:provider/model" から provider/model を取り出す。形式違いは undefined。 */
+function stripPrefix(envValue: string | undefined): string | undefined {
+  if (!envValue || !envValue.startsWith('openrouter:')) return undefined;
+  const id = envValue.slice('openrouter:'.length).trim();
+  return id || undefined;
+}
+
+// lite の FAST 代替は 1 プロセスに 1 回だけ知らせる（リクエストごとに出すとログが埋まる）
+let liteFallbackNotified = false;
+
 /**
  * 環境変数から OpenRouter モデル ID を取り出す。
  * "openrouter:provider/model" 形式のときだけ provider/model を返す。
+ *
+ * ⚠️ lite は AI_PRIMARY_MODEL_LITE が無ければ FAST を使う（安く済ませる最適化なので、
+ * 未設定で機能ごと止めない）。ただし**黙って落とさない**——初回に console.info を出し、
+ * 「lite のつもりが FAST の値段で回っている」を運用側が気づけるようにする（P153）。
  */
 function resolveOpenRouterModel(tier: ModelTier | undefined): string {
-  const envValue = tier === 'pro'
-    ? process.env.AI_PRIMARY_MODEL_THINK
-    : process.env.AI_PRIMARY_MODEL_FAST;
-  if (!envValue || !envValue.startsWith('openrouter:')) {
-    throw new Error(
-      'AI モデル未設定: AI_PRIMARY_MODEL_FAST / AI_PRIMARY_MODEL_THINK に "openrouter:provider/model" を設定してください（Gemini は廃止済み）。',
-    );
+  const primary = envForTier(tier);
+  const resolved = stripPrefix(primary.value);
+  if (resolved) return resolved;
+
+  if (tier === 'lite') {
+    const fast = stripPrefix(process.env.AI_PRIMARY_MODEL_FAST);
+    if (fast) {
+      if (!liteFallbackNotified) {
+        liteFallbackNotified = true;
+        console.info(
+          `[ai-provider] AI_PRIMARY_MODEL_LITE が未設定のため lite は AI_PRIMARY_MODEL_FAST (${fast}) で動作します`,
+        );
+      }
+      return fast;
+    }
   }
-  return envValue.slice('openrouter:'.length);
+
+  throw new Error(
+    `AI モデル未設定: ${primary.name} に "openrouter:provider/model" を設定してください（Gemini は廃止済み）。`,
+  );
+}
+
+/**
+ * 実際に呼ぶ OpenRouter モデル ID を決める。
+ *
+ * override（運営者が指定した値 / env 既定）があればそれを優先し、無ければ tier から解決する。
+ * **呼び出し側が「実際に呼んだモデル」を知る唯一の入口**でもある
+ * （SSE meta のモデル名を固定文字列で書くと実態とズレるため・P153 ③）。
+ */
+export function resolveChatModel(options?: {
+  modelTier?: ModelTier;
+  /** 既に "openrouter:" を剥がしたモデル ID */
+  override?: string | null;
+}): string {
+  const override = options?.override?.trim();
+  if (override) return override;
+  return resolveOpenRouterModel(options?.modelTier);
 }
 
 function buildMessages(
@@ -69,12 +128,14 @@ export async function generateText(
     temperature?: number;
     responseMimeType?: string;
     modelTier?: ModelTier;
+    /** モデル ID を直接指定する（運営者 override 用。指定時は modelTier を見ない） */
+    model?: string;
   },
 ): Promise<string> {
   // 緊急停止スイッチ（2026-08-25）。**外部 API を叩く手前**で止めるので原価が発生しない。
   // ルート側の入口チェックを足し忘れてもここで確実に止まる（最後の砦）
   await assertAiEnabled();
-  const model = resolveOpenRouterModel(options?.modelTier);
+  const model = resolveChatModel({ modelTier: options?.modelTier, override: options?.model });
   return generateOpenRouterText({
     model,
     messages: buildMessages(prompt, options?.systemInstruction),
@@ -94,12 +155,14 @@ export async function generateChat(
     responseMimeType?: string;
     history?: ChatHistoryEntry[];
     modelTier?: ModelTier;
+    /** モデル ID を直接指定する（運営者 override 用。指定時は modelTier を見ない） */
+    model?: string;
   },
 ): Promise<string> {
   // 緊急停止スイッチ（2026-08-25）。**外部 API を叩く手前**で止めるので原価が発生しない。
   // ルート側の入口チェックを足し忘れてもここで確実に止まる（最後の砦）
   await assertAiEnabled();
-  const model = resolveOpenRouterModel(options.modelTier);
+  const model = resolveChatModel({ modelTier: options.modelTier, override: options.model });
   return generateOpenRouterText({
     model,
     messages: buildMessages(prompt, options.systemInstruction, options.history),
@@ -119,13 +182,15 @@ export async function generateChatStream(
     responseMimeType?: string;
     history?: ChatHistoryEntry[];
     modelTier?: ModelTier;
+    /** モデル ID を直接指定する（運営者 override 用。指定時は modelTier を見ない） */
+    model?: string;
     onChunk: (text: string) => void;
   },
 ): Promise<string> {
   // 緊急停止スイッチ（2026-08-25）。**外部 API を叩く手前**で止めるので原価が発生しない。
   // ルート側の入口チェックを足し忘れてもここで確実に止まる（最後の砦）
   await assertAiEnabled();
-  const model = resolveOpenRouterModel(options.modelTier);
+  const model = resolveChatModel({ modelTier: options.modelTier, override: options.model });
   return generateOpenRouterStream(
     {
       model,
@@ -151,12 +216,14 @@ export async function analyzeImages(
     temperature?: number;
     responseMimeType?: string;
     modelTier?: ModelTier;
+    /** モデル ID を直接指定する（運営者 override 用。指定時は modelTier を見ない） */
+    model?: string;
   },
 ): Promise<string> {
   // 緊急停止スイッチ（2026-08-25）。**外部 API を叩く手前**で止めるので原価が発生しない。
   // ルート側の入口チェックを足し忘れてもここで確実に止まる（最後の砦）
   await assertAiEnabled();
-  const model = resolveOpenRouterModel(options?.modelTier);
+  const model = resolveChatModel({ modelTier: options?.modelTier, override: options?.model });
   const messages: OpenRouterChatMessage[] = [];
   if (options?.systemInstruction) messages.push({ role: 'system', content: options.systemInstruction });
 

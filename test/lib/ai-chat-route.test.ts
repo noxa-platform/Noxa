@@ -55,11 +55,18 @@ vi.mock('../../src/app/api/lib/credits', () => ({
   refundAiCredit: mocks.refund,
   logAiLedger: mocks.ledger,
 }));
-vi.mock('../../src/app/api/ai/ai-provider', () => ({
+// ⚠️ **resolveChatModel は本物を使う**（部分モック）。ここをモックにすると
+// 「実際に呼ぶモデルを決める」唯一の場所がテストから消え、SSE meta のモデル名が
+// 実態とズレていた P153 ③ の再発を検知できない。
+vi.mock('../../src/app/api/ai/ai-provider', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../src/app/api/ai/ai-provider')>()),
   generateChatStream: mocks.chatStream,
   analyzeImages: mocks.analyzeImages,
 }));
-vi.mock('../../src/app/api/ai/openrouter', () => ({ generateOpenRouterStream: mocks.openRouterStream }));
+vi.mock('../../src/app/api/ai/openrouter', () => ({
+  generateOpenRouterStream: mocks.openRouterStream,
+  generateOpenRouterText: vi.fn(),
+}));
 vi.mock('@/lib/ai-knowledge/prompt-helpers', () => ({
   resolveWorkspaceContext: mocks.workspaceCtx,
   composePlaybookAndSelf: () => ({ combined: '(playbook)' }),
@@ -126,8 +133,10 @@ describe('ai/chat（AI チャット本体）', () => {
     mocks.openRouterStream.mockReset().mockResolvedValue('{"reply":"or"}');
     mocks.getUser.mockReset().mockResolvedValue({ email: 'user@example.com' });
     mocks.isAdmin.mockReset().mockReturnValue(false);
-    delete process.env.AI_PRIMARY_MODEL_FAST;
-    delete process.env.AI_PRIMARY_MODEL_THINK;
+    // 本番は必ず設定されている前提（未設定は「運営の設定漏れ」で、下に専用テストを置く）
+    process.env.AI_PRIMARY_MODEL_FAST = 'openrouter:test/fast';
+    process.env.AI_PRIMARY_MODEL_THINK = 'openrouter:test/think';
+    delete process.env.AI_PRIMARY_MODEL_LITE;
   });
 
   // --- 入力検証・認可 ---
@@ -320,23 +329,59 @@ describe('ai/chat（AI チャット本体）', () => {
 
   // --- モデル override（運営者限定）---
 
-  it('一般ユーザーが送った overrideModel は無視される', async () => {
+  /** 直近の generateChatStream に渡されたモデル ID */
+  const lastModel = () => (mocks.chatStream.mock.calls.at(-1)![1] as { model?: string }).model;
+
+  it('一般ユーザーが送った overrideModel は無視され、env の既定モデルで呼ばれる', async () => {
     await readSse((await POST(jsonReq({ ...okBody, overrideModel: 'openrouter:evil/model' }))) as Response);
-    expect(mocks.openRouterStream).not.toHaveBeenCalled();
-    expect(mocks.chatStream).toHaveBeenCalled();
+    expect(lastModel()).toBe('test/fast');
   });
 
-  it('admin の overrideModel は OpenRouter 経由になる', async () => {
+  it('admin の overrideModel は実際に呼ぶモデルになる', async () => {
     mocks.isAdmin.mockReturnValue(true);
     await readSse((await POST(jsonReq({ ...okBody, overrideModel: 'openrouter:anthropic/claude' }))) as Response);
-    expect(mocks.openRouterStream).toHaveBeenCalled();
-    expect(mocks.openRouterStream.mock.calls[0][0].model).toBe('anthropic/claude');
-    expect(mocks.chatStream).not.toHaveBeenCalled();
+    expect(lastModel()).toBe('anthropic/claude');
   });
 
   it('env の既定 override は一般ユーザーにも適用される', async () => {
     process.env.AI_PRIMARY_MODEL_FAST = 'openrouter:google/gemini';
     await readSse((await POST(jsonReq(okBody))) as Response);
-    expect(mocks.openRouterStream.mock.calls[0][0].model).toBe('google/gemini');
+    expect(lastModel()).toBe('google/gemini');
+  });
+
+  it('think モードは THINK 側の env モデルで呼ばれる', async () => {
+    await readSse((await POST(jsonReq({ ...okBody, modelMode: 'think' }))) as Response);
+    expect(lastModel()).toBe('test/think');
+  });
+
+  // --- P153: 経路の一本化と実モデル名の申告 ---
+
+  it('SSE meta の model は**実際に呼んだモデル**（固定の gemini 名を返さない）', async () => {
+    const meta = metaOf(await readSse((await POST(jsonReq(okBody))) as Response));
+    expect(meta.model).toBe('test/fast');
+    expect(meta.model).not.toBe('gemini-2.5-flash');
+  });
+
+  it('画像経路にも override が効く（従来ここだけ env 固定だった）', async () => {
+    mocks.isAdmin.mockReturnValue(true);
+    const fd = new FormData();
+    fd.set('workspaceId', 'w1');
+    fd.set('threadId', 't1');
+    fd.set('message', 'これ見て');
+    fd.set('overrideModel', 'openrouter:anthropic/claude');
+    fd.set('images', new File([new Uint8Array([1, 2, 3])], 'a.jpg', { type: 'image/jpeg' }));
+    const res = (await POST(formReq(fd))) as Response;
+    const body = await res.json();
+    expect((mocks.analyzeImages.mock.calls[0][2] as { model?: string }).model).toBe('anthropic/claude');
+    expect(body.model).toBe('anthropic/claude');
+  });
+
+  it('モデル未設定は 500 で、**クレジットを予約しない**', async () => {
+    delete process.env.AI_PRIMARY_MODEL_FAST;
+    const res = (await POST(jsonReq(okBody))) as Response;
+    expect(res.status).toBe(500);
+    // 従来は予約 → ストリーム内で throw → 返金、という往復が発生していた
+    expect(mocks.reserve).not.toHaveBeenCalled();
+    expect(mocks.refund).not.toHaveBeenCalled();
   });
 });

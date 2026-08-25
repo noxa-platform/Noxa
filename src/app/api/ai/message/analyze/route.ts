@@ -71,7 +71,7 @@ export async function POST(request: NextRequest) {
         })
       );
 
-      // Geminiで会話テキスト抽出
+      // モデルで会話テキスト抽出
       const prompt = `以下のLINE・DMのスクリーンショットを読み取り、会話内容を抽出してください。
 
 ## 出力形式（JSON）
@@ -110,7 +110,7 @@ export async function POST(request: NextRequest) {
       try {
         parsed = JSON.parse(result);
       } catch {
-        console.error('Gemini応答のパース失敗 (result length:', result.length, ')');
+        console.error('AI 応答のパース失敗 (result length:', result.length, ')');
         return NextResponse.json({ error: '画像解析結果のパースに失敗しました' }, { status: 500 });
       }
 

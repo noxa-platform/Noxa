@@ -7,7 +7,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { verifyRequest, AuthError, getAdminAuth } from '../../lib/firebase-admin';
 import { isAdmin } from '@/lib/admin';
-import { OPENROUTER_MODELS } from '../openrouter';
+import { OPENROUTER_MODELS } from '@/lib/ai-models';
 
 export async function GET(request: NextRequest) {
   try {

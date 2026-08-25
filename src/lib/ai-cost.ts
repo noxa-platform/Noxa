@@ -5,25 +5,76 @@
  * - 単純なテキスト送信は 1 クレジット（最頻ケース）
  * - 長文ペースト（LINE 履歴、スクショの OCR 結果など）は input トークンが線形に増えるので
  *   2000 文字ごとに 1 クレジット加算する
- * - 画像添付は Gemini のマルチモーダル処理コストが大きいので 1 枚あたり +2 クレジット
+ * - 画像添付は 1 枚あたり +2 クレジット
  *
- * Gemini 2.5 Flash の概算コスト（2026-05 時点）:
- * - text input: $0.075 / M tokens、output: $0.30 / M tokens
- * - 画像 1 枚: 約 258 input tokens として課金
- * - 1 クレジット ≈ ¥0.1 を想定（1000 クレジット使い切って ¥100 原価 ≒ Pro ¥980 で利益確保）
+ * ⚠️ **単価の前提をこのコメントに直書きしない**（P153 ④）。
+ * 旧コメントは「Gemini 2.5 Flash は input $0.075 / output $0.30 / M tokens、
+ * 1 クレジット ≈ ¥0.1 原価」と書いていたが、これは **Gemini を直叩きしていた頃の値**。
+ * 直書きの数字は表を更新しても誰も直さないので、単価は `src/lib/ai-models.ts` の
+ * `OPENROUTER_MODELS` を正本とし、下の `COST_BASIS` / `referenceRequestCostJpy()` で
+ * **表から導く**。表と実勢の乖離は `node scripts/check-model-prices.mjs` で検出する。
  *
- * これにより 1 クレジット = 約 2000 文字相当 + 画像 0.5 枚相当の重さで揃う。
+ * ⚠️ **1cr の実原価は設計前提「≒ ¥0.1」の約 4 倍**（中間ケースで ¥0.41）。
+ * 課金式が `message.length` しか数えず、**毎リクエスト載る固定プロンプト約 4,793 字を
+ * 1 文字も課金していない**ため、短文ほど利幅が薄い。詳細は yorulog の
+ * `docs/AI_CREDIT_COST_AUDIT.md`（2026-08-25・訂正済み版）。
+ * **値付けは事業判断なのでコード側では変えない**（ユーザー判断待ち:
+ * 生成系の価格 / 画像解析を課金対象にするか）。
+ *
  * クライアント側はこの関数で送信前に表示し、サーバー側はこの関数で reserveAiCredit する。
  */
+
+import { findModelMeta, estimateUsdCost } from './ai-models';
+
+/**
+ * 原価を語るときの基準。**単価の正本は OPENROUTER_MODELS**（ここは参照先と前提だけ持つ）。
+ *
+ * トークン数は yorulog の `docs/AI_CREDIT_COST_AUDIT.md` §3「中（顧客＋履歴あり）」の実測。
+ * 固定プロンプト 4,793 字 + 顧客コンテキスト + 履歴 20 件で input 6,764 tok / output 600 tok。
+ *
+ * ⚠️ `referenceModelId` は **本番の FAST モデルだと yorulog が申告している値**。
+ * 本番の `AI_PRIMARY_MODEL_FAST` は Vercel の Sensitive 指定で読めないため、
+ * **こちらでは確認できていない**（単価そのものは OpenRouter 公開 API で実測済み）。
+ */
+export const COST_BASIS = {
+  /** 原価の話をするときの物差しにするモデル */
+  referenceModelId: 'google/gemini-3.1-flash-lite',
+  /** open.er-api.com（2026-08-24 更新）。円は動くので原価の議論では日付とセットで扱う */
+  jpyPerUsd: 158.906,
+  assumedInputTokens: 6764,
+  assumedOutputTokens: 600,
+} as const;
+
+/**
+ * `COST_BASIS` の前提で 1 チャットにかかる概算原価（円）。
+ *
+ * ⚠️ 基準モデルが表から消えたら **null**（0 に倒さない。0 は「タダ」という意味のある値で、
+ * 採算の議論を静かに壊す）。P150 の「分からないを 0 にしない」と同じ扱い。
+ */
+export function referenceRequestCostJpy(): number | null {
+  const cost = estimateUsdCost(COST_BASIS.referenceModelId, {
+    inputTokens: COST_BASIS.assumedInputTokens,
+    outputTokens: COST_BASIS.assumedOutputTokens,
+  });
+  if (!cost) return null;
+  return cost.totalUsd * COST_BASIS.jpyPerUsd;
+}
+
+/** 基準モデルが表にあるか（コメントの数字が独り歩きしていないかの確認用）。 */
+export function hasCostReferenceModel(): boolean {
+  return findModelMeta(COST_BASIS.referenceModelId) !== undefined;
+}
 
 const BASE_COST = 1;
 const CHARS_PER_EXTRA_CREDIT = 2000;
 const COST_PER_IMAGE = 2;
 
-// チャットのモデルモード:
-// - FAST:  gemini-2.5-flash（標準）           クレジット 1.0x
-// - THINK: gemini-2.5-pro（推論強め・遅い） クレジット 3.0x
-//   Pro は input/output token が Flash より高く、出力も長くなるので約 3 倍と見積もる
+// チャットのモデルモード（実際のモデルは env で決まる。ここはクレジット倍率だけ）:
+// - FAST:  AI_PRIMARY_MODEL_FAST  クレジット 1.0x
+// - THINK: AI_PRIMARY_MODEL_THINK クレジット 3.0x
+//   THINK は単価が高く出力も長くなる（上限 2,048 → 4,096 tokens）ので約 3 倍と見積もる。
+//   ⚠️ 旧コメントは gemini-2.5-flash / gemini-2.5-pro 決め打ちだったが、
+//   Gemini 直叩き経路は廃止済みでモデル名は env 次第（P153 ④）
 export type ChatModelMode = 'fast' | 'think';
 export const CHAT_MODEL_MULTIPLIER: Record<ChatModelMode, number> = {
   fast: 1,

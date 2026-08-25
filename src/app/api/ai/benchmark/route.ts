@@ -13,12 +13,12 @@
 //
 // 出力:
 //   { ok: true, reply: string, elapsedMs: number, model: string,
-//     usage: { promptTokens, completionTokens, totalTokens, costUsd },
+//     usage: { promptTokens, completionTokens, totalTokens, costUsd },  // 単価不明なら costUsd は null
 //     modelMeta: { inputCostUsdPerM, outputCostUsdPerM } }
 import { NextRequest, NextResponse } from 'next/server';
 import { verifyRequest, AuthError, getAdminAuth } from '../../lib/firebase-admin';
 import { isAdmin } from '@/lib/admin';
-import { OPENROUTER_MODELS } from '../openrouter';
+import { findModelMeta, estimateUsdCost } from '@/lib/ai-models';
 import { aiKillSwitchResponse } from '@/app/api/lib/ai-kill-switch';
 
 interface BenchRequest {
@@ -98,11 +98,14 @@ export async function POST(request: NextRequest) {
     const completionTokens = data.usage?.completion_tokens ?? 0;
     const totalTokens = data.usage?.total_tokens ?? promptTokens + completionTokens;
 
-    // コスト概算: OPENROUTER_MODELS に記載した USD/M tokens を採用
-    const meta = OPENROUTER_MODELS.find((m) => m.id === body.model);
-    const inputCost = meta ? (promptTokens / 1_000_000) * meta.inputCostUsdPerM : 0;
-    const outputCost = meta ? (completionTokens / 1_000_000) * meta.outputCostUsdPerM : 0;
-    const costUsd = inputCost + outputCost;
+    // コスト概算: モデル表（src/lib/ai-models.ts）の USD/M tokens を採用。
+    // ⚠️ 表に無いモデルは **null**（従来は 0 を返しており、単価不明のモデルが
+    // 比較表で「タダで動いた」ように並んでいた・P153 ④）
+    const meta = findModelMeta(body.model);
+    const cost = estimateUsdCost(body.model, {
+      inputTokens: promptTokens,
+      outputTokens: completionTokens,
+    });
 
     return NextResponse.json({
       ok: true,
@@ -113,9 +116,9 @@ export async function POST(request: NextRequest) {
         promptTokens,
         completionTokens,
         totalTokens,
-        costUsd,
-        inputCostUsd: inputCost,
-        outputCostUsd: outputCost,
+        costUsd: cost?.totalUsd ?? null,
+        inputCostUsd: cost?.inputUsd ?? null,
+        outputCostUsd: cost?.outputUsd ?? null,
       },
       modelMeta: meta
         ? { inputCostUsdPerM: meta.inputCostUsdPerM, outputCostUsdPerM: meta.outputCostUsdPerM, label: meta.label, provider: meta.provider }
