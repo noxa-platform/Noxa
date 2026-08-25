@@ -1,0 +1,87 @@
+{
+  "$comment": [
+    "語彙（用語辞書）の共有スナップショット。noxa（正本）と yorulog-ios が**同じ表**を持つ。",
+    "",
+    "なぜ要るか: iOS は表示専用に 14 概念・既定の呼び名・業種プリセットを**複製で持つ**。",
+    "記録エンジン段 6 の `derivation-cases.json` と違い、呼び名は「同じ入力を流して答えを比べる」",
+    "形にできない（表そのものが答え）ので、**表を書き出して差分で気づく**形にする。",
+    "",
+    "⚠️ これは生成物ではなく**検査対象**。`src/lib/lexicon/concepts.ts` の CONCEPT_DEFAULT_TERMS と",
+    "`src/lib/shopConfig.ts` の INDUSTRY_TERMS を変えると `test/lib/lexicon-snapshot.test.ts` が落ちる。",
+    "落ちたらここを更新し、**yorulog-ios へ知らせること**（向こうは複製なので自動では気づけない）。",
+    "",
+    "⚠️ 解決順は 店舗上書き → 業種プリセット → 既定 → 概念 ID そのもの。",
+    "空文字・空白だけ・文字列でない上書きは「無い」として次の段へ落とす（P153-PM16）。",
+    "⚠️ 業種の照合は**完全一致**。値は読む前に trim する（P153-PM20）。",
+    "⚠️ 呼び名は**表示専用**。保存される文字列（customVisitTypes 等）へ流し込まない",
+    "（改名で集計が割れる）。AI には概念 ID で考えさせ、入出力のときだけ翻訳する。"
+  ],
+  "version": 1,
+  "conceptIds": [
+    "cast",
+    "displayName",
+    "customer",
+    "table",
+    "checkout",
+    "nomination",
+    "nominationPrimary",
+    "nominationInhouse",
+    "nominationFree",
+    "dohan",
+    "extension",
+    "escortHome",
+    "closingRound",
+    "restart"
+  ],
+  "defaultTerms": {
+    "cast": "キャスト",
+    "displayName": "源氏名",
+    "customer": "お客様",
+    "table": "卓",
+    "checkout": "会計",
+    "nomination": "指名",
+    "nominationPrimary": "本指名",
+    "nominationInhouse": "場内指名",
+    "nominationFree": "フリー",
+    "dohan": "同伴",
+    "extension": "延長",
+    "escortHome": "送り",
+    "closingRound": "締め",
+    "restart": "飲み直し"
+  },
+  "industryPresets": {
+    "ホストクラブ": {
+      "cast": "ホスト",
+      "nominationPrimary": "本指名",
+      "nominationInhouse": "場内",
+      "closingRound": "締め"
+    },
+    "キャバクラ": {
+      "cast": "キャスト",
+      "nominationPrimary": "本指名",
+      "nominationInhouse": "場内指名"
+    },
+    "ラウンジ": {
+      "cast": "キャスト",
+      "nominationPrimary": "指名",
+      "nominationInhouse": "場内"
+    },
+    "コンカフェ": {
+      "cast": "キャスト",
+      "nomination": "推し",
+      "nominationPrimary": "本推し",
+      "displayName": "キャラ名",
+      "table": "席",
+      "checkout": "お会計"
+    },
+    "ガールズバー": {
+      "cast": "キャスト",
+      "table": "席",
+      "nominationPrimary": "指名"
+    },
+    "スナック": {
+      "cast": "ママ・キャスト",
+      "table": "席"
+    }
+  }
+}

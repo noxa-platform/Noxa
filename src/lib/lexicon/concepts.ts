@@ -35,7 +35,14 @@ export type ConceptId =
   | 'closingRound'      // 締め
   | 'restart';          // 飲み直し（同じ客で伝票を切り直す）
 
-/** 概念の既定の呼び名（夜職一般）。店舗・業種で上書きされる */
+/**
+ * 概念の既定の呼び名（夜職一般）。店舗・業種で上書きされる。
+ *
+ * ⚠️ **yorulog-ios が表示専用に複製を持つ**（2026-08-26 以降）。ここと
+ * `shopConfig.ts` の `INDUSTRY_TERMS` を変えたら **`lexicon-snapshot.json` も更新し、
+ * yorulog へ知らせること**。`test/lib/lexicon-snapshot.test.ts` が食い違いを検出する
+ * （＝ 変更したのに知らせ忘れると、こちらのテストが落ちて気づける）。
+ */
 export const CONCEPT_DEFAULT_TERMS: Record<ConceptId, string> = {
   cast: 'キャスト',
   displayName: '源氏名',

@@ -77,6 +77,10 @@ export const DEFAULT_TERMS: Record<string, string> = CONCEPT_DEFAULT_TERMS;
 /**
  * 業種プリセット（storeTypeName → 呼び名の上書き）。
  *
+ * ⚠️ **yorulog-ios が表示専用に複製を持つ**。変更したら `src/lib/lexicon/lexicon-snapshot.json`
+ * も更新し、yorulog へ知らせること（`test/lib/lexicon-snapshot.test.ts` が食い違いを検出する）。
+ * ⚠️ 照合は**完全一致**。値は `resolveIndustry` で trim してから渡す。
+ *
  * ⚠ 旧実装はホストクラブで `nomination: '本指名'` としていたが、これは**概念の取り違え**。
  * `nomination` は指名の総称（初回案内の「指名を選ぶ」等で使う）で、本指名は
  * `nominationPrimary` という別概念。総称に本指名を入れると、場内指名の客にも
