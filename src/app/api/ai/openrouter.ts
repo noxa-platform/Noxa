@@ -12,6 +12,8 @@
 // 「openrouter:」のプレフィックスは API route 側で剥がして、ここに渡されるのは
 // 純粋なモデル ID（"anthropic/claude-sonnet-4" など）。
 
+import { assertAiEnabled } from '../lib/ai-kill-switch';
+
 const OR_ENDPOINT = 'https://openrouter.ai/api/v1/chat/completions';
 
 function ensureKey(): string {
@@ -55,6 +57,10 @@ interface OpenRouterChatOptions {
  * 失敗時は例外で投げる（API route 側で reserveAiCredit 連動の refund を実施）。
  */
 export async function generateOpenRouterText(options: OpenRouterChatOptions): Promise<string> {
+  // 緊急停止スイッチ（2026-08-25）。**OpenRouter を叩く直前**の最後の砦。
+  // chat/route.ts は ai-provider を経由せずここを直接呼ぶため、ここに置かないと
+  // 一番の支出源が素通りする
+  await assertAiEnabled();
   const body: Record<string, unknown> = {
     model: options.model,
     messages: options.messages,
@@ -94,6 +100,10 @@ export async function generateOpenRouterStream(
   options: OpenRouterChatOptions,
   onChunk: (text: string) => void,
 ): Promise<string> {
+  // 緊急停止スイッチ（2026-08-25）。**OpenRouter を叩く直前**の最後の砦。
+  // chat/route.ts は ai-provider を経由せずここを直接呼ぶため、ここに置かないと
+  // 一番の支出源が素通りする
+  await assertAiEnabled();
   const body: Record<string, unknown> = {
     model: options.model,
     messages: options.messages,
