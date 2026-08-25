@@ -109,6 +109,18 @@ describe('team/redeem-invite POST（招待受諾＋cast 名簿紐付け）', () 
     expect((await POST(req({ shopId: 's1', code: 'C1' }))).status).toBe(410);
   });
 
+  // ⚠️ **期限が読めない招待は「無期限」ではなく「期限切れ」**（fail-closed・P153-PM13）。
+  // 共通の `toMillis` は分からない値に null を返すので、**受け側が `?? 0` に倒すかどうか**で
+  // 意味が真逆になる。`?? Infinity` にすると壊れた expiresAt の招待が永久に使える穴になる。
+  it('expiresAt が欠損・壊れていても 410（無期限にしない）', async () => {
+    for (const broken of [undefined, null, 'あとで', {}, NaN]) {
+      mocks.getDb.mockReturnValue(
+        makeDb({ ...SHOP, 'shop_shops/s1/invites/C1': { role: 'cast', expiresAt: broken } }).db,
+      );
+      expect((await POST(req({ shopId: 's1', code: 'C1' }))).status).toBe(410);
+    }
+  });
+
   it('既にメンバーなら 409（招待は消費しない）', async () => {
     const { db, store } = makeDb({
       ...SHOP,

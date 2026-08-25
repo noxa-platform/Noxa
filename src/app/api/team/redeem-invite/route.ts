@@ -9,16 +9,11 @@
 //       3. 無ければ新規作成（時給はオーナーが後から設定）
 //     → これが「給与¥0」問題（seating_casts.uid 断線）の入口側の解消。
 import { NextRequest, NextResponse } from 'next/server';
-import { FieldValue, Timestamp } from 'firebase-admin/firestore';
+import { FieldValue } from 'firebase-admin/firestore';
 import { verifyRequest, getAdminDb, AuthError } from '../../lib/firebase-admin';
 import { stampIrVersion } from '@/lib/ir-version';
+import { toMillis } from '@/lib/datetime';
 
-function toMs(v: unknown): number {
-  if (v instanceof Timestamp) return v.toMillis();
-  if (v && typeof v === 'object' && 'seconds' in (v as Record<string, unknown>)) return (v as { seconds: number }).seconds * 1000;
-  if (typeof v === 'number') return v;
-  return 0;
-}
 
 export async function POST(request: NextRequest) {
   try {
@@ -50,7 +45,9 @@ export async function POST(request: NextRequest) {
       if (!inviteSnap.exists) return { status: 404 as const, error: '招待コードが見つかりません' };
       const invite = inviteSnap.data() as { role?: string; createdBy?: string; expiresAt?: unknown; usedBy?: string };
       if (invite.usedBy) return { status: 409 as const, error: 'この招待コードは使用済みです' };
-      if (toMs(invite.expiresAt) < Date.now()) return { status: 410 as const, error: 'この招待コードは期限切れです' };
+      // ⚠️ **期限が読めなければ 0＝期限切れ扱い**（fail-closed）。ここを `?? Infinity` に
+      // すると、壊れた/欠けた expiresAt の招待が**無期限に使える**穴になる。
+      if ((toMillis(invite.expiresAt) ?? 0) < Date.now()) return { status: 410 as const, error: 'この招待コードは期限切れです' };
 
       const memberSnap = await tx.get(memberRef);
       if (memberSnap.exists) return { status: 409 as const, error: '既にこのお店のメンバーです' };

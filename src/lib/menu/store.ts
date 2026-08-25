@@ -27,6 +27,7 @@ import {
 } from './types';
 import { buildFirstVisitPatch, type FirstVisitTableDoc } from './logic';
 import { stampIrVersion } from '@/lib/ir-version';
+import { toMillis } from '@/lib/datetime';
 
 type RawCast = DocumentData & {
   id: string; name?: string; rank?: string; ruby?: string; title?: string;
@@ -88,11 +89,6 @@ async function sha256Hex(shopId: string, pin: string): Promise<string> {
   return Array.from(new Uint8Array(buf)).map((b) => b.toString(16).padStart(2, '0')).join('');
 }
 
-function toMs(v: unknown): number {
-  if (v && typeof v === 'object' && 'seconds' in (v as Record<string, unknown>)) return ((v as { seconds: number }).seconds) * 1000;
-  if (typeof v === 'number') return v;
-  return 0;
-}
 
 export function useMenuStore(user: User): UseMenuStore {
   const shop = useShopId(user);
@@ -148,7 +144,7 @@ export function useMenuStore(user: User): UseMenuStore {
             id: d.id, seat: v.seat ?? '', tableId: v.tableId ?? null, customerName: v.customerName ?? '',
             memo: v.memo ?? '', color: (v.color ?? 'yellow') as MenuColor,
             casts: Array.isArray(v.casts) ? (v.casts as MenuOrderCast[]) : [],
-            source: v.source ?? 'main', createdAtMs: toMs(v.createdAt),
+            source: v.source ?? 'main', createdAtMs: toMillis(v.createdAt) ?? 0,
           });
         });
         list.sort((a, b) => b.createdAtMs - a.createdAtMs);

@@ -49,12 +49,17 @@ export function jstDayWindow(d: Date = new Date()): { startIso: string; endIso: 
  *
  * ## なぜ 1 箇所に集めたか
  *
- * これまで各画面が `toMs` を**それぞれ書いており、写しが 6 つ・挙動が 3 通りに割れていた**:
- * - number（ミリ秒）を**受ける**:  `PayrollClient` / `TransportClient` / `AttendanceClient`
- * - number を**受けない**（null）:  `NotificationsClient` / `SalesClient` / `CustomersClient`
+ * これまで `toMs` を**各所がそれぞれ書いており、写しが 9 つ・挙動が割れていた**:
+ * - 画面（6 つ）: number（ミリ秒）を**受ける** `PayrollClient` / `TransportClient` / `AttendanceClient`、
+ *   **受けない**（null）`NotificationsClient` / `SalesClient` / `CustomersClient`
+ * - サーバ（3 つ）: `finalize-payroll` / `redeem-invite` / `lib/menu/store.ts`（既定 0）
  *
  * ＝ **同じ値を書いても画面によって出たり「—」になったりする**。nomishugy の移行（P46）で
  * `lastContactAt` を number で書いて顧客一覧だけ「—」になった実害がまさにこれだった。
+ *
+ * ⚠️ **既定値は呼び出し側が決める**（ここは null を返すだけ）。`redeem-invite` の期限判定は
+ * `?? 0`＝**読めなければ期限切れ**（fail-closed）でなければならない、というように、
+ * 「分からないとき何に倒すか」は場所ごとに違う。ここで 0 を返すと**その判断が消える**。
  *
  * ## 受ける形（緩い側に揃える）
  *

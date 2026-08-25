@@ -10,10 +10,11 @@
 //                  フォールバック。>0 のときのみ名簿の時給より優先。
 
 import { NextRequest, NextResponse } from 'next/server';
-import { Timestamp, FieldValue } from 'firebase-admin/firestore';
+import { FieldValue } from 'firebase-admin/firestore';
 import { verifyRequest, getAdminDb, AuthError } from '../../lib/firebase-admin';
 import { isSafeDocId } from '../../lib/doc-id';
 import { pickPeriodPart } from '../../lib/period';
+import { toMillis } from '@/lib/datetime';
 
 export const maxDuration = 60;
 
@@ -34,12 +35,6 @@ export const maxDuration = 60;
  * 実体は Day103 で `../../lib/period` へ共通化（team/member-stats が同じ形だったため）。
  */
 
-function toMs(v: unknown): number {
-  if (v instanceof Timestamp) return v.toMillis();
-  if (v && typeof v === 'object' && 'seconds' in (v as Record<string, unknown>)) return (v as { seconds: number }).seconds * 1000;
-  if (typeof v === 'number') return v;
-  return 0;
-}
 const numOr0 = (v: unknown): number => (typeof v === 'number' && Number.isFinite(v) ? v : 0);
 
 export async function POST(request: NextRequest) {
@@ -98,7 +93,7 @@ export async function POST(request: NextRequest) {
       // castUid は payrolls/{castUid}/items/{period} の doc パスに入る。`/` 入りの壊れた値が
       // 1件でも混じると db.doc() が throw して**給与確定が丸ごと 500**になるため、行ごと除外する。
       if (!x.castUid || !isSafeDocId(x.castUid) || !(x.date ?? '').startsWith(period)) continue;
-      const st = toMs(x.startAt), en = toMs(x.endAt);
+      const st = toMillis(x.startAt), en = toMillis(x.endAt);
       if (st && en && en > st) minutesByUid.set(x.castUid, (minutesByUid.get(x.castUid) ?? 0) + (en - st) / 60000);
       // 退勤打刻が無い(未退勤) or end<=start(日跨ぎを同暦日で締めた旧データ等)の勤務は
       // 0 分＝黙って落とすと過少支給事故になるため、要修正として件数で警告する。
