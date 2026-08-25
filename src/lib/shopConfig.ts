@@ -117,6 +117,29 @@ export const DEFAULT_CONFIG: ShopConfig = {
 };
 
 /**
+ * 店舗 doc から業種を取り出す（2026-08-26・P153-PM20）。
+ *
+ * ⚠️ **正本は `storeTypeName`。`businessCategory` は読み手ゼロのフィールドだった。**
+ * iOS の新規お店チュートリアルは業種を**必須で聞いて `businessCategory` に保存**しており
+ * （yorulog `d20cf02` で `storeTypeName` へ是正済み）、**そこに入れた値は業種プリセットにも
+ * テーマにも AI の店舗ヒントにも一度も効いていなかった**。
+ * ⚠️ **配布済みの古い iOS ビルド（v1.0 / v1.1 は `READY_FOR_SALE`）は今も
+ * `businessCategory` にしか書かない**ので、読み側で拾う。書き戻しはしない
+ * （ユーザーの保存操作を待たずに読みで解決する方が安全）。
+ * ⚠️ **前後の空白は落とす**。`resolveStoreHintKey` は `trim().toLowerCase()` で緩く見るのに
+ * `INDUSTRY_TERMS` と `industryToTheme` は完全一致なので、「ホストクラブ 」のような値で
+ * **AI のヒントは効くのに呼び名とテーマは効かない**という割れ方をしていた。
+ *
+ * 本番実測（2026-08-26・`shop_shops` 全 4 件）: `storeTypeName` のみ 1 件（ホストクラブ）、
+ * どちらも無し 3 件、**`businessCategory` だけの店は 0 件**。＝ 現時点の実害はゼロで、
+ * ここは**古いクライアントが今後作る店**への備え。
+ */
+export function resolveIndustry(shopData: { storeTypeName?: unknown; businessCategory?: unknown } | null | undefined): string | undefined {
+  const pick = (v: unknown) => (typeof v === 'string' && v.trim() ? v.trim() : undefined);
+  return pick(shopData?.storeTypeName) ?? pick(shopData?.businessCategory);
+}
+
+/**
  * 用語解決: 店舗上書き → 業種プリセット → 既定 → key（key は概念 ID・concepts.ts）。
  *
  * ⚠️ **空文字・空白だけ・文字列でない上書きは「無い」として次の段へ落とす**（P153-PM16）。
@@ -192,7 +215,7 @@ export function useShopConfig(user: User): UseShopConfig {
     const sid = shop.shopId;
     if (!sid) return;
     getDoc(doc(db, `shop_shops/${sid}`)).then((s) => {
-      setIndustrySnap({ scope: sid, value: { industry: (s.data() as { storeTypeName?: string } | undefined)?.storeTypeName, error: null } });
+      setIndustrySnap({ scope: sid, value: { industry: resolveIndustry(s.data()), error: null } });
     }).catch((e) => {
       setIndustrySnap({ scope: sid, value: { industry: undefined, error: describeFirestoreError(e, '店舗情報の読み込み') } });
     });

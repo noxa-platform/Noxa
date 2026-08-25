@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
-  mergeModules, resolveTerm, DEFAULT_MODULES, CORE_MODULE_KEYS,
+  mergeModules, resolveTerm, resolveIndustry, DEFAULT_MODULES, CORE_MODULE_KEYS,
   type ShopConfig,
 } from '../../src/lib/shopConfig';
 
@@ -39,6 +39,36 @@ describe('resolveTerm — 用語解決のフォールバック連鎖', () => {
       const cfg = { terminology: { cast: bad } } as unknown as ShopConfig;
       expect(resolveTerm(cfg, undefined, 'cast')).toBe('キャスト');
     }
+  });
+});
+
+describe('resolveIndustry — 業種の取り出し（P153-PM20）', () => {
+  // ⚠️ **`businessCategory` は読み手ゼロのフィールドだった**。iOS のチュートリアルは
+  // 業種を必須で聞いてそこへ保存しており、入れた値が業種プリセットにもテーマにも
+  // AI の店舗ヒントにも一度も効いていなかった（yorulog `d20cf02` で iOS 側は是正済み）。
+  // **配布済みの古いビルドは今も `businessCategory` にしか書かない**ので読み側で拾う。
+  it('storeTypeName を優先し、無ければ businessCategory から拾う', () => {
+    expect(resolveIndustry({ storeTypeName: 'ホストクラブ' })).toBe('ホストクラブ');
+    expect(resolveIndustry({ businessCategory: 'キャバクラ' })).toBe('キャバクラ');
+    expect(resolveIndustry({ storeTypeName: 'ラウンジ', businessCategory: 'スナック' })).toBe('ラウンジ');
+  });
+
+  // ⚠️ 空文字は「業種が空である」ではなく「入っていない」（PM16 と同じ判断）
+  it('空文字・空白だけの storeTypeName は businessCategory へ落ちる', () => {
+    expect(resolveIndustry({ storeTypeName: '', businessCategory: 'スナック' })).toBe('スナック');
+    expect(resolveIndustry({ storeTypeName: '   ', businessCategory: 'スナック' })).toBe('スナック');
+  });
+
+  // ⚠️ 前後の空白で「AI のヒントは効くのに呼び名とテーマは効かない」割れ方をしていた
+  it('前後の空白を落とす（完全一致で照合する側と、緩く見る側を揃える）', () => {
+    expect(resolveIndustry({ storeTypeName: ' ホストクラブ ' })).toBe('ホストクラブ');
+    expect(resolveTerm(null, resolveIndustry({ storeTypeName: 'ホストクラブ ' }), 'cast')).toBe('ホスト');
+  });
+
+  it('どちらも無い・型違いなら undefined（既定へ落ちる）', () => {
+    expect(resolveIndustry({})).toBeUndefined();
+    expect(resolveIndustry(null)).toBeUndefined();
+    expect(resolveIndustry({ storeTypeName: 42, businessCategory: {} })).toBeUndefined();
   });
 });
 

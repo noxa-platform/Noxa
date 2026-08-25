@@ -9,12 +9,16 @@ import { collection, doc, getDoc, getDocs, query, where } from 'firebase/firesto
 import type { User } from 'firebase/auth';
 import { db } from '@/lib/firebase/config';
 import { getActiveShop, pickShopId } from '@/lib/workspace';
+import { resolveIndustry } from '@/lib/shopConfig';
 import { activeMembershipIds } from '@/lib/membership';
 
 export const THEME_KEY = 'noxa_theme'; // '' | 'auto' | 'noxa' | 'concafe'
 
 export function industryToTheme(storeTypeName?: string): string {
-  if (storeTypeName === 'コンカフェ') return 'concafe';
+  // ⚠️ 前後の空白を落としてから照合する（P153-PM20）。`resolveStoreHintKey` は
+  // `trim().toLowerCase()` で緩く見るので、揃えないと「コンカフェ 」で
+  // **AI のヒントは効くのにテーマだけ効かない**という割れ方をする
+  if (storeTypeName?.trim() === 'コンカフェ') return 'concafe';
   return '';
 }
 
@@ -42,7 +46,8 @@ export function useTheme(user: User | undefined): void {
         const { shopId } = pickShopId(owned.docs.map((d) => d.id), activeMembershipIds(ms.docs), getActiveShop());
         if (shopId) {
           const docData = ownedById.get(shopId)?.data() ?? (await getDoc(doc(db, `shop_shops/${shopId}`))).data();
-          storeTypeName = (docData as { storeTypeName?: string } | undefined)?.storeTypeName;
+          // ⚠️ 古い iOS ビルドは業種を `businessCategory` にしか書かない（P153-PM20）
+          storeTypeName = resolveIndustry(docData);
         }
         if (alive) applyTheme(industryToTheme(storeTypeName));
       } catch { applyTheme(''); }
