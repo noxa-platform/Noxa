@@ -10,6 +10,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { Timestamp, FieldValue } from 'firebase-admin/firestore';
 import { verifyRequest, getAdminDb, AuthError } from '../../lib/firebase-admin';
 import { stampIrVersion } from '@/lib/ir-version';
+import { toMillis } from '@/lib/datetime';
 
 // 新規会員に付与する初期招待枠（シード期は太め。運営が後で調整＝ダイヤル制）
 const INITIAL_INVITE_CREDITS = 5;
@@ -40,9 +41,15 @@ export async function POST(request: NextRequest) {
 
       const inviteSnap = await tx.get(inviteRef);
       if (!inviteSnap.exists) throw new RedeemError('招待コードが見つかりません');
-      const inv = inviteSnap.data() as { status?: string; expiresAt?: Timestamp; usedBy?: string | null; issuedBy?: string };
+      const inv = inviteSnap.data() as { status?: string; expiresAt?: unknown; usedBy?: string | null; issuedBy?: string };
       if (inv.status !== 'active' || inv.usedBy) throw new RedeemError('この招待コードは既に使用済みです');
-      if (inv.expiresAt instanceof Timestamp && inv.expiresAt.toMillis() < Date.now()) throw new RedeemError('この招待コードは期限切れです');
+      // ⚠️ **期限が読めなければ期限切れ扱い**（fail-closed・P153-PM14）。
+      // 旧実装は `inv.expiresAt instanceof Timestamp && ...` で、**instanceof を満たさない値
+      // （欠落・数値・文字列・別クライアントが書いた `{seconds}` 形）だと判定ごと飛んで
+      // 招待が無期限に使えた**。team/redeem-invite は `?? 0` で fail-closed になっており、
+      // 同じ招待なのに community 側だけ穴が開いていた。発行は必ず TTL 7 日を入れる
+      // （`community/issue-invite`）ので、読めない expiresAt は正常な状態ではない。
+      if ((toMillis(inv.expiresAt) ?? 0) < Date.now()) throw new RedeemError('この招待コードは期限切れです');
       issuedBy = inv.issuedBy ?? null;
 
       tx.update(inviteRef, { status: 'used', usedBy: uid, usedAt: Timestamp.now() });

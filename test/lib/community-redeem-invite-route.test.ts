@@ -127,6 +127,33 @@ describe('community/redeem-invite POST（招待引き換えの会員化境界）
     expect(store[USER]).toBeUndefined();
   });
 
+  // ⚠️ **期限が読めない招待は「無期限」ではなく「期限切れ」**（fail-closed・P153-PM14）。
+  // 旧実装は `expiresAt instanceof Timestamp && ...` で判定しており、**instanceof を満たさない値だと
+  // 期限チェックごと飛んで招待が永久に使えた**。team/redeem-invite は同じ場面で `?? 0` に
+  // 倒しており、同じ「招待」なのに community 側だけ穴が開いていた。
+  it('expiresAt が欠損・別形式・壊れていても 400（無期限にしない）', async () => {
+    for (const broken of [undefined, null, 'あとで', {}, NaN, { seconds: 'たぶん' }]) {
+      const { db, store } = makeDb({ [INVITE]: { status: 'active', issuedBy: 'owner', expiresAt: broken } });
+      mocks.getDb.mockReturnValue(db);
+      const r = await POST(req({ code: 'INV' }));
+      expect(r.status).toBe(400);
+      expect((await r.json()).error).toContain('期限切れ');
+      // 会員化していない／招待も消費していない
+      expect(store[USER]).toBeUndefined();
+      expect(store[INVITE]?.status).toBe('active');
+    }
+  });
+
+  // 逆に、**数値や `{seconds}` 形で未来が入っていれば通る**（instanceof に依存しない）
+  it('expiresAt が number / {seconds} 形の未来なら受け付ける', async () => {
+    for (const ok of [Date.now() + 1_000_000, { seconds: Math.floor(Date.now() / 1000) + 1000 }]) {
+      const { db, store } = makeDb({ [INVITE]: { status: 'active', issuedBy: 'owner', expiresAt: ok } });
+      mocks.getDb.mockReturnValue(db);
+      expect((await POST(req({ code: 'INV' }))).status).toBe(200);
+      expect(store[INVITE]?.status).toBe('used');
+    }
+  });
+
   it('期限切れ（expiresAt が過去の Timestamp）は 400', async () => {
     const { db, store } = makeDb({ [INVITE]: { status: 'active', issuedBy: 'owner', expiresAt: past() } });
     mocks.getDb.mockReturnValue(db);
@@ -136,12 +163,24 @@ describe('community/redeem-invite POST（招待引き換えの会員化境界）
     expect(store[USER]).toBeUndefined();
   });
 
-  it('expiresAt 欠落は防御的に非失効扱いで会員化（active かつ未使用なら通す）', async () => {
+  // ⚠️ **2026-08-26（P153-PM14）に挙動を反転させた**。Day76 のこのテストは
+  // 「expiresAt 欠落は**防御的に非失効扱い**で会員化」を固定していたが、
+  // これは実装の挙動を観察して書き留めたもので、**なぜ通してよいかの根拠は無かった**。
+  // 反転の理由:
+  //  - 発行側（`community/issue-invite`）は**必ず TTL 7 日の expiresAt を書く**。
+  //    ＝ expiresAt が無い招待は正常な発行物ではない。
+  //  - 同じ「招待」でも `team/redeem-invite` は fail-closed（読めなければ期限切れ）だった。
+  //    **同種のゲートで片方だけ開いている**状態そのものが穴。
+  //  - 「防御的」は**誰に対する防御か**が逆。ここを開けて守られるのは
+  //    壊れた招待を持つ人で、失うのは招待制そのもの。
+  // ⚠️ 影響: expiresAt を持たない**既存の招待は使えなくなる**（TTL 7 日なので、
+  // 現存するならとうに期限切れであるべきもの）。
+  it('expiresAt 欠落は 400（Day76 の「防御的に非失効」から反転）', async () => {
     const { db, store } = makeDb({ [INVITE]: { status: 'active', issuedBy: 'owner' } });
     mocks.getDb.mockReturnValue(db);
     const r = await POST(req({ code: 'INV' }));
-    expect(r.status).toBe(200);
-    expect(store[USER]).toBeDefined();
+    expect(r.status).toBe(400);
+    expect(store[USER]).toBeUndefined();
   });
 
   it('issuedBy が無ければ会員化するが通知はしない', async () => {
