@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { businessDayKey, businessMonthKey, jstCalendarDate, jstDayWindow } from '../../src/lib/datetime';
+import { businessDayKey, businessMonthKey, jstCalendarDate, jstDayWindow, toMillis } from '../../src/lib/datetime';
 
 // 営業日キー（深夜6時切替・JST）——POS 書込と売上集計の両方が従う日付規約の心臓部（Day25）。
 // Day46: 入力は全て絶対時刻(Z 明示)で書く。これによりランナーの TZ に関係なく
@@ -99,5 +99,38 @@ describe('jstDayWindow — JST 今日1日分の絶対時刻ウィンドウ（Day
   it('窓幅は常に24時間', () => {
     const { startIso, endIso } = jstDayWindow(new Date('2026-07-14T03:00:00Z'));
     expect(new Date(endIso).getTime() - new Date(startIso).getTime()).toBe(24 * 60 * 60 * 1000);
+  });
+});
+
+describe('toMillis — 時刻をミリ秒へ揃える（P153-PM12）', () => {
+  // ⚠️ **緩い側に揃えた**ことを固定する。以前は画面ごとに写しがあり、
+  // number を受ける実装（勤怠・送迎・給与）と受けない実装（通知・売上・顧客）に割れていて、
+  // **同じ値を書いても画面によって出たり「—」になったり**していた（nomishugy 移行 P46 の実害）。
+  it('Firestore Timestamp（toMillis を持つ）を受ける', () => {
+    expect(toMillis({ toMillis: () => 1_700_000_000_000 })).toBe(1_700_000_000_000);
+  });
+
+  it('seconds だけ持つ形（シリアライズされた Timestamp）も受ける', () => {
+    expect(toMillis({ seconds: 1_700_000_000, nanoseconds: 0 })).toBe(1_700_000_000_000);
+  });
+
+  it('**number（ミリ秒）を受ける**——ここを弾くと既存データの表示が消える', () => {
+    expect(toMillis(1_700_000_000_000)).toBe(1_700_000_000_000);
+    expect(toMillis(0)).toBe(0); // 1970 も「値がある」なので null にしない
+  });
+
+  it('Date も受ける', () => {
+    expect(toMillis(new Date(1_700_000_000_000))).toBe(1_700_000_000_000);
+  });
+
+  it('分からないものは **null**（0 に倒すと 1970-01-01 という意味のある時刻に化ける）', () => {
+    for (const v of [null, undefined, '', 'あとで', {}, [], NaN, Infinity, new Date('壊れた')]) {
+      expect(toMillis(v)).toBeNull();
+    }
+  });
+
+  it('toMillis() が数値を返さない偽物は null（例外にしない）', () => {
+    expect(toMillis({ toMillis: () => 'いつか' })).toBeNull();
+    expect(toMillis({ seconds: 'たぶん' })).toBeNull();
   });
 });

@@ -19,6 +19,7 @@ import { useShopConfig, type ChoiceItem } from '@/lib/shopConfig';
 import { describeFirestoreError } from '@/lib/firestore-error';
 import { describeMissingShop } from '@/lib/shop-id-state';
 import { stampIrVersion } from '@/lib/ir-version';
+import { toMillis } from '@/lib/datetime';
 
 /**
  * ⑦ 送迎 — 配車ボード + 送迎リクエスト一覧 + 地図プレースホルダ（実データ）
@@ -130,11 +131,6 @@ const MOCK_PINS = [
   { id: 'p3', top: '28%', left: '58%', color: 'var(--noxa-status-warning)' },
 ];
 
-function toMs(v: unknown): number {
-  if (v && typeof v === 'object' && 'seconds' in (v as Record<string, unknown>)) return (v as { seconds: number }).seconds * 1000;
-  if (typeof v === 'number') return v;
-  return 0;
-}
 function isReqType(v: unknown): v is RequestType { return typeof v === 'string' && v.length > 0; }
 function isReqStatus(v: unknown): v is RequestStatus { return v === 'waiting' || v === 'assigned' || v === 'in_progress' || v === 'done'; }
 function isVehStatus(v: unknown): v is VehicleStatus { return v === 'standby' || v === 'on_trip' || v === 'returning'; }
@@ -214,7 +210,8 @@ export function TransportClient({ user }: { user: User }) {
           vehicleId: (v.vehicleId as string) ?? undefined,
           driver: (v.driver as string) ?? undefined,
           memo: (v.memo as string) ?? undefined,
-          createdMs: toMs(v.createdAt),
+          // 並べ替えの第 2 キー専用。欠けていたら 0（＝同時刻内で先頭）で従来どおり
+          createdMs: toMillis(v.createdAt) ?? 0,
         });
       });
       list.sort((a, b) => a.time.localeCompare(b.time) || a.createdMs - b.createdMs);

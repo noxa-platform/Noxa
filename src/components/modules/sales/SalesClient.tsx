@@ -2,10 +2,10 @@
 
 import Link from 'next/link';
 import { useEffect, useMemo, useState } from 'react';
-import { collection, onSnapshot, addDoc, doc, updateDoc, deleteDoc, getDocs, serverTimestamp, increment, query, where, Timestamp, type DocumentData } from 'firebase/firestore';
+import { collection, onSnapshot, addDoc, doc, updateDoc, deleteDoc, getDocs, serverTimestamp, increment, query, where, type DocumentData } from 'firebase/firestore';
 import { db } from '@/lib/firebase/config';
 import { useShopId } from '@/lib/useShopId';
-import { businessDayKey } from '@/lib/datetime';
+import { businessDayKey, toMillis } from '@/lib/datetime';
 import { describeFirestoreError, isPermissionDenied } from '@/lib/firestore-error';
 import { describeDelegateRequest } from '@/lib/permission-guidance';
 import { toCsv, withBom, csvFileName, type CsvColumn } from '@/lib/export/csv';
@@ -22,7 +22,6 @@ import type { User } from 'firebase/auth';
 const mono = 'var(--noxa-font-mono)';
 const yen = (n: number) => `¥${Math.round(n).toLocaleString('ja-JP')}`;
 
-function toMs(v: unknown): number | null { if (v instanceof Timestamp) return v.toMillis(); if (v && typeof v === 'object' && 'seconds' in (v as Record<string, unknown>)) return (v as { seconds: number }).seconds * 1000; return null; }
 
 type Sale = { id: string; amount: number; customerName: string | null; customerId: string | null; castName: string | null; dayKey: string; atMs: number | null; voided: boolean; source: string; nomination: string | null; dohan: boolean; unpaidAmount: number };
 
@@ -73,7 +72,7 @@ export function SalesClient({ user }: { user: User }) {
         // amount が無い旧 CF 控えは salesAmount を表示に使う（個人控えのスキーマ互換）
         id: d.id, amount: typeof x.amount === 'number' ? x.amount : (typeof x.salesAmount === 'number' ? x.salesAmount : 0),
         customerName: x.customerName ?? null, customerId: x.customerId ?? null, castName: x.castName ?? null, dayKey: x.dayKey ?? '',
-        atMs: toMs(x.checkoutAt) ?? toMs(x.datetime) ?? toMs(x.createdAt), voided: x.voided === true, source: x.source ?? 'manual',
+        atMs: toMillis(x.checkoutAt) ?? toMillis(x.datetime) ?? toMillis(x.createdAt), voided: x.voided === true, source: x.source ?? 'manual',
         nomination: typeof x.nomination === 'string' ? x.nomination : null, dohan: x.dohan === true,
         unpaidAmount: typeof x.unpaidAmount === 'number' ? x.unpaidAmount : 0,
       }); });

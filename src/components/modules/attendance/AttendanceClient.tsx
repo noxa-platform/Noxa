@@ -14,6 +14,7 @@ import { resolveOvernightEndMs } from '@/lib/attendance/shift-time';
 import { describeFirestoreError } from '@/lib/firestore-error';
 import { Shell, Section, Empty, Eyebrow, chip } from '@/components/modules/schedule/ScheduleClient';
 import { stampIrVersion } from '@/lib/ir-version';
+import { toMillis } from '@/lib/datetime';
 
 /**
  * shifts.date の日付キー規約: 打刻側（clockIn）が書く `toISOString().slice(0,10)`（UTC 暦日）。
@@ -29,14 +30,8 @@ const shiftDateKey = () => new Date().toISOString().slice(0, 10);
 const mono = 'var(--noxa-font-mono)';
 
 type Shift = { id: string; date: string; startMs: number | null; endMs: number | null };
-function toMs(v: unknown): number | null {
-  if (v instanceof Timestamp) return v.toMillis();
-  if (v && typeof v === 'object' && 'seconds' in (v as Record<string, unknown>)) return (v as { seconds: number }).seconds * 1000;
-  if (typeof v === 'number') return v;
-  return null;
-}
 function mapShift(id: string, d: DocumentData): Shift {
-  return { id, date: (d.date as string) ?? '', startMs: toMs(d.startAt), endMs: toMs(d.endAt) };
+  return { id, date: (d.date as string) ?? '', startMs: toMillis(d.startAt), endMs: toMillis(d.endAt) };
 }
 const hhmm = (ms: number | null) => { if (!ms) return '—'; const d = new Date(ms); return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`; };
 function dur(a: number | null, b: number | null) { if (!a || !b || b <= a) return ''; const m = Math.floor((b - a) / 60000); return `${Math.floor(m / 60)}h${String(m % 60).padStart(2, '0')}m`; }
@@ -462,7 +457,7 @@ function TeamAttendanceSection({ shopId }: { shopId: string }) {
       .then((snap) => {
         if (!alive) return;
         const list: TeamShift[] = [];
-        snap.forEach((d) => { const v = d.data() as DocumentData; list.push({ castUid: (v.castUid as string) ?? '', date: (v.date as string) ?? '', startMs: toMs(v.startAt), endMs: toMs(v.endAt) }); });
+        snap.forEach((d) => { const v = d.data() as DocumentData; list.push({ castUid: (v.castUid as string) ?? '', date: (v.date as string) ?? '', startMs: toMillis(v.startAt), endMs: toMillis(v.endAt) }); });
         setTeamShifts(list); setAsOf({ nowMs: Date.now(), todayKey: shiftDateKey() }); setErr(null);
       })
       .catch((e) => { if (alive) { setTeamShifts([]); setErr(describeFirestoreError(e, 'チーム勤怠の取得')); } });

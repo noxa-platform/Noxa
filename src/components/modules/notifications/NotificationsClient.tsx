@@ -1,11 +1,12 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { collection, getDocs, query, where, doc, updateDoc, Timestamp, type DocumentData } from 'firebase/firestore';
+import { collection, getDocs, query, where, doc, updateDoc, type DocumentData } from 'firebase/firestore';
 import { describeFirestoreError } from '@/lib/firestore-error';
 import type { User } from 'firebase/auth';
 import { db } from '@/lib/firebase/config';
 import { Shell, Section, Empty, Eyebrow } from '@/components/modules/schedule/ScheduleClient';
+import { toMillis } from '@/lib/datetime';
 
 /**
  * 通知センター — Noxa OS（実データ）
@@ -15,17 +16,12 @@ const mono = 'var(--noxa-font-mono)';
 
 type Notif = { id: string; title: string; body: string; at: number | null; read: boolean; kind: string };
 
-function toMs(v: unknown): number | null {
-  if (v instanceof Timestamp) return v.toMillis();
-  if (v && typeof v === 'object' && 'seconds' in (v as Record<string, unknown>)) return (v as { seconds: number }).seconds * 1000;
-  return null;
-}
 function mapN(id: string, d: DocumentData): Notif {
   return {
     id,
     title: (d.title as string) ?? (d.kind as string) ?? 'お知らせ',
     body: (d.body as string) ?? (d.message as string) ?? '',
-    at: toMs(d.createdAt ?? d.sentAt ?? d.at),
+    at: toMillis(d.createdAt ?? d.sentAt ?? d.at),
     read: d.read === true || d.isRead === true,
     kind: (d.kind as string) ?? (d.type as string) ?? '',
   };

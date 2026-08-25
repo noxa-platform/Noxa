@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { useEffect, useMemo, useState } from 'react';
-import { collection, onSnapshot, addDoc, doc, updateDoc, deleteDoc, serverTimestamp, Timestamp, type DocumentData } from 'firebase/firestore';
+import { collection, onSnapshot, addDoc, doc, updateDoc, deleteDoc, serverTimestamp, type DocumentData } from 'firebase/firestore';
 import { db } from '@/lib/firebase/config';
 import { useShopId } from '@/lib/useShopId';
 import { useShopRole, hasShopRole } from '@/lib/useShopRole';
@@ -11,6 +11,7 @@ import { describeFirestoreError } from '@/lib/firestore-error';
 import { SHOP_SCOPE_NOTE } from '@/lib/shop-scope';
 import type { User } from 'firebase/auth';
 import { stampIrVersion } from '@/lib/ir-version';
+import { toMillis } from '@/lib/datetime';
 
 /**
  * 顧客台帳（最小版・yorulog ベースを最低限で移植）。
@@ -24,17 +25,12 @@ const yen = (n: number) => `¥${Math.round(n).toLocaleString('ja-JP')}`;
 
 type Cust = { id: string; name: string; totalSales: number; visitCount: number; lastContactAt: number | null; rank: string | null; castName: string | null };
 
-function toMs(v: unknown): number | null {
-  if (v instanceof Timestamp) return v.toMillis();
-  if (v && typeof v === 'object' && 'seconds' in (v as Record<string, unknown>)) return (v as { seconds: number }).seconds * 1000;
-  return null;
-}
 function mapCust(id: string, d: DocumentData): Cust {
   return {
     id, name: (d.name as string) ?? '（無名）',
     totalSales: typeof d.totalSales === 'number' ? d.totalSales : 0,
     visitCount: typeof d.visitCount === 'number' ? d.visitCount : 0,
-    lastContactAt: toMs(d.lastContactAt), rank: (d.rank as string) ?? null,
+    lastContactAt: toMillis(d.lastContactAt), rank: (d.rank as string) ?? null,
     castName: (d.castName as string) ?? null,
   };
 }

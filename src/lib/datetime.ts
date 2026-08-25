@@ -43,3 +43,45 @@ export function jstDayWindow(d: Date = new Date()): { startIso: string; endIso: 
   const end = new Date(start.getTime() + 24 * 60 * 60 * 1000);
   return { startIso: start.toISOString(), endIso: end.toISOString() };
 }
+
+/**
+ * Firestore の時刻値をミリ秒へ揃える（2026-08-26・P153-PM12）。
+ *
+ * ## なぜ 1 箇所に集めたか
+ *
+ * これまで各画面が `toMs` を**それぞれ書いており、写しが 6 つ・挙動が 3 通りに割れていた**:
+ * - number（ミリ秒）を**受ける**:  `PayrollClient` / `TransportClient` / `AttendanceClient`
+ * - number を**受けない**（null）:  `NotificationsClient` / `SalesClient` / `CustomersClient`
+ *
+ * ＝ **同じ値を書いても画面によって出たり「—」になったりする**。nomishugy の移行（P46）で
+ * `lastContactAt` を number で書いて顧客一覧だけ「—」になった実害がまさにこれだった。
+ *
+ * ## 受ける形（緩い側に揃える）
+ *
+ * Firestore の `Timestamp`（`toMillis()` を持つ / `seconds` を持つ）・`Date`・**number（ミリ秒）**。
+ * ⚠️ **厳しい側に揃えない**——number を弾く実装に統一すると、いま number で保存されている
+ * データを表示している画面（勤怠・送迎・給与）が**一斉に「—」になる**。読み手を緩くしても
+ * 壊れるものは無いが、逆は表示を消す。
+ *
+ * ⚠️ **書き手は Timestamp で書くこと**（読めるからといって number で書いてよい話ではない）。
+ * 並べ替えやクエリの範囲指定は型が揃っていないと成立しない。
+ *
+ * 分からないものは **null**（0 に倒すと 1970-01-01 という意味のある時刻に化ける）。
+ */
+export function toMillis(v: unknown): number | null {
+  if (v == null) return null;
+  if (typeof v === 'number') return Number.isFinite(v) ? v : null;
+  if (v instanceof Date) {
+    const ms = v.getTime();
+    return Number.isFinite(ms) ? ms : null;
+  }
+  if (typeof v === 'object') {
+    const o = v as { toMillis?: unknown; seconds?: unknown };
+    if (typeof o.toMillis === 'function') {
+      const ms = (o.toMillis as () => unknown)();
+      return typeof ms === 'number' && Number.isFinite(ms) ? ms : null;
+    }
+    if (typeof o.seconds === 'number' && Number.isFinite(o.seconds)) return o.seconds * 1000;
+  }
+  return null;
+}

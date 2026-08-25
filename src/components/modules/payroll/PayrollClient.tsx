@@ -11,6 +11,7 @@ import { resolveShopIdState, SHOP_UNRESOLVED_TEXT, SHOP_NOT_FOUND_TEXT } from '@
 import { activeMembershipIds } from '@/lib/membership';
 import { describeFirestoreError } from '@/lib/firestore-error';
 import { Shell, Section, Empty, Eyebrow } from '@/components/modules/schedule/ScheduleClient';
+import { toMillis } from '@/lib/datetime';
 
 /**
  * 給与 — Noxa OS（実データ・閲覧）
@@ -22,7 +23,6 @@ const yen = (n: number) => `¥${Math.round(n).toLocaleString('ja-JP')}`;
 
 type Period = { id: string; label: string; total: number; breakdown: { label: string; amount: number }[]; status: string };
 
-function toMs(v: unknown): number { if (v && typeof v === 'object' && 'seconds' in (v as Record<string, unknown>)) return (v as { seconds: number }).seconds * 1000; if (typeof v === 'number') return v; return 0; }
 
 // 当月の勤務(shifts)×自分の時給(seating_casts.hourlyWage)から見込み給与(基本給)を算出
 async function computeDraft(shopId: string, uid: string): Promise<Period | null> {
@@ -31,7 +31,7 @@ async function computeDraft(shopId: string, uid: string): Promise<Period | null>
   try {
     const sh = await getDocs(query(collection(db, `shop_shops/${shopId}/shifts`), where('castUid', '==', uid)));
     let mins = 0;
-    sh.forEach((doc) => { const x = doc.data(); const date = (x.date as string) ?? ''; if (!date.startsWith(ym)) return; const s = toMs(x.startAt), e = toMs(x.endAt); if (s && e && e > s) mins += (e - s) / 60000; });
+    sh.forEach((doc) => { const x = doc.data(); const date = (x.date as string) ?? ''; if (!date.startsWith(ym)) return; const s = toMillis(x.startAt), e = toMillis(x.endAt); if (s && e && e > s) mins += (e - s) / 60000; });
     if (mins <= 0) return null;
     const cw = await getDocs(query(collection(db, `shop_shops/${shopId}/seating_casts`), where('uid', '==', uid)));
     const wage = cw.empty ? 0 : ((cw.docs[0].data().hourlyWage as number) ?? 0);
