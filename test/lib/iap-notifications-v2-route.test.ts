@@ -80,7 +80,7 @@ describe('iap/notifications-v2 POST（返金クレジット取り戻しの冪等
     mocks.getDb.mockReturnValue(db);
 
     const r = await POST(req({ signedPayload: 'NOTIF' }));
-    expect(await r.json()).toEqual({ ok: true, revoked: 100 });
+    expect(await r.json()).toEqual({ ok: true, revoked: 100, unrecovered: 0 });
     expect((store[SUB_PATH] as { purchasedCredits?: number }).purchasedCredits).toBe(50); // 150 - 100
     expect((store[TX_PATH] as { refunded?: boolean; refundType?: string }).refunded).toBe(true);
     expect((store[TX_PATH] as { refundType?: string }).refundType).toBe('REFUND');
@@ -107,9 +107,44 @@ describe('iap/notifications-v2 POST（返金クレジット取り戻しの冪等
     });
     mocks.getDb.mockReturnValue(db);
 
-    await POST(req({ signedPayload: 'NOTIF' }));
+    const r = await POST(req({ signedPayload: 'NOTIF' }));
     expect((store[SUB_PATH] as { purchasedCredits?: number }).purchasedCredits).toBe(0); // max(0, 30-100)
     expect((store[TX_PATH] as { refunded?: boolean }).refunded).toBe(true);
+
+    // ⚠️ ここが P154-PM1。**取り戻せたのは 30 だけ**で、70 は使い切られた後だった。
+    // 以前は付与時の credits(100) を「取り戻した数」として返し、
+    // tx doc にも実測が残らなかった＝**全額取り戻した顔**で通っていた
+    expect(await r.json()).toEqual({ ok: true, revoked: 30, unrecovered: 70 });
+    expect(store[TX_PATH]).toMatchObject({ revokedCredits: 30, unrecoveredCredits: 70 });
+  });
+
+  // 「申告 = 実測 + 取り戻せなかった分」が必ず合うこと（検算）。
+  // 合わない形＝どこかで数字の性格を落としている
+  it('取り戻しの検算: credits = revoked + unrecovered が常に成り立つ', async () => {
+    for (const [granted, balance] of [[100, 150], [100, 30], [100, 0], [40, 40]]) {
+      setJws(notif('REFUND'), TXINFO);
+      const { db } = makeDb({
+        [TX_PATH]: { uid: 'u1', credits: granted, refunded: false },
+        [SUB_PATH]: { purchasedCredits: balance },
+      });
+      mocks.getDb.mockReturnValue(db);
+      const body = await (await POST(req({ signedPayload: 'NOTIF' }))).json();
+      expect(body.revoked + body.unrecovered).toBe(granted);
+      expect(body.revoked).toBe(Math.min(granted, balance));
+    }
+  });
+
+  // 残高ゼロ（使い切ってから返金）は運営が知りたい唯一の形。0 を返して黙らない
+  it('残高ゼロなら revoked=0 / unrecovered=全額 を返し、tx にも残す', async () => {
+    setJws(notif('REFUND'), TXINFO);
+    const { db, store } = makeDb({
+      [TX_PATH]: { uid: 'u1', credits: 100, refunded: false },
+      [SUB_PATH]: { purchasedCredits: 0 },
+    });
+    mocks.getDb.mockReturnValue(db);
+    const r = await POST(req({ signedPayload: 'NOTIF' }));
+    expect(await r.json()).toEqual({ ok: true, revoked: 0, unrecovered: 100 });
+    expect(store[TX_PATH]).toMatchObject({ refunded: true, revokedCredits: 0, unrecoveredCredits: 100 });
   });
 
   it('REVOKE も同じ取り戻し経路（refundType=REVOKE）', async () => {
@@ -121,7 +156,7 @@ describe('iap/notifications-v2 POST（返金クレジット取り戻しの冪等
     mocks.getDb.mockReturnValue(db);
 
     const r = await POST(req({ signedPayload: 'NOTIF' }));
-    expect(await r.json()).toEqual({ ok: true, revoked: 40 });
+    expect(await r.json()).toEqual({ ok: true, revoked: 40, unrecovered: 0 });
     expect((store[SUB_PATH] as { purchasedCredits?: number }).purchasedCredits).toBe(60);
     expect((store[TX_PATH] as { refundType?: string }).refundType).toBe('REVOKE');
   });

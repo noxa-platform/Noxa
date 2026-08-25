@@ -106,19 +106,23 @@ export async function POST(request: NextRequest) {
       // refunded 判定・減算・フラグ立てを同一 tx に入れて原子化する（reads を先に）。
       const outcome = await db.runTransaction(async (t) => {
         const txSnap = await t.get(txRef);
-        if (!txSnap.exists) return { status: 'unknown' as const, credits: 0 };
+        if (!txSnap.exists) return { status: 'unknown' as const, credits: 0, revoked: 0, unrecovered: 0 };
         const txData = txSnap.data() ?? {};
-        if (txData.refunded) return { status: 'already' as const, credits: 0 };
+        if (txData.refunded) return { status: 'already' as const, credits: 0, revoked: 0, unrecovered: 0 };
         const uid = txData.uid as string | undefined;
         const credits = (txData.credits as number | undefined) ?? 0;
         if (!uid || credits <= 0) {
           // 取り消す対象なし（原実装踏襲: refunded は立てない）
-          return { status: 'noop' as const, credits: 0 };
+          return { status: 'noop' as const, credits: 0, revoked: 0, unrecovered: 0 };
         }
         const subRef = db.doc(`account_subscriptions/${uid}`);
         const subSnap = await t.get(subRef);
         const current = Math.max(0, Number(subSnap.data()?.purchasedCredits ?? 0));
         const next = Math.max(0, current - credits);
+        // **取り戻せた実数**。残高が足りなければ 0 で下げ止まるので、
+        // 付与した credits と一致するとは限らない（P154-PM1）
+        const revoked = current - next;
+        const unrecovered = credits - revoked;
         t.set(subRef, { purchasedCredits: next, lastRefundAt: FieldValue.serverTimestamp() }, { merge: true });
         t.set(
           txRef,
@@ -126,10 +130,14 @@ export async function POST(request: NextRequest) {
             refunded: true,
             refundedAt: FieldValue.serverTimestamp(),
             refundType: notificationType,
+            // 申告（credits）ではなく**実測**を残す。この 2 つが食い違うのは
+            // 「使い切ってから返金された」ときだけで、それは運営が知りたい唯一の形
+            revokedCredits: revoked,
+            unrecoveredCredits: unrecovered,
           },
           { merge: true },
         );
-        return { status: 'revoked' as const, credits };
+        return { status: 'revoked' as const, credits, revoked, unrecovered };
       });
 
       if (outcome.status === 'unknown') {
@@ -141,9 +149,29 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ ok: true, alreadyRefunded: true });
       }
       if (outcome.status === 'revoked') {
-        console.log('[iap/notifications-v2]', notificationType, transactionId, 'credits revoked:', outcome.credits);
+        console.log(
+          '[iap/notifications-v2]', notificationType, transactionId,
+          `credits revoked: ${outcome.revoked}/${outcome.credits}`,
+        );
+        if (outcome.unrecovered > 0) {
+          // 残高が足りず取り戻しきれなかった＝**使い切ってから返金された**。
+          // Apple 側では返金が成立しているので、こちらは損失を被っている。
+          // 返金額を書き換える手段は無い（それは事業判断）が、**黙って全額取り戻した顔で
+          // 通すのが一番まずい**ので、運営が後から数えられる形で残す。
+          console.warn(
+            '[iap/notifications-v2] 消費済みで取り戻せなかったクレジットがあります',
+            transactionId, `unrecovered=${outcome.unrecovered}`,
+          );
+        }
       }
-      return NextResponse.json({ ok: true, revoked: outcome.credits });
+      // ⚠️ 申告（credits）ではなく**実測**を返す。以前は「取り戻した数」として
+      // 付与時の credits をそのまま返しており、0 しか取り戻せていなくても
+      // 全額取り戻したように見えていた（P154-PM1）
+      return NextResponse.json({
+        ok: true,
+        revoked: outcome.revoked,
+        unrecovered: outcome.unrecovered,
+      });
     }
 
     // CONSUMPTION_REQUEST: Apple が消費状態を尋ねる（consumable 商品）
