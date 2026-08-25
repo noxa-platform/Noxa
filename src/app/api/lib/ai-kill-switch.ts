@@ -138,7 +138,10 @@ const EMAIL_CACHE_MS = 5 * 60_000;
  */
 async function isExemptUid(state: AiKillSwitchState, uid: string | undefined): Promise<boolean> {
   if (!uid) return false;
-  if (state.exemptUids.includes(uid)) return true;
+  if (state.exemptUids.includes(uid)) {
+    noteExemption(uid, 'uid');
+    return true;
+  }
   if (state.exemptEmails.length === 0) return false;
 
   const now = Date.now();
@@ -155,7 +158,23 @@ async function isExemptUid(state: AiKillSwitchState, uid: string | undefined): P
     }
     emailCache.set(uid, { at: now, email });
   }
-  return email !== null && state.exemptEmails.includes(email);
+  const exempt = email !== null && state.exemptEmails.includes(email);
+  if (exempt) noteExemption(uid, 'email');
+  return exempt;
+}
+
+/**
+ * 除外が実際に効いたことをログに残す。
+ *
+ * 除外リストは**間違っていても静かに効かないだけ**で、症状は
+ * 「審査員が AI を触ったらエラーだった」という取り返しのつかない形でしか出ない
+ * （実際に一度、審査用アドレスが ASC の実体と違っていた）。
+ * デプロイ後に「除外が効いているか」を Vercel のログで確かめられるようにする。
+ * uid は伏せずに出す（運用者しか見ないログで、照合できないと確認の意味が無い）。
+ * 除外は稀にしか起きないのでノイズにならない。
+ */
+function noteExemption(uid: string, via: 'uid' | 'email'): void {
+  console.info(`[ai-kill-switch] 停止中だが除外リストにより通過 uid=${uid} via=${via}`);
 }
 
 /** テスト用。メール解決のキャッシュも捨てる */

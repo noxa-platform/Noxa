@@ -258,6 +258,27 @@ describe('審査用デモアカウントの除外', () => {
 
   // 安全網（openrouter.ts の fetch 直前）でも同じ判定が効くこと。
   // ここが効かないと、ルートを通った除外ユーザーが安全網で弾かれて審査が通らない
+  // 除外リストが間違っていても「静かに効かない」だけなので、
+  // デプロイ後にログで確認できることを担保する（実際に審査用アドレスが違っていた）
+  it('除外が効いたときはログに残る（デプロイ後に確認できる）', async () => {
+    const spy = vi.spyOn(console, 'info').mockImplementation(() => {});
+    try {
+      mocks.getDb.mockReturnValue(makeDb({ [SWITCH_PATH]: { ...OFF, exemptUids: ['demo1'] } }));
+      await aiKillSwitchResponse('demo1');
+      expect(spy).toHaveBeenCalled();
+      expect(String(spy.mock.calls[0]?.[0])).toContain('demo1');
+    } finally { spy.mockRestore(); }
+  });
+
+  it('除外されなかったときはログを出さない（ノイズにしない）', async () => {
+    const spy = vi.spyOn(console, 'info').mockImplementation(() => {});
+    try {
+      mocks.getDb.mockReturnValue(makeDb({ [SWITCH_PATH]: { ...OFF, exemptUids: ['demo1'] } }));
+      await aiKillSwitchResponse('someone-else');
+      expect(spy).not.toHaveBeenCalled();
+    } finally { spy.mockRestore(); }
+  });
+
   it('入口を通った除外ユーザーは assertAiEnabled も通る', async () => {
     mocks.getDb.mockReturnValue(makeDb({ [SWITCH_PATH]: { ...OFF, exemptUids: ['demo1'] } }));
     expect(await aiKillSwitchResponse('demo1')).toBeNull();
