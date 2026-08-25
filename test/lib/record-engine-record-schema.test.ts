@@ -279,11 +279,19 @@ describe('P154-PM3 スキーマ側の上限は「切った」ことを必ず言�
     expect(trimmed).toHaveLength(2);
   });
 
-  it('上限内なら trimmed は空（0 件と「欄が無い」を混同しない）', () => {
-    const { trimmed } = parseRecordSchema({
+  // ⚠️ 「上限内なら空」**だけ**を見ると、`trimmed` を**常に空で返す実装**でも通る
+  //    ＝「正しく 0」と「常に 0」を区別できない（P154-PM7 で実測して判明）。
+  //    同じ関数が上限超では**必ず言う**ことを対にして、初めて番人になる
+  it('上限内なら trimmed は空・上限超なら必ず言う（常に空の実装を通さない）', () => {
+    const within = parseRecordSchema({
       fields: [{ ...base, type: 'select', options: ['a', 'b'], roles: ['cast'] }],
     });
-    expect(trimmed).toEqual([]);
+    expect(within.trimmed).toEqual([]);
+
+    const over = parseRecordSchema({
+      fields: [{ ...base, type: 'select', options: Array.from({ length: MAX_OPTIONS + 1 }, (_, i) => `o${i}`) }],
+    });
+    expect(over.trimmed.length).toBeGreaterThan(0);
   });
 
   it('拒否された項目は trimmed に混ざらない（別勘定＝検算が壊れない）', () => {
@@ -346,9 +354,10 @@ describe('P154-PM3 記録の値も「切った」ことを必ず言う', () => {
     expect(trimmed).toHaveLength(2); // 「1 個落とした」と「N 個を切った」
   });
 
-  it('上限内なら trimmed は空', () => {
-    const { trimmed } = validateXMap({ memo: 'ふつうの長さ', tags: ['a', 'b'], amount: 1200 });
-    expect(trimmed).toEqual([]);
+  // 値の側も同じ。否定だけでは「常に空」を見逃す（P154-PM7）
+  it('上限内なら trimmed は空・上限超なら必ず言う（常に空の実装を通さない）', () => {
+    expect(validateXMap({ memo: 'ふつうの長さ', tags: ['a', 'b'], amount: 1200 }).trimmed).toEqual([]);
+    expect(validateXMap({ memo: 'あ'.repeat(MAX_STRING_LENGTH + 1) }).trimmed.length).toBeGreaterThan(0);
   });
 
   it('文字列以外が混ざった配列は従来どおり拒否（切り詰めに化けない）', () => {
