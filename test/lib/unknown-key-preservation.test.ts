@@ -39,6 +39,8 @@ const GUARDED_CREATES: { file: string; count: number; why: string }[] = [
   { file: 'src/app/api/team/issue-invite/route.ts', count: 1, why: '招待コードの新規発行' },
   { file: 'src/app/api/team/redeem-invite/route.ts', count: 2, why: 'memberSnap.exists なら 409 で返すため新規のみ／名簿は castsCol.doc() の自動 ID' },
   { file: 'src/app/store/new/page.tsx', count: 2, why: '店舗作成直後の members / device_profiles（作りたてで既存なし）' },
+  { file: 'src/app/api/record-engine/apply/route.ts', count: 2, why: '控えは 1 世代の上書き（前の控えを残さないのが仕様）／スキーマは doc が無いときだけ非 merge' },
+  { file: 'src/app/api/record-engine/revert/route.ts', count: 1, why: 'スキーマは doc が無いときだけ非 merge（実際には既存があるので通らない枝）' },
   { file: 'functions/src/audit.ts', count: 1, why: 'audit_logs は collection().doc() の自動 ID＝追記専用' },
   { file: 'functions/src/claim-shop.ts', count: 1, why: '申請の append（自動 ID）' },
   { file: 'functions/src/credits.ts', count: 1, why: '台帳への追記（自動 ID）' },

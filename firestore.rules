@@ -418,9 +418,17 @@ service cloud.firestore {
       // 読みは店のメンバー全員（記録画面が項目を出すのに要る）。
       // 書きは owner のみ——**項目の形はワークスペース全体の集計の切り口**なので、
       // キャストが増やせると店の数字の意味が勝手に変わる。
+      //
+      // ⚠️ **適用の控え（record_schema_receipt）だけは owner しか読めない**。
+      // 「何を AI が足したか」は運営情報で、キャストに見せる必要が無い。
+      // Firestore は**当てはまる rule のどれかが許せば通る**ので、下の専用 match で
+      // 絞るだけでは効かない。ここで明示的に除外する必要がある。
       match /settings/{settingId} {
-        allow read: if isShopMember(shopId);
+        allow read: if isShopMember(shopId) && settingId != 'record_schema_receipt';
         allow write: if isShopOwnerLike(shopId);
+      }
+      match /settings/record_schema_receipt {
+        allow read, write: if isShopOwnerLike(shopId);
       }
       match /menus/{menuId} {
         allow read: if isShopMember(shopId);

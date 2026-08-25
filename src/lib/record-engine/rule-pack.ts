@@ -330,6 +330,60 @@ export function revertRulePack(
   };
 }
 
+/** 保存済みの導出を読む。**壊れた式は落とすが、残りは通す**（1 本の不正で全部消さない） */
+export function parseStoredDerivations(raw: unknown): {
+  derivations: { key: string; label: string; expr: Expr }[];
+  rejected: PackRejection[];
+} {
+  const derivations: { key: string; label: string; expr: Expr }[] = [];
+  const rejected: PackRejection[] = [];
+  if (!Array.isArray(raw)) return { derivations, rejected };
+  const seen = new Set<string>();
+  for (const item of raw) {
+    const o = (item && typeof item === 'object') ? item as Record<string, unknown> : {};
+    const key = typeof o.key === 'string' ? o.key : '';
+    const { schema } = parseRecordSchema({ fields: [{ key, type: 'count', label: key }] });
+    if (schema.fields.length === 0) {
+      rejected.push({ kind: 'derivation', key, reason: 'キーの形が不正です' });
+      continue;
+    }
+    if (seen.has(key)) {
+      rejected.push({ kind: 'derivation', key, reason: 'キーが重複しています' });
+      continue;
+    }
+    const parsed = parseExpr(o.expr);
+    if (!parsed.ok) {
+      rejected.push({ kind: 'derivation', key, reason: `式が不正です（${parsed.error.path}: ${parsed.error.reason}）` });
+      continue;
+    }
+    seen.add(key);
+    derivations.push({
+      key,
+      label: typeof o.label === 'string' && o.label.trim() ? o.label.trim().slice(0, 60) : key,
+      expr: parsed.parsed.expr,
+    });
+  }
+  return { derivations, rejected };
+}
+
+/**
+ * 保存済みの控えを読む。**token が無いものは控えとして扱わない**——
+ * token は「どの適用の控えか」の印で、これが無いと取り消しの相手を特定できない。
+ */
+export function parseReceipt(raw: unknown): ApplyReceipt | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const o = raw as Record<string, unknown>;
+  if (typeof o.token !== 'string' || !o.token) return null;
+  const { schema } = parseRecordSchema({ fields: Array.isArray(o.fields) ? o.fields : [] });
+  const { derivations } = parseStoredDerivations(o.derivations);
+  return {
+    token: o.token,
+    appliedAt: typeof o.appliedAt === 'number' && Number.isFinite(o.appliedAt) ? o.appliedAt : 0,
+    fields: schema.fields,
+    derivations,
+  };
+}
+
 /** 足した時点の姿と同じか。**表示名・型・付随情報のどれか 1 つでも違えば編集された扱い** */
 function sameField(a: FieldDef, b: FieldDef): boolean {
   return JSON.stringify(normalizeField(a)) === JSON.stringify(normalizeField(b));

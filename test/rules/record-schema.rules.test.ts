@@ -64,6 +64,30 @@ describe('record_schema は「読みはメンバー / 書きは owner」', () =>
   });
 });
 
+// P152: 控え（何を AI が足したか）は運営情報。キャストに見せる必要が無い。
+// ⚠️ Firestore は**当てはまる rule のどれかが許せば通る**ので、専用 match を足すだけでは
+// 絞れない。汎用の `settings/{settingId}` 側で明示的に除外している。
+describe('適用の控えは owner しか読めない', () => {
+  const RECEIPT = `shop_shops/${SHOP}/settings/record_schema_receipt`;
+
+  it('owner は読み書きできる', async () => {
+    const { getDoc } = await import('firebase/firestore');
+    await assertSucceeds(setDoc(doc(as(OWNER), RECEIPT), { token: 'rp_1', fields: [] }));
+    await assertSucceeds(getDoc(doc(as(OWNER), RECEIPT)));
+  });
+
+  it('キャストは読めない（他の settings は読めるのに、ここだけ閉じている）', async () => {
+    const { getDoc } = await import('firebase/firestore');
+    await assertFails(getDoc(doc(as(CAST), RECEIPT)));
+    // 比較: 同じ settings 配下でもスキーマは読める
+    await assertSucceeds(getDoc(doc(as(CAST), SCHEMA)));
+  });
+
+  it('キャストは書けない', async () => {
+    await assertFails(setDoc(doc(as(CAST), RECEIPT), { token: 'rp_2', fields: [] }));
+  });
+});
+
 describe('記録側の `x` はキー数だけ縛る', () => {
   it('`x` を持たない記録はそのまま通る（既存データ全部がこれ）', async () => {
     await assertSucceeds(setDoc(doc(as(CAST), `shop_shops/${SHOP}/sales/rs_s1`), {
