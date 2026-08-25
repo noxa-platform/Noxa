@@ -22,6 +22,24 @@ describe('resolveTerm — 用語解決のフォールバック連鎖', () => {
   it('config が null / 業種が undefined でも既定へ落ちる', () => {
     expect(resolveTerm(null, undefined, 'cast')).toBe('キャスト');
   });
+
+  // ⚠️ **空の上書きは「呼び名が空」ではなく「上書きが無い」**（P153-PM16）。
+  // 旧実装は `??` で繋いでおり `''` がそのまま返っていた。設定画面は入力欄を空にしたまま
+  // 保存できるので、**その店だけラベルが消えた画面**になっていた。
+  it('空文字・空白だけの上書きは次の段へ落ちる（ラベルを消さない）', () => {
+    for (const blank of ['', '   ', '\n']) {
+      const cfg = { terminology: { cast: blank } } as unknown as ShopConfig;
+      expect(resolveTerm(cfg, 'ホストクラブ', 'cast')).toBe('ホスト'); // 業種プリセットへ
+      expect(resolveTerm(cfg, undefined, 'cast')).toBe('キャスト');    // 既定へ
+    }
+  });
+
+  it('文字列でない上書きも「無い」扱い（Firestore は型違いを保存できる）', () => {
+    for (const bad of [0, 42, true, null, {}, ['ホスト']]) {
+      const cfg = { terminology: { cast: bad } } as unknown as ShopConfig;
+      expect(resolveTerm(cfg, undefined, 'cast')).toBe('キャスト');
+    }
+  });
 });
 
 describe('mergeModules — 既定とのマージ', () => {

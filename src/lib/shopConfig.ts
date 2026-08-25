@@ -116,11 +116,24 @@ export const DEFAULT_CONFIG: ShopConfig = {
   inventoryCategories: DEFAULT_INVENTORY_CATEGORIES,
 };
 
-/** 用語解決: 店舗上書き → 業種プリセット → 既定 → key（key は概念 ID・concepts.ts） */
+/**
+ * 用語解決: 店舗上書き → 業種プリセット → 既定 → key（key は概念 ID・concepts.ts）。
+ *
+ * ⚠️ **空文字・空白だけ・文字列でない上書きは「無い」として次の段へ落とす**（P153-PM16）。
+ * 旧実装は `??` で繋いでいたため、`''` は nullish ではなく**そのまま返っていた**——
+ * 設定画面は入力欄を空にしたまま保存でき（`store/settings` は空値を落とさない）、
+ * その店では**ラベルが消えた画面**になる。呼び名が消えるのは「呼び名が空である」ことを
+ * 意味しない（＝「無い・分からない」を値として混ぜない、今週の原則の語彙版）。
+ * 型違いも同じ扱い。Firestore は文字列以外でも保存できてしまうため。
+ */
+function usableTerm(v: unknown): string | undefined {
+  return typeof v === 'string' && v.trim() ? v : undefined;
+}
+
 export function resolveTerm(config: ShopConfig | null, industry: string | undefined, key: ConceptId | string): string {
-  return config?.terminology?.[key]
-    ?? (industry ? INDUSTRY_TERMS[industry]?.[key] : undefined)
-    ?? DEFAULT_TERMS[key]
+  return usableTerm(config?.terminology?.[key])
+    ?? usableTerm(industry ? INDUSTRY_TERMS[industry]?.[key] : undefined)
+    ?? usableTerm(DEFAULT_TERMS[key])
     ?? key;
 }
 
