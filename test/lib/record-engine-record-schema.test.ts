@@ -1,4 +1,6 @@
 import { describe, it, expect } from 'vitest';
+import { readFileSync, readdirSync } from 'node:fs';
+import { join, relative } from 'node:path';
 import {
   parseRecordSchema, validateXMap, isAggregatable,
   MAX_OPTIONS, MAX_ROLES, MAX_LABEL_LENGTH,
@@ -6,7 +8,9 @@ import {
 } from '@/lib/record-engine/record-schema';
 
 // 記録エンジン段 5（P149）。**rules はマップのキーを 1 つずつ検査できない**ので、
-// ここが自由項目の唯一の番人になる。書き手（Web / iOS / nomishugy / CF）は全員ここを通す。
+// ⚠️ **ここは「唯一の番人」では*ない***（P154-PM4 で実測して訂正）。iOS は `x.<key>` で
+// Firestore へ直接書き、Web の本番呼び出し元は 0 件。**各書き手が自分の写しで守っている**。
+// このファイルの役割は「関門」ではなく**仕様の実装＋各写しの照合先**。
 // ⚠️ **ただし番人なのは*値*についてだけ**（P153-PM3）。ここに並ぶのは「書こうとしている値」の
 // 検査だけで、**差分の組み立て（とくに削除）はこの関数を一度も通らない**。
 // 消える経路は書き手側の約束（record-schema.ts 冒頭の 4〜6）で塞ぐ。
@@ -352,5 +356,68 @@ describe('P154-PM3 記録の値も「切った」ことを必ず言う', () => {
     expect(x.tags).toBeUndefined();
     expect(rejected).toHaveLength(1);
     expect(trimmed).toEqual([]);
+  });
+});
+
+
+// P154-PM4: 「唯一の番人・書き手は全員ここを通す」という**申告**が、実測と食い違っていた。
+// P153-PM4 は写し 4 箇所に「*値*についてだけ」という限定を足したが、
+// **限定を足した本人が、限定した文の前提（そもそも全員が通っているのか）を確かめていなかった。**
+//
+// ここは呼び出し元を**実測で固定**する。増減したら落ちるので、そのとき
+// `record-schema.ts` 冒頭の「ここは唯一の番人ではない」の段落を書き直せる
+// （terminology の `lexicon-snapshot.json` と同じ「知らせ忘れに気づける」立て付け）。
+describe('P154-PM4 検証関数の届く範囲を実測で固定する', () => {
+  const SRC_ROOT = join(process.cwd(), 'src');
+
+  function srcFiles(): string[] {
+    const out: string[] = [];
+    (function walk(d: string) {
+      for (const e of readdirSync(d, { withFileTypes: true })) {
+        const f = join(d, e.name);
+        if (e.isDirectory()) walk(f);
+        else if (/\.tsx?$/.test(e.name)) out.push(f);
+      }
+    })(SRC_ROOT);
+    return out;
+  }
+  /** `fn` を**呼んでいる**ファイル。定義そのもの（`export function fn(`）は数えない */
+  const callersOf = (fn: string) => srcFiles()
+    .filter((f) => {
+      const src = readFileSync(f, 'utf8').replace(new RegExp(`(export )?function ${fn}\\(`, 'g'), '');
+      return new RegExp(`${fn}\\(`).test(src);
+    })
+    .map((f) => relative(SRC_ROOT, f).split(/[\\/]/).join('/'))
+    .sort();
+
+  it('validateXMap の本番の呼び出し元は derivation.ts だけ（＝書き手は 1 つも通っていない）', () => {
+    expect(callersOf('validateXMap')).toEqual(['lib/record-engine/derivation.ts']);
+  });
+
+  it('その derivation.ts の出口（derivationsToXPatch）も本番からは呼ばれていない', () => {
+    // ＝ `validateXMap` は本番コードから 1 度も実行されない。
+    // 「ここを通しているから安全」と書けない根拠がこれ。
+    expect(callersOf('derivationsToXPatch')).toEqual([]);
+  });
+
+  it('parseRecordSchema は逆に本番で実際に使われている（読みの側は届いている）', () => {
+    const callers = callersOf('parseRecordSchema');
+    expect(callers).toContain('app/api/record-engine/apply/route.ts');
+    expect(callers.length).toBeGreaterThan(1);
+  });
+
+  it('「唯一の番人」という言い切りがコードベースに残っていない', () => {
+    // ⚠️ この一文は**コピーされる**（P153 で 4 箇所に増えていた実績がある）。
+    // 復活したら落として、実測し直させる
+    // 判定は**単純な規則**にする: この一文を持ってよいのは正本（record-schema.ts）だけ。
+    // ⚠️ 最初は「近くに打ち消しがあれば可」にしたが、打ち消しの書き方は無数にあり
+    //    （「ではない」「通っていない」…）**判定の方がザル**になった。
+    //    写しが増えることを止めたいのだから、**写しの存在そのもの**を見れば足りる。
+    const CANON = 'lib/record-engine/record-schema.ts';
+    const offenders = srcFiles()
+      .filter((f) => /唯一の番人/.test(readFileSync(f, 'utf8')))
+      .map((f) => relative(SRC_ROOT, f).split(/[\\/]/).join('/'))
+      .filter((rel) => rel !== CANON);
+    expect(offenders).toEqual([]);
   });
 });
