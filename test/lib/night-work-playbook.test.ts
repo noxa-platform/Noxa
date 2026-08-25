@@ -3,6 +3,7 @@ import {
   resolveStoreHintKey,
   buildPlaybookInstruction,
   VOICE_RULES,
+  VOICE_RULES_COMPACT,
   NIGHT_WORK_BASE_PLAYBOOK,
   STORE_TYPE_HINTS,
   SCENE_ADDITIONAL_HINTS,
@@ -48,9 +49,50 @@ describe('resolveStoreHintKey — 業種ルーティングの優先順位', () =
 });
 
 describe('buildPlaybookInstruction — プレイブック合成', () => {
-  it('VOICE_RULES を常に最上段へ置く', () => {
+  it('文体ルールを常に最上段へ置く（通常はフル版）', () => {
     const out = buildPlaybookInstruction({});
     expect(out.startsWith(VOICE_RULES)).toBe(true);
+  });
+
+  // 2026-08-25 原価圧縮: compact を渡すのは chat と insights-narrative の 2 経路で、
+  // どちらも「利用者本人への解説・助言」が主目的。chat の SYSTEM_PROMPT 自身が
+  // 「この文体ルールの対象は顧客へ送る文面であって解説には適用しない」と書いており、
+  // フル版 1,522 字を入れてから否定している状態だった。
+  describe('compact 経路の文体ルール（原価圧縮）', () => {
+    it('compact は短縮版を最上段に置く（フル版は入れない）', () => {
+      const out = buildPlaybookInstruction({ compact: true });
+      expect(out.startsWith(VOICE_RULES_COMPACT)).toBe(true);
+      expect(out).not.toContain(VOICE_RULES);
+    });
+
+    it('短縮版はフル版より十分短い（半分以下）', () => {
+      expect(VOICE_RULES_COMPACT.length).toBeLessThan(VOICE_RULES.length / 2);
+    });
+
+    // 「短くした結果、効くルールまで落ちた」を防ぐ。
+    // chat は「LINE 文面を書いて」と頼まれる経路でもあるので、丸ごと外してはいない
+    it.each([
+      ['禁止クリシェ', '胸が締め付けられる'],
+      ['禁止クリシェ', 'かけがえのない'],
+      ['括弧書きの禁止', '括弧書き'],
+      ['改行の指示', '改行'],
+      ['一人称の指定', '一人称'],
+      ['読点の上限', '読点'],
+    ])('短縮版でも %s が残っている（%s）', (_label, needle) => {
+      expect(VOICE_RULES_COMPACT).toContain(needle);
+    });
+
+    it('文面生成が本業の経路（compact なし）はフル版のまま', () => {
+      const full = buildPlaybookInstruction({ compact: false });
+      expect(full).toContain(VOICE_RULES);
+      expect(full).not.toContain(VOICE_RULES_COMPACT);
+    });
+
+    it('compact 全体がフルより 1000 字以上短い（圧縮が実際に効いている）', () => {
+      const full = buildPlaybookInstruction({ compact: false });
+      const compact = buildPlaybookInstruction({ compact: true });
+      expect(full.length - compact.length).toBeGreaterThan(1000);
+    });
   });
 
   it('通常はフル、compact は要点版を注入する（差分がある）', () => {
