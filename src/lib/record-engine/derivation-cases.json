@@ -1,0 +1,216 @@
+{
+  "$comment": [
+    "記録エンジン段 6（導出）の共有テストケース表。noxa（サーバ・正本）と yorulog-ios（表示用の簡易評価）が",
+    "**同じ表を通す**。片側だけ挙動が変わったら、その側のテストが落ちる。",
+    "",
+    "なぜ要るか: 評価はサーバが正本でクライアントは表示のみ、と決めたが、",
+    "iOS はオフラインでも記録できる必要があるため暫定表示用の評価を持つ。",
+    "＝ 同じ判定が 2 箇所に存在する。P100 で「2 箇所に書くと必ずズレる」を実際に踏んだので、",
+    "**ズレを検出する仕掛けを先に置く**。",
+    "",
+    "expected.value が null なら「計算できない」。**0 ではない**——0 に倒すと",
+    "「売上ゼロ」という意味のある値に化け、集計に混ざったまま気づけない。",
+    "",
+    "この表を更新したら、必ず両側でテストを走らせること。片側だけ更新して緑にしない。"
+  ],
+  "version": 1,
+  "cases": [
+    {
+      "name": "定数",
+      "record": {},
+      "expr": { "lit": 42 },
+      "expected": { "value": 42 }
+    },
+    {
+      "name": "固定項目を読む",
+      "record": { "salesAmount": 12000 },
+      "expr": { "field": "salesAmount" },
+      "expected": { "value": 12000 }
+    },
+    {
+      "name": "x の自由項目を読む",
+      "record": { "x": { "bottle_count": 3 } },
+      "expr": { "field": "bottle_count" },
+      "expected": { "value": 3 }
+    },
+    {
+      "name": "x が固定項目より優先される（記録に書かれた方を使う）",
+      "record": { "salesAmount": 100, "x": { "salesAmount": 999 } },
+      "expr": { "field": "salesAmount" },
+      "expected": { "value": 999 }
+    },
+    {
+      "name": "無い項目は null（0 にしない）",
+      "record": {},
+      "expr": { "field": "bottle_count" },
+      "expected": { "value": null }
+    },
+    {
+      "name": "null は伝播する（無い項目を足しても 0 扱いにしない）",
+      "record": { "x": { "a": 10 } },
+      "expr": { "op": "+", "args": [{ "field": "a" }, { "field": "missing" }] },
+      "expected": { "value": null }
+    },
+    {
+      "name": "四則: 足す",
+      "record": { "x": { "a": 3, "b": 4 } },
+      "expr": { "op": "+", "args": [{ "field": "a" }, { "field": "b" }] },
+      "expected": { "value": 7 }
+    },
+    {
+      "name": "四則: 引く",
+      "record": { "x": { "a": 3, "b": 4 } },
+      "expr": { "op": "-", "args": [{ "field": "a" }, { "field": "b" }] },
+      "expected": { "value": -1 }
+    },
+    {
+      "name": "四則: 掛ける（単価 × 本数）",
+      "record": { "x": { "unit_price": 8000, "bottle_count": 3 } },
+      "expr": { "op": "*", "args": [{ "field": "unit_price" }, { "field": "bottle_count" }] },
+      "expected": { "value": 24000 }
+    },
+    {
+      "name": "四則: 割る",
+      "record": { "x": { "total": 30000, "people": 4 } },
+      "expr": { "op": "/", "args": [{ "field": "total" }, { "field": "people" }] },
+      "expected": { "value": 7500 }
+    },
+    {
+      "name": "0 除算は null（Infinity にしない）",
+      "record": { "x": { "total": 30000, "people": 0 } },
+      "expr": { "op": "/", "args": [{ "field": "total" }, { "field": "people" }] },
+      "expected": { "value": null }
+    },
+    {
+      "name": "真偽値は 1 / 0 として読む（toggle 項目）",
+      "record": { "x": { "is_dohan": true } },
+      "expr": { "field": "is_dohan" },
+      "expected": { "value": 1 }
+    },
+    {
+      "name": "文字列は数として扱わない（\"1,000\" を勝手に解釈しない）",
+      "record": { "x": { "amount_text": "1,000" } },
+      "expr": { "field": "amount_text" },
+      "expected": { "value": null }
+    },
+    {
+      "name": "比較は 1 / 0 を返す",
+      "record": { "x": { "a": 10 } },
+      "expr": { "cmp": ">", "args": [{ "field": "a" }, { "lit": 5 }] },
+      "expected": { "value": 1 }
+    },
+    {
+      "name": "比較（偽）",
+      "record": { "x": { "a": 3 } },
+      "expr": { "cmp": ">=", "args": [{ "field": "a" }, { "lit": 5 }] },
+      "expected": { "value": 0 }
+    },
+    {
+      "name": "条件分岐: 同伴なら +2000",
+      "record": { "x": { "is_dohan": true, "base": 10000 } },
+      "expr": {
+        "if": { "field": "is_dohan" },
+        "then": { "op": "+", "args": [{ "field": "base" }, { "lit": 2000 }] },
+        "else": { "field": "base" }
+      },
+      "expected": { "value": 12000 }
+    },
+    {
+      "name": "条件分岐: 同伴でないなら素通し",
+      "record": { "x": { "is_dohan": false, "base": 10000 } },
+      "expr": {
+        "if": { "field": "is_dohan" },
+        "then": { "op": "+", "args": [{ "field": "base" }, { "lit": 2000 }] },
+        "else": { "field": "base" }
+      },
+      "expected": { "value": 10000 }
+    },
+    {
+      "name": "条件が分からなければ結果も分からない（どちらの枝も選ばない）",
+      "record": { "x": { "base": 10000 } },
+      "expr": {
+        "if": { "field": "is_dohan" },
+        "then": { "lit": 1 },
+        "else": { "lit": 0 }
+      },
+      "expected": { "value": null }
+    },
+    {
+      "name": "coalesce は「分からない」を倒せる唯一の場所",
+      "record": {},
+      "expr": { "coalesce": [{ "field": "missing" }, { "lit": 0 }] },
+      "expected": { "value": 0 }
+    },
+    {
+      "name": "coalesce: 左が取れれば右は使わない",
+      "record": { "x": { "a": 5 } },
+      "expr": { "coalesce": [{ "field": "a" }, { "lit": 99 }] },
+      "expected": { "value": 5 }
+    },
+    {
+      "name": "実例: バック計算（売上 × 率、率が無ければ 0 として扱うと宣言）",
+      "record": { "x": { "sales": 50000, "back_rate": 0.2 } },
+      "expr": {
+        "op": "*",
+        "args": [
+          { "field": "sales" },
+          { "coalesce": [{ "field": "back_rate" }, { "lit": 0 }] }
+        ]
+      },
+      "expected": { "value": 10000 }
+    },
+    {
+      "name": "実例: 率が未設定なら 0（バックが付かない）",
+      "record": { "x": { "sales": 50000 } },
+      "expr": {
+        "op": "*",
+        "args": [
+          { "field": "sales" },
+          { "coalesce": [{ "field": "back_rate" }, { "lit": 0 }] }
+        ]
+      },
+      "expected": { "value": 0 }
+    },
+    {
+      "name": "桁あふれは null（Infinity を返さない）",
+      "record": { "x": { "huge": 1e308 } },
+      "expr": { "op": "*", "args": [{ "field": "huge" }, { "lit": 100 }] },
+      "expected": { "value": null }
+    },
+    {
+      "name": "非有限の値を持つ項目は null（保存経路で弾いているが読み側でも守る）",
+      "record": { "x": { "broken": null } },
+      "expr": { "field": "broken" },
+      "expected": { "value": null }
+    }
+  ],
+  "invalidExprs": [
+    { "name": "知らない演算子", "expr": { "op": "**", "args": [{ "lit": 1 }, { "lit": 2 }] } },
+    { "name": "知らない比較", "expr": { "cmp": "=~", "args": [{ "lit": 1 }, { "lit": 2 }] } },
+    { "name": "引数が 1 つ", "expr": { "op": "+", "args": [{ "lit": 1 }] } },
+    { "name": "引数が 3 つ", "expr": { "op": "+", "args": [{ "lit": 1 }, { "lit": 2 }, { "lit": 3 }] } },
+    { "name": "非有限の定数", "expr": { "lit": null } },
+    { "name": "項目名が空", "expr": { "field": "   " } },
+    { "name": "知らない式", "expr": { "concat": ["a", "b"] } },
+    { "name": "式ではない", "expr": 42 },
+    { "name": "配列", "expr": [{ "lit": 1 }] }
+  ],
+  "sumCases": [
+    {
+      "name": "合計: 計算できない行は 0 として足さず飛ばす",
+      "rows": [
+        { "x": { "a": 100 } },
+        { "x": {} },
+        { "x": { "a": 200 } }
+      ],
+      "expr": { "field": "a" },
+      "expected": { "value": 300, "counted": 2, "skipped": 1, "truncated": false }
+    },
+    {
+      "name": "合計: 全行が計算できなければ 0 件で 0（「合計 0 円」と区別できるよう counted を見る）",
+      "rows": [{ "x": {} }, { "x": {} }],
+      "expr": { "field": "a" },
+      "expected": { "value": 0, "counted": 0, "skipped": 2, "truncated": false }
+    }
+  ]
+}
