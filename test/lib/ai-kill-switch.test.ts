@@ -18,6 +18,7 @@ import {
   getAiKillSwitch, aiKillSwitchResponse, assertAiEnabled,
   AiDisabledError, resetAiKillSwitchCache, resetAiExemptionCache, AI_DISABLED_CODE,
 } from '../../src/app/api/lib/ai-kill-switch';
+import { enterAiRequest } from '../../src/app/api/lib/ai-request-context';
 
 /** global_settings/ai_kill_switch と account_subscriptions/{uid} だけ持つ最小フェイク */
 function makeDb(docs: Record<string, Record<string, unknown> | undefined>) {
@@ -29,6 +30,21 @@ function makeDb(docs: Record<string, Record<string, unknown> | undefined>) {
       },
     }),
   };
+}
+/** どの doc を何回読んだかを数えるフェイク（安全網が読み直していないことの確認用） */
+function makeCountingDb(docs: Record<string, Record<string, unknown> | undefined>) {
+  const reads = { subscription: 0, switch: 0 };
+  const db = {
+    doc: (path: string) => ({
+      get: async () => {
+        if (path.startsWith('account_subscriptions/')) reads.subscription++;
+        else if (path === 'global_settings/ai_kill_switch') reads.switch++;
+        if (docs[path] === undefined) return { exists: false, data: () => undefined };
+        return { exists: true, data: () => docs[path] };
+      },
+    }),
+  };
+  return { db, reads };
 }
 function makeFailingDb() {
   return { doc: () => ({ get: async () => { throw new Error('firestore down'); } }) };
@@ -315,6 +331,68 @@ describe('assertAiEnabled — プロバイダ直前の最後の砦', () => {
   it('動作中は通す', async () => {
     mocks.getDb.mockReturnValue(makeDb({ [SWITCH_PATH]: { disabled: false } }));
     await expect(assertAiEnabled()).resolves.toBeUndefined();
+  });
+});
+
+// P147: 入口（aiKillSwitchResponse）と安全網（assertAiEnabled）が**同じ結論**を出すこと。
+//
+// 是正前: 入口は `allowPurchasedCredits` を見て購入者を通すのに、安全網は除外 uid しか見て
+// いなかった。＝ 購入クレジット保持者は**入口を通ったあと openrouter 直前で throw** され、
+// `AiDisabledError` はどこでも catch されないため **500**（`code: AI_DISABLED` も付かない）に
+// なっていた。iOS からは「一時停止」とも「残高不足」とも判別できないただのエラーに見える。
+describe('入口と安全網が食い違わない（P147）', () => {
+  const SUB = (uid: string) => `account_subscriptions/${uid}`;
+
+  it('購入クレジット保持者: 入口が通したら安全網も通す', async () => {
+    mocks.getDb.mockReturnValue(makeDb({
+      [SWITCH_PATH]: { disabled: true, allowPurchasedCredits: true },
+      [SUB('buyer')]: { purchasedCredits: 100 },
+    }));
+    // 入口が null（＝通す）を返す
+    expect(await aiKillSwitchResponse('buyer')).toBeNull();
+    // 同じリクエスト文脈で安全網も通ること（是正前はここで throw していた）
+    await expect(assertAiEnabled()).resolves.toBeUndefined();
+  });
+
+  it('除外 uid: 入口が通したら安全網も通す', async () => {
+    mocks.getDb.mockReturnValue(makeDb({
+      [SWITCH_PATH]: { disabled: true, exemptUids: ['demo'] },
+    }));
+    expect(await aiKillSwitchResponse('demo')).toBeNull();
+    await expect(assertAiEnabled()).resolves.toBeUndefined();
+  });
+
+  it('購入残高ゼロ: 入口が 503 なら安全網も止める', async () => {
+    mocks.getDb.mockReturnValue(makeDb({
+      [SWITCH_PATH]: { disabled: true, allowPurchasedCredits: true },
+      [SUB('poor')]: { purchasedCredits: 0 },
+    }));
+    expect((await aiKillSwitchResponse('poor'))?.status).toBe(503);
+    await expect(assertAiEnabled()).rejects.toBeInstanceOf(AiDisabledError);
+  });
+
+  // 印は「入口を通った」ことの証拠。入口を経ずに安全網へ来たら止まる（fail-closed の維持）
+  it('入口を通っていないリクエストは、購入者であっても安全網が止める', async () => {
+    mocks.getDb.mockReturnValue(makeDb({
+      [SWITCH_PATH]: { disabled: true, allowPurchasedCredits: true },
+      [SUB('buyer')]: { purchasedCredits: 100 },
+    }));
+    enterAiRequest('buyer'); // uid は判るが、入口の判定は通っていない
+    await expect(assertAiEnabled()).rejects.toBeInstanceOf(AiDisabledError);
+  });
+
+  // 安全網が Firestore を読み直す実装に戻ると、AI 呼び出しのたびに読み取りが増え、
+  // かつ入口と別々に判定することで今回の食い違いが再発する
+  it('安全網は購入残高を読み直さない（入口の結論を尊重する）', async () => {
+    const { db, reads } = makeCountingDb({
+      [SWITCH_PATH]: { disabled: true, allowPurchasedCredits: true },
+      [SUB('buyer')]: { purchasedCredits: 100 },
+    });
+    mocks.getDb.mockReturnValue(db);
+    expect(await aiKillSwitchResponse('buyer')).toBeNull();
+    const afterEntry = reads.subscription;
+    await assertAiEnabled();
+    expect(reads.subscription).toBe(afterEntry); // 安全網では 1 回も読んでいない
   });
 });
 

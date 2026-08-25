@@ -23,7 +23,7 @@
 
 import { NextResponse } from 'next/server';
 import { getAdminDb, getAdminAuth } from './firebase-admin';
-import { enterAiRequest, currentAiUid } from './ai-request-context';
+import { enterAiRequest, currentAiUid, markAiAllowedBy, currentAiAllowReason } from './ai-request-context';
 
 const DOC_PATH = 'global_settings/ai_kill_switch';
 
@@ -234,14 +234,23 @@ export async function aiKillSwitchResponse(uid?: string): Promise<NextResponse |
   if (!state.disabled) return null;
 
   // 審査用デモアカウント等は通す
-  if (await isExemptUid(state, uid)) return null;
+  if (await isExemptUid(state, uid)) {
+    // 安全網（assertAiEnabled）が同じ結論を出せるよう、通した理由を文脈へ残す
+    markAiAllowedBy('exempt');
+    return null;
+  }
 
   if (state.allowPurchasedCredits && uid) {
     // 支払い済みの対価は履行する運用。購入済み残高がある人だけ通す
     try {
       const snap = await getAdminDb().doc(`account_subscriptions/${uid}`).get();
       const purchased = Number(snap.data()?.purchasedCredits ?? 0);
-      if (Number.isFinite(purchased) && purchased > 0) return null;
+      if (Number.isFinite(purchased) && purchased > 0) {
+        // ⚠️ ここを記録し忘れると、入口は通ったのに **openrouter 直前の安全網で throw** され、
+        // どこでも catch されないまま 500 になる（P147 で是正した実際の不具合）。
+        markAiAllowedBy('purchased');
+        return null;
+      }
     } catch (e) {
       // 判定できないときは通さない（止血が目的）
       console.error('[ai-kill-switch] 購入済み残高の確認に失敗', e);
@@ -270,7 +279,12 @@ export class AiDisabledError extends Error {
 export async function assertAiEnabled(): Promise<void> {
   const state = await getAiKillSwitch();
   if (!state.disabled) return;
-  // ルート入口で登録された実行者を見る。取れなければ除外は成立しない（＝止まる）
+  // 入口が通した理由を尊重する。**ここで Firestore を読み直さない**——
+  // AI 呼び出しのたびに追加の読み取りが増えるうえ、入口と別々に判定すると
+  // 今回の不具合（入口は通すのに安全網が落とす）が再発する。
+  // 印が無ければ「入口を通っていない」ので止まる＝ fail-closed は維持される。
+  if (currentAiAllowReason()) return;
+  // 入口を経由しないルートが増えたときの保険。取れなければ除外は成立しない（＝止まる）
   if (await isExemptUid(state, currentAiUid())) return;
   throw new AiDisabledError(state.message);
 }
