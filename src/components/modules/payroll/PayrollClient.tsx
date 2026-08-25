@@ -11,7 +11,7 @@ import { resolveShopIdState, SHOP_UNRESOLVED_TEXT, SHOP_NOT_FOUND_TEXT } from '@
 import { activeMembershipIds } from '@/lib/membership';
 import { describeFirestoreError } from '@/lib/firestore-error';
 import { Shell, Section, Empty, Eyebrow } from '@/components/modules/schedule/ScheduleClient';
-import { toMillis } from '@/lib/datetime';
+import { computeDraftPayroll } from '@/lib/payroll/draft';
 
 /**
  * 給与 — Noxa OS（実データ・閲覧）
@@ -25,19 +25,36 @@ type Period = { id: string; label: string; total: number; breakdown: { label: st
 
 
 // 当月の勤務(shifts)×自分の時給(seating_casts.hourlyWage)から見込み給与(基本給)を算出
+//
+// ⚠️ **時間に入らなかった勤務を黙って落とさない**（P153-PM23）。
+// 退勤打刻の無い勤務・`end <= start` の壊れた勤務は時間に計上できないが、旧実装は
+// **何も言わずに飛ばしていた**。オーナー側の確定画面には「打刻漏れ n 件」の警告が出るのに、
+// **本人が見る「見込み」だけ黙って少ない額**になっており、本人には減った理由が分からなかった。
+// 金額が絡む欠落は、欠落そのものより**気づく手がかりが無いこと**が問題
+// （yorulog が `DailyCloseView` で踏んだ「読めなかった行を黙って捨てる」と同じ形）。
 async function computeDraft(shopId: string, uid: string): Promise<Period | null> {
   const d = new Date();
   const ym = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
   try {
     const sh = await getDocs(query(collection(db, `shop_shops/${shopId}/shifts`), where('castUid', '==', uid)));
-    let mins = 0;
-    sh.forEach((doc) => { const x = doc.data(); const date = (x.date as string) ?? ''; if (!date.startsWith(ym)) return; const s = toMillis(x.startAt), e = toMillis(x.endAt); if (s && e && e > s) mins += (e - s) / 60000; });
-    if (mins <= 0) return null;
     const cw = await getDocs(query(collection(db, `shop_shops/${shopId}/seating_casts`), where('uid', '==', uid)));
     const wage = cw.empty ? 0 : ((cw.docs[0].data().hourlyWage as number) ?? 0);
-    const hours = mins / 60;
-    const base = Math.round(hours * wage);
-    return { id: `draft-${ym}`, label: `${ym.replace('-', '年')}月（見込み）`, total: base, status: '見込み', breakdown: [{ label: `基本給（勤務 ${hours.toFixed(1)}h × 時給 ¥${wage.toLocaleString('ja-JP')}）`, amount: base }] };
+    const { hours, base, staleOpens, minutes } = computeDraftPayroll(
+      sh.docs.map((doc) => doc.data() as { date?: unknown; startAt?: unknown; endAt?: unknown }),
+      ym,
+      wage,
+    );
+    // ⚠️ **全部が打刻漏れでも黙って消えない**。旧実装は分数 0 で null を返しており、
+    // 「見込み」カードごと出なくなる＝**今月は働いていない**ように見えていた
+    if (minutes <= 0 && staleOpens === 0) return null;
+    const breakdown = [{ label: `基本給（勤務 ${hours.toFixed(1)}h × 時給 ¥${wage.toLocaleString('ja-JP')}）`, amount: base }];
+    if (staleOpens > 0) {
+      breakdown.push({
+        label: `⚠ 退勤打刻の無い勤務 ${staleOpens} 件は時間に入っていません（勤怠画面で締めると反映されます）`,
+        amount: 0,
+      });
+    }
+    return { id: `draft-${ym}`, label: `${ym.replace('-', '年')}月（見込み）`, total: base, status: '見込み', breakdown };
   } catch { return null; }
 }
 
