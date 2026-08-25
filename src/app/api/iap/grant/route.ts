@@ -32,6 +32,9 @@ import { NextRequest, NextResponse } from 'next/server';
 import { verifyRequest, getAdminDb, AuthError } from '../../lib/firebase-admin';
 import { getIapProduct } from '@/lib/iap/products';
 import { verifyAppleJws, decodeAppleJwsPayload } from '@/lib/iap/verify-apple-jws';
+import {
+  readAppleEnvironment, normalizeClaimedEnvironment, environmentDisagrees, readJwsString,
+} from '@/lib/iap/transaction-facts';
 import { FieldValue } from 'firebase-admin/firestore';
 import { stampIrVersion } from '@/lib/ir-version';
 
@@ -42,7 +45,12 @@ interface GrantBody {
   signedTransactionJws: string;
   /** 購入された product ID（クライアント申告。最終的にはサーバが JWS から取り直す） */
   productId: string;
-  /** 'production' | 'sandbox' (iOS 側で判定) */
+  /**
+   * 'production' | 'sandbox'（iOS 側の判定）。
+   * ⚠️ **記録には使わない**。素性は JWS ペイロードの `environment` から取る
+   * （クライアント申告は偽れるうえ、後から素性を判断する根拠にならない）。
+   * 申告が JWS と食い違ったときの痕跡としてだけ残す。
+   */
   environment?: 'production' | 'sandbox';
 }
 
@@ -108,6 +116,18 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'bundleId が一致しません' }, { status: 400 });
     }
 
+    // 素性は Apple 由来の値で記録する。**付与の可否には使わない**——
+    // Sandbox を弾くと TestFlight と審査員が課金できなくなる（リジェクト要因）。
+    const jwsEnvironment = readAppleEnvironment(payload);
+    const claimedDisagrees = environmentDisagrees(jwsEnvironment, environment);
+    if (claimedDisagrees) {
+      // 黙って捨てない。出回っているクライアントの申告がずれていることに気づける唯一の手掛かり
+      console.warn(
+        `[iap/grant] environment がクライアント申告と食い違う txId=${transactionId} `
+        + `jws=${jwsEnvironment} claimed=${normalizeClaimedEnvironment(environment)}`,
+      );
+    }
+
     // 冪等性 + 付与
     const db = getAdminDb();
     const txRef = db.doc(`account_iap_transactions/${transactionId}`);
@@ -123,7 +143,16 @@ export async function POST(request: NextRequest) {
         productId,
         credits: product.credits,
         priceJpy: product.priceJpy,
-        environment: environment ?? 'unknown',
+        // **Apple 由来**の素性。クライアント申告は採らない（2026-08-25 の是正）
+        environment: jwsEnvironment,
+        // この `environment` がどれだけ信用できるか。署名検証が通っていなければ
+        // ペイロード自体が検証されていないので、環境の値も同じだけ弱い
+        environmentSource: jwsResult.verified ? 'jws' : 'jws-unverified',
+        // 申告と食い違ったときだけ痕跡を残す（一致しているときに残すと雑音になる）
+        ...(claimedDisagrees ? { environmentClaimed: normalizeClaimedEnvironment(environment) } : {}),
+        // 返金・再購入の突き合わせに要る。Apple 由来の値だけを保存する
+        originalTransactionId: readJwsString(payload, 'originalTransactionId'),
+        bundleId: readJwsString(payload, 'bundleId'),
         processedAt: FieldValue.serverTimestamp(),
         signedDateMs: payload.signedDate ?? null,
         // 署名検証済みか（本番は常に true。開発の decode-only 付与は false で痕跡を残す）

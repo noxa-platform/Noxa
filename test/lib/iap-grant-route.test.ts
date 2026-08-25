@@ -129,6 +129,80 @@ describe('iap/grant POST（購入クレジット付与の冪等・整合境界�
     expect((store[TX_PATH] as { uid?: string }).uid).toBe('u1');
   });
 
+  // ── 素性の記録（P146）─────────────────────────────
+  // 経緯: `environment` を **iOS の body から**保存していたため、本番の 4 件を
+  // 「実在する有料顧客」と読み違えかけた（全部 Sandbox だった）。素性は JWS から取る。
+  describe('素性は Apple 由来の値で記録する（クライアント申告を採らない）', () => {
+    const txOf = (store: Record<string, Record<string, unknown> | undefined>) =>
+      store[TX_PATH] as Record<string, unknown>;
+
+    it('JWS の environment を保存する（申告が production でも JWS が Sandbox なら sandbox）', async () => {
+      const { db, store } = makeDb();
+      mocks.getDb.mockReturnValue(db);
+      mocks.jws.mockReturnValue({ ok: true, payload: { ...OK_PAYLOAD, environment: 'Sandbox' } });
+
+      expect((await POST(req({ ...BASE, environment: 'production' }))).status).toBe(200);
+      expect(txOf(store).environment).toBe('sandbox');
+      expect(txOf(store).environmentSource).toBe('jws');
+      // 食い違いは消さずに残す（いつから申告値がずれていたかを後から追える唯一の手段）
+      expect(txOf(store).environmentClaimed).toBe('production');
+    });
+
+    it('一致しているときは環境の食い違い記録を残さない（雑音にしない）', async () => {
+      const { db, store } = makeDb();
+      mocks.getDb.mockReturnValue(db);
+      mocks.jws.mockReturnValue({ ok: true, payload: { ...OK_PAYLOAD, environment: 'Production' } });
+
+      expect((await POST(req({ ...BASE, environment: 'production' }))).status).toBe(200);
+      expect(txOf(store).environment).toBe('production');
+      expect('environmentClaimed' in txOf(store)).toBe(false);
+    });
+
+    it('JWS に environment が無ければ unknown（申告値で埋めない）', async () => {
+      const { db, store } = makeDb();
+      mocks.getDb.mockReturnValue(db);
+      mocks.jws.mockReturnValue({ ok: true, payload: OK_PAYLOAD });
+
+      expect((await POST(req({ ...BASE, environment: 'production' }))).status).toBe(200);
+      expect(txOf(store).environment).toBe('unknown');
+    });
+
+    it('署名未検証で通した場合は environmentSource でそれが分かる', async () => {
+      const { db, store } = makeDb();
+      mocks.getDb.mockReturnValue(db);
+      mocks.jws.mockReturnValue({ ok: false, reason: 'x5c' });
+      mocks.decode.mockReturnValue({ ...OK_PAYLOAD, environment: 'Sandbox' });
+
+      expect((await POST(req(BASE))).status).toBe(200);
+      expect(txOf(store).environmentSource).toBe('jws-unverified');
+      expect(txOf(store).jwsVerified).toBe(false);
+    });
+
+    it('返金突き合わせ用に originalTransactionId / bundleId を JWS から保存する', async () => {
+      const { db, store } = makeDb();
+      mocks.getDb.mockReturnValue(db);
+      mocks.jws.mockReturnValue({
+        ok: true,
+        payload: { ...OK_PAYLOAD, environment: 'Sandbox', originalTransactionId: 2000001172963469 },
+      });
+
+      expect((await POST(req(BASE))).status).toBe(200);
+      expect(txOf(store).originalTransactionId).toBe('2000001172963469'); // 桁落ちしない string
+      expect(txOf(store).bundleId).toBe('com.noxa.app');
+    });
+
+    // Sandbox を弾くと TestFlight と審査員が課金できなくなる（リジェクト要因）。
+    // 素性は「記録するだけ」で、付与の可否には一切効かせない
+    it('Sandbox でも付与は通常どおり行う（素性は付与を止めない）', async () => {
+      const { db, store } = makeDb({ [SUB_PATH]: { purchasedCredits: 0 } });
+      mocks.getDb.mockReturnValue(db);
+      mocks.jws.mockReturnValue({ ok: true, payload: { ...OK_PAYLOAD, environment: 'Sandbox' } });
+
+      expect((await POST(req({ ...BASE, environment: 'sandbox' }))).status).toBe(200);
+      expect((store[SUB_PATH] as { purchasedCredits?: number }).purchasedCredits).toBe(100);
+    });
+  });
+
   it('🔁二重付与防止: 同一 transactionId が処理済みなら 409（クレジットを加算しない）', async () => {
     const { db, store } = makeDb({
       [TX_PATH]: { uid: 'u1', credits: 100 }, // 既に処理済み

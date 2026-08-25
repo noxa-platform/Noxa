@@ -118,6 +118,21 @@ describe('iap/google-play-grant POST（Android 購入クレジット付与の冪
     expect((store[TX_PATH] as { credits?: number }).credits).toBe(100);
   });
 
+  // P146: 素性（テスト購入かどうか）を記録する。iOS 側と同じ穴で、Android は
+  // これまで purchaseType を一切保存しておらず、後から本物の購入か判断できなかった。
+  it('検証 skip 経路では素性を unknown として残す（欠落を normal に倒さない）', async () => {
+    allowSkip();
+    const { db, store } = makeDb();
+    mocks.getDb.mockReturnValue(db);
+
+    expect((await POST(req(BASE))).status).toBe(200);
+    const tx = store[TX_PATH] as Record<string, unknown>;
+    // Play に問い合わせていない以上「通常購入」とは言えない。
+    // ここを normal にすると、検証を飛ばした付与が実購入として記録に残る
+    expect(tx.purchaseKind).toBe('unknown');
+    expect(tx.environmentSource).toBe('unverified');
+  });
+
   it('🔁二重付与防止: 同一 purchaseToken が処理済みなら 409（クレジットを加算しない）', async () => {
     allowSkip();
     const { db, store } = makeDb({

@@ -25,6 +25,7 @@ import { verifyRequest, getAdminDb, AuthError } from '../../lib/firebase-admin';
 import { getIapProductByAndroidId } from '@/lib/iap/products';
 import { FieldValue } from 'firebase-admin/firestore';
 import { stampIrVersion } from '@/lib/ir-version';
+import { readPlayPurchaseKind } from '@/lib/iap/transaction-facts';
 
 interface GrantBody {
   /** Android アプリの packageName（例: jp.egshugy.yorulog） */
@@ -40,12 +41,20 @@ interface GrantBody {
 interface VerifyResult {
   ok: boolean;
   reason?: string;
+  /** Play Developer API に実際に問い合わせて答えが返ったか（検証 skip と区別する） */
+  verified?: boolean;
   /** purchaseState: 0=PURCHASED, 1=CANCELED, 2=PENDING（Play Developer API 規約） */
   purchaseState?: number;
   /** consumption state: 0=YET_TO_BE_CONSUMED, 1=CONSUMED */
   consumptionState?: number;
   /** acknowledged: 0=NOT_ACKNOWLEDGED, 1=ACKNOWLEDGED */
   acknowledgementState?: number;
+  /**
+   * purchaseType: 0=Test（ライセンステスター）/ 1=Promo / 2=Rewarded。
+   * **通常購入では項目自体が返らない**のが Play の仕様＝欠落が実購入。
+   * Apple の `environment: Sandbox` に当たる値で、これまで一切記録していなかった。
+   */
+  purchaseType?: number;
 }
 
 /**
@@ -66,7 +75,8 @@ async function verifyGooglePlayPurchase(
     // 絶対に skip しない（誤設定による金銭事故を構造的に防ぐ）。
     if (process.env.IAP_ALLOW_UNVERIFIED === 'true' && process.env.NODE_ENV !== 'production') {
       console.warn('verifyGooglePlayPurchase: IAP_ALLOW_UNVERIFIED=true のため検証skip（非本番のみ有効）');
-      return { ok: true, purchaseState: 0 };
+      // 検証を飛ばした以上「通常購入」とは言えない。verified: false で区別する
+      return { ok: true, verified: false, purchaseState: 0 };
     }
     return { ok: false, reason: 'Service Account 未設定（検証不可）' };
   }
@@ -86,9 +96,11 @@ async function verifyGooglePlayPurchase(
     });
     return {
       ok: data.purchaseState === 0,
+      verified: true,
       purchaseState: data.purchaseState ?? undefined,
       consumptionState: data.consumptionState ?? undefined,
       acknowledgementState: data.acknowledgementState ?? undefined,
+      purchaseType: data.purchaseType ?? undefined,
       ...(data.purchaseState !== 0 ? { reason: `purchaseState=${data.purchaseState}` } : {}),
     };
   } catch (e) {
@@ -159,6 +171,9 @@ export async function POST(request: NextRequest) {
         { status: 400 },
       );
     }
+    // Play が実際に答えたときだけ素性を断定できる。検証 skip 時の「項目が無い」は
+    // 「通常購入」ではなく**分からない**（欠落を肯定の根拠にしない）
+    const verifiedByPlay = verify.verified === true;
     if (verify.purchaseState !== undefined && verify.purchaseState !== 0) {
       // 1: CANCELED, 2: PENDING（保留中の家族承認など）
       return NextResponse.json(
@@ -189,6 +204,11 @@ export async function POST(request: NextRequest) {
         orderId: orderId ?? null,
         credits: product.credits,
         priceJpy: product.priceJpy,
+        // 素性（Play 由来）。テスト購入かどうかがこれまで記録に残っておらず、
+        // 後から「本物の購入か」を判断できなかった（iOS 側と同じ穴・2026-08-25 の是正）。
+        // **付与の可否には使わない**（テスト購入を弾くと審査とテスターが詰まる）
+        purchaseKind: verifiedByPlay ? readPlayPurchaseKind(verify.purchaseType) : 'unknown',
+        environmentSource: verifiedByPlay ? 'play-api' : 'unverified',
         processedAt: FieldValue.serverTimestamp(),
       }));
       tx.set(
