@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   parseRecordSchema, validateXMap, isAggregatable,
+  MAX_OPTIONS, MAX_ROLES, MAX_LABEL_LENGTH,
   FIELD_KEY_PATTERN, MAX_X_KEYS, MAX_STRING_LENGTH, MAX_TAGS, MAX_FIELDS, OPAQUE,
 } from '@/lib/record-engine/record-schema';
 
@@ -232,5 +233,124 @@ describe('isAggregatable — opaque と note は集計に出さない（§1.2 / 
   // 保持はするが集計には出さない。「集計できません」と明示するための判定
   it('スキーマに無い項目（未知）は集計しない', () => {
     expect(isAggregatable(undefined)).toBe(false);
+  });
+});
+
+
+// P154-PM3: yorulog の「**洗った範囲を『全部』と呼んでいた**」を受けた点検。
+// P153-PM26 で `limit` を全部洗ったつもりだったが、見ていたのは**取得の limit** だけで、
+// **スキーマ側の上限**は視野に入っていなかった。
+//
+// 上限で切ること自体は必要（doc が肥大すると全員の記録画面が開かなくなる）。
+// 悪いのは**切ったことを言わずに、切った後の姿を「その項目そのもの」の顔で出す**こと。
+// とくに `/api/record-engine/apply` は**読んだ姿をそのまま書き戻す**ので、
+// 黙って切ると**今回の適用と無関係な項目が恒久的に削られる**。
+describe('P154-PM3 スキーマ側の上限は「切った」ことを必ず言う', () => {
+  const base = { key: 'k1', type: 'text', label: 'ラベル' };
+
+  it('選択肢が上限を超えたら trimmed に載せる（採用はする）', () => {
+    const options = Array.from({ length: MAX_OPTIONS + 7 }, (_, i) => `o${i}`);
+    const { schema, rejected, trimmed } = parseRecordSchema({ fields: [{ ...base, type: 'select', options }] });
+    expect(schema.fields[0].options).toHaveLength(MAX_OPTIONS); // 切ること自体は正しい
+    expect(rejected).toEqual([]);                               // **拒否ではない**（採用している）
+    expect(trimmed).toHaveLength(1);
+    expect(trimmed[0].key).toBe('k1');
+    expect(trimmed[0].reason).toContain('7');                   // 何個落としたかが判る
+  });
+
+  it('役割が上限を超えたら trimmed に載せる（誰に出すかが変わる）', () => {
+    const roles = Array.from({ length: MAX_ROLES + 2 }, (_, i) => `r${i}`);
+    const { schema, trimmed } = parseRecordSchema({ fields: [{ ...base, roles }] });
+    expect(schema.fields[0].roles).toHaveLength(MAX_ROLES);
+    expect(trimmed.some((t) => t.reason.includes('役割'))).toBe(true);
+  });
+
+  it('表示名・参照先の切り詰めも言う（参照先は切ると別のものを指す）', () => {
+    const long = 'あ'.repeat(MAX_LABEL_LENGTH + 5);
+    const { schema, trimmed } = parseRecordSchema({
+      fields: [{ key: 'k1', type: 'ref', label: long, target: long }],
+    });
+    expect(schema.fields[0].label).toHaveLength(MAX_LABEL_LENGTH);
+    expect(schema.fields[0].target).toHaveLength(MAX_LABEL_LENGTH);
+    expect(trimmed).toHaveLength(2);
+  });
+
+  it('上限内なら trimmed は空（0 件と「欄が無い」を混同しない）', () => {
+    const { trimmed } = parseRecordSchema({
+      fields: [{ ...base, type: 'select', options: ['a', 'b'], roles: ['cast'] }],
+    });
+    expect(trimmed).toEqual([]);
+  });
+
+  it('拒否された項目は trimmed に混ざらない（別勘定＝検算が壊れない）', () => {
+    const { schema, rejected, trimmed } = parseRecordSchema({
+      fields: [
+        { key: '9bad', type: 'text', label: 'x' },                                   // キーが不正＝拒否
+        { ...base, type: 'select', options: Array.from({ length: MAX_OPTIONS + 1 }, (_, i) => `o${i}`) },
+      ],
+    });
+    expect(schema.fields).toHaveLength(1);
+    expect(rejected).toHaveLength(1);
+    expect(trimmed).toHaveLength(1);
+    expect(rejected[0].key).not.toBe(trimmed[0].key);
+  });
+
+  // ここが本丸。apply は読んだ姿を書き戻すので、黙って切ると**次の保存で本当に消える**
+  it('読み→書き戻しの往復で選択肢が恒久的に減ることを固定する', () => {
+    const stored = {
+      fields: [{ ...base, type: 'select', options: Array.from({ length: MAX_OPTIONS + 3 }, (_, i) => `o${i}`) }],
+    };
+    const first = parseRecordSchema(stored);
+    expect(first.trimmed).toHaveLength(1); // 1 回目は「削った」と言える
+
+    // apply が書き戻すのはこの `schema.fields`。それを読み直すと…
+    const second = parseRecordSchema({ fields: first.schema.fields });
+    expect(second.schema.fields[0].options).toHaveLength(MAX_OPTIONS);
+    // ⚠️ **2 回目はもう何も言わない**——既に消えているので「削った」ことすら判らなくなる。
+    // だからこそ 1 回目で言う必要がある（言い逃すと二度と気づけない種類の欠損）
+    expect(second.trimmed).toEqual([]);
+  });
+});
+
+
+// 値の側（書き込み経路）。ここは黙って切ると**利用者が入れた文字がその場で消える**
+describe('P154-PM3 記録の値も「切った」ことを必ず言う', () => {
+  it('長すぎる文字列は保存しつつ trimmed に載せる', () => {
+    const long = 'あ'.repeat(MAX_STRING_LENGTH + 12);
+    const { x, rejected, trimmed } = validateXMap({ memo: long });
+    expect((x.memo as string).length).toBe(MAX_STRING_LENGTH);
+    expect(rejected).toEqual([]); // **拒否ではない**（保存はしている）
+    expect(trimmed).toHaveLength(1);
+    expect(trimmed[0].key).toBe('memo');
+    expect(trimmed[0].reason).toContain('12');
+  });
+
+  it('タグが上限を超えたら落とした個数を言う', () => {
+    const tags = Array.from({ length: MAX_TAGS + 4 }, (_, i) => `t${i}`);
+    const { x, trimmed } = validateXMap({ tags });
+    expect(x.tags).toHaveLength(MAX_TAGS);
+    expect(trimmed).toHaveLength(1);
+    expect(trimmed[0].reason).toContain('4');
+  });
+
+  it('タグの件数と各要素の長さは別々に言う（理由を畳まない）', () => {
+    const tags = [
+      ...Array.from({ length: MAX_TAGS }, () => 'あ'.repeat(MAX_STRING_LENGTH + 1)),
+      't-extra',
+    ];
+    const { trimmed } = validateXMap({ tags });
+    expect(trimmed).toHaveLength(2); // 「1 個落とした」と「N 個を切った」
+  });
+
+  it('上限内なら trimmed は空', () => {
+    const { trimmed } = validateXMap({ memo: 'ふつうの長さ', tags: ['a', 'b'], amount: 1200 });
+    expect(trimmed).toEqual([]);
+  });
+
+  it('文字列以外が混ざった配列は従来どおり拒否（切り詰めに化けない）', () => {
+    const { x, rejected, trimmed } = validateXMap({ tags: ['a', 3] });
+    expect(x.tags).toBeUndefined();
+    expect(rejected).toHaveLength(1);
+    expect(trimmed).toEqual([]);
   });
 });

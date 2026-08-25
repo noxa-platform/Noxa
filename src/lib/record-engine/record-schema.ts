@@ -56,6 +56,13 @@
 //      （どちらも「正しい形の差分」として届くため）。Web で入力 UI を作るときも同じ手当てが要る。
 // 6. Firestore の作法: **`update` のフィールドパスはドットで階層になるが、`set` ではキー名そのもの**。
 //    新規作成だけは `x` を丸ごと渡してよい（消える先が無い）。既存への追記は必ず `update`。
+// 7. **`trimmed` を握り潰さない**（2026-08-26・P154-PM3）。`validateXMap` / `parseRecordSchema` は
+//    上限を超えた値を**保存したうえで切り詰める**（doc の肥大を防ぐため切ること自体は必要）。
+//    ⚠️ **切ったことを言わずに保存すると、利用者が入れた文字がその場で黙って消える。**
+//    しかも `parseRecordSchema` の側は**読んだ姿をそのまま書き戻す**経路があるため、
+//    **今回の操作と無関係な項目が恒久的に削られる**（`/api/record-engine/apply`）。
+//    切ったことを言えるのは**その 1 回だけ**で、次に読み直したときにはもう「切られた形」が
+//    正常な姿に見える＝**言い逃すと二度と気づけない**。返ってきた `trimmed` は必ず画面に出す。
 import { readIrVersion, IR_VERSION_LEGACY } from '@/lib/ir-version';
 
 /** 値の型。§1.2 の 10 種 + 未知 1（`opaque`）。**未知を拒否せず opaque で保持する** */
@@ -83,6 +90,13 @@ export const MAX_STRING_LENGTH = 2000;
 export const MAX_TAGS = 30;
 /** スキーマに定義できる項目数の上限 */
 export const MAX_FIELDS = 200;
+
+/** 表示名・参照先の最大長 */
+export const MAX_LABEL_LENGTH = 60;
+/** 1 項目に指定できる役割の数 */
+export const MAX_ROLES = 10;
+/** 1 項目に持てる選択肢の数 */
+export const MAX_OPTIONS = 100;
 
 export interface FieldDef {
   /** 不変キー。表示名を変えてもこれは変わらない */
@@ -120,8 +134,13 @@ export interface RejectedField {
  * スキーマ doc を読む。**壊れた項目は落とすが、doc 全体を捨てない**——
  * 1 項目の不正で店の全項目が消えると、記録画面が丸ごと使えなくなる。
  */
-export function parseRecordSchema(raw: unknown): { schema: RecordSchema; rejected: RejectedField[] } {
+export function parseRecordSchema(
+  raw: unknown,
+): { schema: RecordSchema; rejected: RejectedField[]; trimmed: RejectedField[] } {
   const rejected: RejectedField[] = [];
+  // 「採用したが**中身を削った**」もの。`rejected`（採用しなかった）とは別勘定にする——
+  // 混ぜると「選んだ数 = 足した数 + 引かなかった数」の検算（P153-PM25）が合わなくなる
+  const trimmed: RejectedField[] = [];
   const fields: FieldDef[] = [];
   const seen = new Set<string>();
   const list = (raw as { fields?: unknown } | null)?.fields;
@@ -133,49 +152,83 @@ export function parseRecordSchema(raw: unknown): { schema: RecordSchema; rejecte
       }
       const parsed = parseFieldDef(item);
       if ('reason' in parsed) { rejected.push(parsed); continue; }
-      if (seen.has(parsed.key)) {
-        rejected.push({ key: parsed.key, reason: 'キーが重複しています' });
+      if (seen.has(parsed.def.key)) {
+        rejected.push({ key: parsed.def.key, reason: 'キーが重複しています' });
         continue;
       }
-      seen.add(parsed.key);
-      fields.push(parsed);
+      seen.add(parsed.def.key);
+      fields.push(parsed.def);
+      trimmed.push(...parsed.trimmed);
     }
   }
   const irVersion = readIrVersion(raw);
   return {
     schema: { fields, ...(irVersion > IR_VERSION_LEGACY ? { ir_version: irVersion } : {}) },
     rejected,
+    trimmed,
   };
 }
 
-function parseFieldDef(raw: unknown): FieldDef | RejectedField {
+/**
+ * 1 項目を読む。**採用したうえで中身を削った**ときは `trimmed` に理由を載せる（P154-PM3）。
+ *
+ * ⚠️ 上限で切ること自体は必要（doc が肥大すると全員の記録画面が開かなくなる）。
+ * 悪いのは**切ったことを言わずに、切った後の姿を「その項目そのもの」の顔で出す**こと。
+ * とくに `apply` は**読んだ姿をそのまま書き戻す**ので、黙って切ると
+ * **無関係な適用 1 回で恒久的に消える**（yorulog の `paidSoFar` と同じ形——
+ * 正規化して保存し直すのに、正規化した事実を誰にも伝えていない）。
+ */
+function parseFieldDef(raw: unknown): { def: FieldDef; trimmed: RejectedField[] } | RejectedField {
   if (!raw || typeof raw !== 'object') return { key: '', reason: '項目の形が不正です' };
   const o = raw as Record<string, unknown>;
   const key = typeof o.key === 'string' ? o.key : '';
   if (!FIELD_KEY_PATTERN.test(key)) {
     return { key, reason: 'キーは英小文字で始まり、英小文字・数字・_ のみ 40 字までです' };
   }
-  const label = typeof o.label === 'string' && o.label.trim() ? o.label.trim().slice(0, 60) : key;
+  const trimmed: RejectedField[] = [];
+  const rawLabel = typeof o.label === 'string' ? o.label.trim() : '';
+  if (rawLabel.length > MAX_LABEL_LENGTH) {
+    trimmed.push({ key, reason: `表示名が ${MAX_LABEL_LENGTH} 字を超えたため切り詰めました` });
+  }
+  const label = rawLabel ? rawLabel.slice(0, MAX_LABEL_LENGTH) : key;
   // **知らない型は拒否せず opaque にする**（§1.6）。拒否すると、新しい型を使う
   // 別クライアントの記録がこちらで丸ごと読めなくなる
   const rawType = typeof o.type === 'string' ? o.type : '';
   const type: FieldType | typeof OPAQUE =
     (FIELD_TYPES as readonly string[]).includes(rawType) ? (rawType as FieldType) : OPAQUE;
-  const roles = Array.isArray(o.roles)
-    ? o.roles.filter((r): r is string => typeof r === 'string' && r.trim().length > 0).slice(0, 10)
+  const allRoles = Array.isArray(o.roles)
+    ? o.roles.filter((r): r is string => typeof r === 'string' && r.trim().length > 0)
     : [];
+  if (allRoles.length > MAX_ROLES) {
+    // ⚠️ `roles` は**その項目を誰に出すか**。黙って切ると、11 人目以降の役割の人だけ
+    // 項目が消える——本人にも設定した人にも理由が見えない
+    trimmed.push({ key, reason: `対象の役割が ${MAX_ROLES} 個を超えたため ${allRoles.length - MAX_ROLES} 個を落としました` });
+  }
+  const roles = allRoles.slice(0, MAX_ROLES);
   const def: FieldDef = { key, type, label, roles };
-  const options = Array.isArray(o.options)
-    ? o.options.filter((v): v is string => typeof v === 'string' && v.trim().length > 0).slice(0, 100)
+  const allOptions = Array.isArray(o.options)
+    ? o.options.filter((v): v is string => typeof v === 'string' && v.trim().length > 0)
     : undefined;
+  if (allOptions && allOptions.length > MAX_OPTIONS) {
+    // ⚠️ 選択肢が消えると、**過去にその選択肢で入力された記録が「知らない値」になる**
+    trimmed.push({ key, reason: `選択肢が ${MAX_OPTIONS} 個を超えたため ${allOptions.length - MAX_OPTIONS} 個を落としました` });
+  }
+  const options = allOptions?.slice(0, MAX_OPTIONS);
   if (options && options.length) def.options = options;
   if (o.direction === 'in' || o.direction === 'out' || o.direction === 'discount') def.direction = o.direction;
   if (typeof o.scale === 'number' && Number.isFinite(o.scale) && o.scale >= 2 && o.scale <= 100) {
     def.scale = Math.floor(o.scale);
   }
-  if (typeof o.target === 'string' && o.target.trim()) def.target = o.target.trim().slice(0, 60);
+  if (typeof o.target === 'string' && o.target.trim()) {
+    const t = o.target.trim();
+    if (t.length > MAX_LABEL_LENGTH) {
+      // 参照先が切り詰められると**別のものを指す**（黙って切るのが一番まずい種類）
+      trimmed.push({ key, reason: `参照先が ${MAX_LABEL_LENGTH} 字を超えたため切り詰めました` });
+    }
+    def.target = t.slice(0, MAX_LABEL_LENGTH);
+  }
   if (o.scope === 'self' || o.scope === 'shop' || o.scope === 'org' || o.scope === 'public') def.scope = o.scope;
-  return def;
+  return { def, trimmed };
 }
 
 // ── 記録側（`x` マップ）の検証 ─────────────────────────
@@ -184,6 +237,11 @@ export interface ValidateXResult {
   /** 保存してよい形にした `x`。**未知キーも残す**（§1.6） */
   x: Record<string, unknown>;
   rejected: RejectedField[];
+  /**
+   * **保存はしたが中身を削った**もの（P154-PM3）。`rejected`（保存しなかった）とは別勘定。
+   * ⚠️ ここは書き込み経路なので、黙って切ると**利用者が入れた文字がその場で消える**。
+   */
+  trimmed: RejectedField[];
 }
 
 /**
@@ -198,8 +256,9 @@ export interface ValidateXResult {
  */
 export function validateXMap(raw: unknown, schema?: RecordSchema): ValidateXResult {
   const rejected: RejectedField[] = [];
+  const trimmed: RejectedField[] = [];
   const x: Record<string, unknown> = {};
-  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return { x, rejected };
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return { x, rejected, trimmed };
   const byKey = new Map((schema?.fields ?? []).map((f) => [f.key, f]));
 
   for (const [key, value] of Object.entries(raw as Record<string, unknown>)) {
@@ -214,12 +273,21 @@ export function validateXMap(raw: unknown, schema?: RecordSchema): ValidateXResu
     }
     const checked = checkValue(value, byKey.get(key));
     if ('reason' in checked) { rejected.push({ key, reason: checked.reason }); continue; }
+    for (const reason of checked.trimmed ?? []) trimmed.push({ key, reason });
     x[key] = checked.value;
   }
-  return { x, rejected };
+  return { x, rejected, trimmed };
 }
 
-function checkValue(value: unknown, def: FieldDef | undefined): { value: unknown } | { reason: string } {
+/**
+ * 1 つの値を検証する。**保存したうえで中身を削った**ときは `trimmed` に理由を載せる。
+ * 上限で切ること自体は必要だが、**切ったことを言わずに保存すると、利用者が入れた文字が
+ * その場で黙って消える**（P154-PM3）。
+ */
+function checkValue(
+  value: unknown,
+  def: FieldDef | undefined,
+): { value: unknown; trimmed?: string[] } | { reason: string } {
   if (value === null || value === undefined) return { value: null };
 
   if (typeof value === 'number') {
@@ -230,15 +298,31 @@ function checkValue(value: unknown, def: FieldDef | undefined): { value: unknown
   }
   if (typeof value === 'boolean') return { value };
   if (typeof value === 'string') {
-    return { value: value.length > MAX_STRING_LENGTH ? value.slice(0, MAX_STRING_LENGTH) : value };
+    if (value.length > MAX_STRING_LENGTH) {
+      return {
+        value: value.slice(0, MAX_STRING_LENGTH),
+        trimmed: [`${MAX_STRING_LENGTH} 字を超えたため ${value.length - MAX_STRING_LENGTH} 字を切りました`],
+      };
+    }
+    return { value };
   }
   if (Array.isArray(value)) {
     // `tags` 想定。要素は文字列に限る（入れ子の配列/マップは集計不能で、深さの上限も要る）
-    const items = value.filter((v): v is string => typeof v === 'string').slice(0, MAX_TAGS);
-    if (items.length !== value.length && value.some((v) => typeof v !== 'string')) {
+    const strings = value.filter((v): v is string => typeof v === 'string');
+    if (strings.length !== value.length) {
       return { reason: '配列に文字列以外が含まれています' };
     }
-    return { value: items.map((v) => (v.length > MAX_STRING_LENGTH ? v.slice(0, MAX_STRING_LENGTH) : v)) };
+    const notes: string[] = [];
+    if (strings.length > MAX_TAGS) {
+      notes.push(`${MAX_TAGS} 個を超えたため ${strings.length - MAX_TAGS} 個を落としました`);
+    }
+    const items = strings.slice(0, MAX_TAGS);
+    const longs = items.filter((v) => v.length > MAX_STRING_LENGTH).length;
+    if (longs > 0) notes.push(`${longs} 個の値が ${MAX_STRING_LENGTH} 字を超えたため切りました`);
+    return {
+      value: items.map((v) => (v.length > MAX_STRING_LENGTH ? v.slice(0, MAX_STRING_LENGTH) : v)),
+      ...(notes.length ? { trimmed: notes } : {}),
+    };
   }
   if (typeof value === 'object') {
     // `period`（start / end）だけは 1 段のマップを許す。それ以外の入れ子は許さない——

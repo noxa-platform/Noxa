@@ -59,21 +59,24 @@ export async function POST(request: NextRequest) {
       const snap = await tx.get(schemaRef);
       const data = snap.exists ? snap.data() ?? {} : {};
       // **サーバで読み直した現行**を土台にする（クライアントの姿は使わない）
-      const { schema: current } = parseRecordSchema(data);
+      // ⚠️ `trimmed` は「読むときに中身を削った既存項目」。ここは**読んだ姿をそのまま
+      // 書き戻す**ので、黙っていると**今回の適用と無関係な項目が恒久的に削られる**
+      // （選択肢 101 個目以降・役割 11 個目以降など）。必ず呼び出し元まで運ぶ（P154-PM3）。
+      const { schema: current, trimmed } = parseRecordSchema(data);
       const { derivations: currentDerivations } = parseStoredDerivations(data.derivations);
 
       // 送られてきたパックも検証を通す。**生成 API を経由せず直接叩かれても、
       // 壊れた式や不正なキーは入らない**（route ごとに守りを重ねる）
       const validated = validateRulePack(body.pack, current, currentDerivations.map((d) => d.key));
       if (validated.accepted === 0) {
-        return { ok: false as const, rejected: validated.rejected };
+        return { ok: false as const, rejected: validated.rejected, trimmed };
       }
 
       const applied = applyRulePack(current, currentDerivations, validated.pack, { token, now, selectedKeys });
       if (applied.receipt.fields.length === 0 && applied.receipt.derivations.length === 0) {
         // 選ばれたものが全部「適用時点で既にあった」場合。**控えを空で保存しない**
         // （空の控えが残ると、次の取り消しが何も引かずに成功したように見える）
-        return { ok: false as const, rejected: [...validated.rejected, ...applied.skipped] };
+        return { ok: false as const, rejected: [...validated.rejected, ...applied.skipped], trimmed };
       }
 
       const patch = {
@@ -97,13 +100,21 @@ export async function POST(request: NextRequest) {
         fields: applied.receipt.fields,
         derivations: applied.receipt.derivations,
       }));
-      return { ok: true as const, applied, rejected: validated.rejected };
+      return { ok: true as const, applied, rejected: validated.rejected, trimmed };
     });
 
+    if (result.trimmed.length > 0) {
+      // 「今回足したもの」ではなく「既にあったものが削られた」ので、運営が後から追える形で残す
+      console.warn(
+        '[api/record-engine/apply] 既存項目の中身を削って書き戻しました',
+        JSON.stringify(result.trimmed),
+      );
+    }
     if (!result.ok) {
       return NextResponse.json({
         error: '適用できる項目がありませんでした',
         rejected: result.rejected,
+        trimmed: result.trimmed,
       }, { status: 409 });
     }
 
@@ -118,6 +129,9 @@ export async function POST(request: NextRequest) {
       },
       skipped: result.applied.skipped,
       rejected: result.rejected,
+      // 今回の適用とは無関係に、**既存項目が読み込みで削られた**もの。
+      // 空配列でも必ず載せる（欄が無いのと 0 件は別のこと）
+      trimmed: result.trimmed,
     });
   } catch (error) {
     if (error instanceof AuthError) {
