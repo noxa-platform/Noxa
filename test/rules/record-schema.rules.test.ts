@@ -7,6 +7,8 @@
 // ⚠️ **rules で守れるのはここまで**。マップのキーを 1 つずつ検査できない（繰り返しが書けない）
 // ため、**キー名の形も値の型も rules では検査できない**。それは
 // `src/lib/record-engine/record-schema.ts` が唯一の番人で、書き手は全員そこを通す約束。
+// ⚠️ **番人なのは*値*についてだけ**（P153-PM3）。差分の組み立て方——とくに「消す」という
+// 指示——は検証関数を構造的に通らないので、rules でも検証関数でも捕まえられない。
 // この非対称は意図的なので、テストにも「rules では落ちない」ことを書いて残す。
 import { describe, it, beforeAll, afterAll } from 'vitest';
 import { readFileSync } from 'node:fs';
@@ -123,7 +125,7 @@ describe('記録側の `x` はキー数だけ縛る', () => {
 
 // ここは「守れない」ことを明示的に残すためのテスト。挙動が変わったら気づけるようにする。
 // これらを rules で落とせると誤解したまま検証関数を外すと、そのまま素通りする。
-describe('rules では落ちないもの（検証関数が唯一の番人であることの記録）', () => {
+describe('rules では落ちないもの（*値*の番人は検証関数だけ、という記録）', () => {
   it('キー名の形は rules では検査できない（繰り返しが書けないため）', async () => {
     await assertSucceeds(setDoc(doc(as(CAST), `shop_shops/${SHOP}/sales/rs_bad1`), {
       amount: 1, x: { 'ボトル本数': 3, 'A-B': 1 }, // 検証関数なら弾く形
