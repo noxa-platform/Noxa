@@ -102,6 +102,20 @@ describe('ai/tags POST（自動タグ付け・手動 reserve/refund 境界）', 
     expect(mocks.gen.mock.calls.at(-1)![0] as string).toContain('[同伴: 場所不明]');
   });
 
+  // ⚠️ **「0 円と入れた」と「未入力」を混ぜない**（P153-PM19）。0 は「ゼロという測定結果」
+  // （相手の奢り・費用なし）で、無いこととは違う。未入力はクライアントがキーごと落として送る。
+  it('金額 0 は「0円」として届く（未入力と同じ扱いにしない）', async () => {
+    await POST(req({ customerName: 'A', logs: [{ type: '来店', withDouhan: true, douhanPlace: '和食', douhanAmount: 0 }] }));
+    expect(mocks.gen.mock.calls.at(-1)![0] as string).toContain('[同伴: 和食 0円]');
+  });
+
+  it('金額キーが無ければ金額を書かない（未入力は未入力のまま）', async () => {
+    await POST(req({ customerName: 'A', logs: [{ type: '来店', withDouhan: true, douhanPlace: '和食' }] }));
+    const prompt = mocks.gen.mock.calls.at(-1)![0] as string;
+    expect(prompt).toContain('[同伴: 和食]');
+    expect(prompt).not.toContain('円');
+  });
+
   it('同伴の場所に書かれた電話番号もマスクされる（組み立て後にマスクする形を崩さない）', async () => {
     await POST(req({
       customerName: 'A',

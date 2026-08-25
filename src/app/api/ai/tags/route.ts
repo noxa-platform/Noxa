@@ -40,18 +40,22 @@ export async function POST(request: NextRequest) {
     // 「和食派」「同伴常連」のようなタグは、まさにここからしか出ない。
     // ⚠️ 記録が無ければ何も足さないのでプロンプトは 1 文字も増えない（P143 の圧縮を維持）。
     // ⚠️ マスクは**組み立て後の文字列**に掛けるので、場所名を足しても掛かり方は変わらない。
-    const outingPart = (l: Record<string, unknown>, on: unknown, place: unknown, amount: unknown, label: string) => {
+    // ⚠️ **「0 円と入れた」と「未入力」を混ぜない**（P153-PM19）。当初は `amount > 0` で
+    // 絞っており、利用者が 0 と入力した同伴（相手の奢り・費用なし）が**未入力と同じ扱い**で
+    // 消えていた。0 は「ゼロという測定結果」で、無いこととは違う。
+    // 未入力はクライアントがキーごと落として送る（＝ここへは来ない）ので、
+    // **数値として届いた値はそのまま出す**。
+    const outingPart = (on: unknown, place: unknown, amount: unknown, label: string) => {
       if (!on) return '';
-      void l;
       const where = typeof place === 'string' && place.trim() ? place : '場所不明';
-      const yen = typeof amount === 'number' && Number.isFinite(amount) && amount > 0 ? ` ${amount}円` : '';
+      const yen = typeof amount === 'number' && Number.isFinite(amount) ? ` ${amount}円` : '';
       return ` [${label}: ${where}${yen}]`;
     };
     const logsContext = Array.isArray(logs)
       ? maskContactInfo(logs.map((l: Record<string, unknown>) =>
           `${l.type}: ${l.memo || ''} (場所: ${l.place || '不明'})`
-          + outingPart(l, l.withDouhan, l.douhanPlace, l.douhanAmount, '同伴')
-          + outingPart(l, l.withAfter, l.afterPlace, l.afterAmount, 'アフター'),
+          + outingPart(l.withDouhan, l.douhanPlace, l.douhanAmount, '同伴')
+          + outingPart(l.withAfter, l.afterPlace, l.afterAmount, 'アフター'),
         ).join('\n'))
       : 'ログなし';
 

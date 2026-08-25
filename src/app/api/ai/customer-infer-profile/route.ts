@@ -120,11 +120,14 @@ export async function POST(request: NextRequest) {
         const parts: string[] = [`#${i + 1} ${l.type || 'other'}`];
         if (l.visitType) parts.push(`visitType=${l.visitType}`);
         if (l.place) parts.push(`場所=${l.place}`);
-        if (l.salesAmount) parts.push(`売上=${l.salesAmount}`);
+        // ⚠️ **0 と未入力を混ぜない**（P153-PM19）。旧実装は truthy 判定で、
+        // **売上 0 の来店（顔を出しただけ・奢られた）が「売上の記録が無い」と同じ扱い**で
+        // 消えていた。人物像の推定では「来たのに 0」は意味のある信号。
+        if (Number.isFinite(l.salesAmount)) parts.push(`売上=${l.salesAmount}`);
         // 同伴・アフターは**場所と金額まで**渡す（P153-PM18）。旗だけだと
         // 「同伴した」しか伝わらず、どこへ行ったか・いくら使ったかが助言に効かない
-        if (l.withDouhan) parts.push(`同伴${l.douhanPlace ? `=${l.douhanPlace}` : ''}${l.douhanAmount ? `(${l.douhanAmount}円)` : ''}`);
-        if (l.withAfter) parts.push(`アフター${l.afterPlace ? `=${l.afterPlace}` : ''}${l.afterAmount ? `(${l.afterAmount}円)` : ''}`);
+        if (l.withDouhan) parts.push(`同伴${l.douhanPlace ? `=${l.douhanPlace}` : ''}${Number.isFinite(l.douhanAmount) ? `(${l.douhanAmount}円)` : ''}`);
+        if (l.withAfter) parts.push(`アフター${l.afterPlace ? `=${l.afterPlace}` : ''}${Number.isFinite(l.afterAmount) ? `(${l.afterAmount}円)` : ''}`);
         if (l.giftGiven) parts.push(`贈った=${l.giftGiven}`);
         if (l.giftReceived) parts.push(`貰った=${l.giftReceived}`);
         if (l.rating != null) parts.push(`★${l.rating}`);
