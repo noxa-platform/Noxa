@@ -38,6 +38,9 @@ async function getCustomerContext(ctx: AccessContext, customerId: string): Promi
         place: ld.place || '',
         date: dt ? dt.toISOString().split('T')[0] : '不明',
         salesAmount: ld.salesAmount || 0,
+        // ⚠️ 同伴・アフターは `type` に出ない（来店ログのサブアクション）。P153-PM17
+        ...(ld.withDouhan ? { douhan: { place: ld.douhanPlace || '', amount: ld.douhanAmount || 0 } } : {}),
+        ...(ld.withAfter ? { after: { place: ld.afterPlace || '', amount: ld.afterAmount || 0 } } : {}),
       };
     });
 

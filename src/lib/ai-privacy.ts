@@ -24,7 +24,17 @@ export const AI_CUSTOMER_FIELDS = [
 ] as const;
 
 /** 来店ログから AI に渡してよいフィールド */
-export const AI_LOG_FIELDS = ['type', 'date', 'datetime', 'salesAmount', 'memo', 'note', 'countAsGroup'] as const;
+// ⚠️ **同伴・アフターは `type` に出ない**（P153-PM17）。Web / iOS とも来店ログの
+// サブアクションとして `withDouhan` / `withAfter` のフラグ + 専用の場所・金額で保存するため、
+// `type` は `visit` のまま。ここに入れないと、**利用者が入れた同伴の場所と金額が AI に
+// 1 つも届かず**、店内の `salesAmount` だけを見て助言することになる
+// （「同伴どこ行った？」に答えられない・同伴代が売上に化ける）。
+// `pickForAi` は undefined / null / '' を落とすので、無い記録では 1 文字も増えない。
+export const AI_LOG_FIELDS = [
+  'type', 'date', 'datetime', 'salesAmount', 'memo', 'note', 'countAsGroup',
+  'withDouhan', 'douhanPlace', 'douhanAmount',
+  'withAfter', 'afterPlace', 'afterAmount',
+] as const;
 
 // 日本の電話番号（0始まり10-11桁・+81 形式）。区切りは共通の PHONE_SEP_CLASS に集約
 // （3ファイルで個別定義され区切り漏れが繰り返したため単一ソース化・Day51）。

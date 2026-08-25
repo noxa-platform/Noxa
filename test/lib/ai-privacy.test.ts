@@ -1,6 +1,6 @@
 // Day12: AI への顧客 PII 送信ガード（マスキング・allowlist）のテスト。
 import { describe, it, expect } from 'vitest';
-import { maskContactInfo, maskDeep, pickForAi, AI_CUSTOMER_FIELDS } from '../../src/lib/ai-privacy';
+import { maskContactInfo, maskDeep, pickForAi, AI_CUSTOMER_FIELDS, AI_LOG_FIELDS } from '../../src/lib/ai-privacy';
 
 describe('maskContactInfo', () => {
   it('日本の電話番号をマスクする（ハイフン/空白/+81/連続桁）', () => {
@@ -94,5 +94,42 @@ describe('pickForAi', () => {
   it('null/undefined/空文字は含めない・data 無しは空オブジェクト', () => {
     expect(pickForAi({ name: '', rank: null, tags: undefined }, AI_CUSTOMER_FIELDS)).toEqual({});
     expect(pickForAi(undefined, AI_CUSTOMER_FIELDS)).toEqual({});
+  });
+});
+
+describe('AI_LOG_FIELDS — 同伴・アフターが AI に届く（P153-PM17）', () => {
+  // ⚠️ **同伴は `type` に出ない**。来店ログのサブアクション（`withDouhan` フラグ + 専用の
+  // 場所・金額）として保存されるので、`type` は `visit` のまま。allowlist から漏らすと
+  // **利用者が入れた同伴の場所と金額が AI に 1 つも届かない**まま、
+  // 店内の `salesAmount` だけを見て助言することになる。
+  it('同伴・アフターの場所と金額が allowlist に入っている', () => {
+    for (const f of ['withDouhan', 'douhanPlace', 'douhanAmount', 'withAfter', 'afterPlace', 'afterAmount']) {
+      expect(AI_LOG_FIELDS).toContain(f);
+    }
+  });
+
+  it('同伴の記録は場所と金額ごと通り、フリーテキストはマスクされる', () => {
+    const out = pickForAi(
+      {
+        type: 'visit', salesAmount: 30000,
+        withDouhan: true, douhanPlace: '焼肉 090-1234-5678', douhanAmount: 8000,
+      },
+      AI_LOG_FIELDS,
+    );
+    expect(out.withDouhan).toBe(true);
+    expect(out.douhanAmount).toBe(8000);
+    expect(out.douhanPlace).toBe('焼肉 [電話番号非表示]');
+  });
+
+  it('同伴が無い記録では 1 つもキーが増えない（プロンプトを膨らませない）', () => {
+    const out = pickForAi({ type: 'visit', salesAmount: 30000, withDouhan: false }, AI_LOG_FIELDS);
+    // false は「同伴していない」という意味のある値なので残る。場所・金額は付かない
+    expect(Object.keys(out).sort()).toEqual(['salesAmount', 'type', 'withDouhan']);
+  });
+
+  // allowlist なので、連絡先系は増やした後も落ちたまま
+  it('同伴を足しても連絡先は落ちる', () => {
+    const out = pickForAi({ type: 'visit', phone: '090-1111-2222', douhanPlace: '店' }, AI_LOG_FIELDS);
+    expect(out.phone).toBeUndefined();
   });
 });

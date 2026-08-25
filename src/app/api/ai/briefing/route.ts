@@ -38,6 +38,11 @@ async function getCustomerContext(ctx: AccessContext, customerId: string): Promi
         salesAmount: data.salesAmount,
         reaction: data.reaction,
         nextAction: data.nextAction,
+        // ⚠️ 同伴・アフターは `type` に出ない（来店ログのサブアクション）。
+        // 落とすと利用者が入れた場所と金額が AI に届かない（P153-PM17）。
+        // 記録が無いときはキーごと出さない（プロンプトを 1 文字も増やさない）
+        ...(data.withDouhan ? { douhan: { place: data.douhanPlace, amount: data.douhanAmount, memo: data.douhanMemo } } : {}),
+        ...(data.withAfter ? { after: { place: data.afterPlace, amount: data.afterAmount, memo: data.afterMemo } } : {}),
       };
     });
     // 顧客のフリーテキスト（likesNote / importantMemo / tags 等）とログの memo/place には
