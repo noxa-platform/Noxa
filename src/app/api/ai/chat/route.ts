@@ -23,6 +23,12 @@ const FULL_DATA_THRESHOLD = AI_CONFIG.fullDataThreshold;
 // 月次集計の sales-service ではちゃんと加算されているが、
 // /api/ai/chat の getCustomerContext がこれを見ていない → AI が「顧客なし日売」
 // を読み取れない問題への対応。
+/**
+ * 顧客なし日売の取得上限。⚠️ **ここで切ると合計が実際より少なくなる**ので、
+ * 上限に当たったことをプロンプトに書いて AI に断らせる（P153-PM24）。
+ */
+const STANDALONE_SALES_LIMIT = 200;
+
 async function getStandaloneSalesContext(ctx: AccessContext): Promise<string> {
   try {
     const db = getAdminDb();
@@ -32,7 +38,7 @@ async function getStandaloneSalesContext(ctx: AccessContext): Promise<string> {
       .collection(pathStandaloneSales(ctx))
       .where('datetime', '>=', sixtyDaysAgo)
       .orderBy('datetime', 'desc')
-      .limit(200)
+      .limit(STANDALONE_SALES_LIMIT)
       .get();
 
     if (snap.empty) return '';
@@ -61,6 +67,13 @@ async function getStandaloneSalesContext(ctx: AccessContext): Promise<string> {
 
     let context = '## 顧客なし日売（顧客に紐付かないフリー客・ヘルプ売上等）\n';
     context += `直近 60 日のエントリ数: ${items.length} 件\n`;
+    // ⚠️ **取得上限に当たったら合計を「確定値」として出さない**（P153-PM24）。
+    // 直近 200 件で切っているので、それを超える店では**合計が実際より少なくなる**。
+    // 黙って少ない数字を出すと、AI は**それが全部だという顔で**答える
+    // （「今月の売上は◯◯円ですね」＝ 嘘を断言する）
+    if (items.length >= STANDALONE_SALES_LIMIT) {
+      context += `⚠️ 直近 ${STANDALONE_SALES_LIMIT} 件までしか読んでいません。**下の合計は実際より少ない可能性があります**。正確な数字は売上画面で確認するよう促してください。\n`;
+    }
     context += `今月 (${monthKey}) の合計: ${thisMonthTotal.toLocaleString()}円 / 組数 ${thisMonthGroups} 組\n\n`;
     context += '個別エントリ（新しい順、最大 50 件）:\n';
     // memo / place はユーザーのフリーテキスト（「090-…の常連」等が普通に入る）。
@@ -70,7 +83,13 @@ async function getStandaloneSalesContext(ctx: AccessContext): Promise<string> {
     return context;
   } catch (e) {
     console.error('getStandaloneSalesContext error:', e);
-    return '';
+    // ⚠️ **空文字を返さない**（P153-PM24）。空だとプロンプトから節ごと消え、
+    // AI は「顧客なし日売は無い」ものとして**顧客分だけで合計を答える**。
+    // 読めなかったことは「無い」ことではない。**言えないと言わせる**。
+    // 隣の getCustomerContext は失敗を文言で伝えているのに、ここだけ黙っていた
+    // （＝ 対処の存在は網羅の証拠にならない・yorulog の指摘の同型）。
+    return '## 顧客なし日売\n⚠️ このワークスペースの「顧客なし日売」は**読み取りに失敗しました**。'
+      + '売上や組数を聞かれたら、**この分が抜けている可能性がある**と必ず断ってから答えてください。';
   }
 }
 

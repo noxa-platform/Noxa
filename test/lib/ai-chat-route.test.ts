@@ -327,6 +327,38 @@ describe('ai/chat（AI チャット本体）', () => {
     expect(mocks.threadUpdate).not.toHaveBeenCalled();
   });
 
+  // --- 顧客なし日売の欠落（P153-PM24）---
+
+  // ⚠️ **読めなかったことを「無い」にしない**。空を返すとプロンプトから節ごと消え、
+  // AI は顧客分だけで合計を答える（＝ 売上を過少に断言する）。
+  // 隣の getCustomerContext は失敗を文言で伝えているのに、ここだけ黙っていた。
+  it('顧客なし日売が読めなかったら、その旨をプロンプトに書く（黙って消さない）', async () => {
+    mocks.standaloneGet.mockRejectedValue(new Error('permission denied'));
+    await readSse((await POST(jsonReq(okBody))) as Response);
+    const prompt = lastPrompt();
+    expect(prompt).toContain('読み取りに失敗');
+    expect(prompt).toContain('抜けている可能性');
+  });
+
+  // ⚠️ 取得上限で切れた合計を「確定値」の顔で渡さない
+  it('取得上限に当たったら「合計が実際より少ない可能性」を添える', async () => {
+    const docs = Array.from({ length: 200 }, () => ({
+      data: () => ({ datetime: { toDate: () => new Date() }, salesAmount: 1000, groupCount: 1 }),
+    }));
+    mocks.standaloneGet.mockResolvedValue({ empty: false, docs });
+    await readSse((await POST(jsonReq(okBody))) as Response);
+    expect(lastPrompt()).toContain('実際より少ない可能性');
+  });
+
+  it('上限に届いていなければ断り書きは出ない（プロンプトを無駄に増やさない）', async () => {
+    const docs = Array.from({ length: 3 }, () => ({
+      data: () => ({ datetime: { toDate: () => new Date() }, salesAmount: 1000, groupCount: 1 }),
+    }));
+    mocks.standaloneGet.mockResolvedValue({ empty: false, docs });
+    await readSse((await POST(jsonReq(okBody))) as Response);
+    expect(lastPrompt()).not.toContain('実際より少ない可能性');
+  });
+
   // --- モデル override（運営者限定）---
 
   /** 直近の generateChatStream に渡されたモデル ID */
