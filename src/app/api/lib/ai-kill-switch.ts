@@ -43,6 +43,16 @@ const DEFAULT_PURCHASED_MESSAGE =
   'AI 機能は現在一時停止しています。ご購入いただいたクレジットは残高として保持されており、再開後にそのままお使いいただけます。'
   + '\nAI 以外の機能（顧客管理・売上記録・集計・目標）は通常どおりご利用いただけます。';
 
+/**
+ * 停止であることの機械可読な印（2026-08-25 追加・yorulog からの要望）。
+ *
+ * クライアントは「パスが ai/」「503」「本文を復号できた」の 3 条件で停止を判定していたが、
+ * **ホスティング側の一時障害も 503 を返しうる**。取り違えると障害中に
+ * 「AI 一時停止しています」という**嘘の説明**をしてしまう。
+ * 本文にこの印を入れておけば、停止と障害を確実に分けられる。
+ */
+export const AI_DISABLED_CODE = 'AI_DISABLED';
+
 export interface AiKillSwitchState {
   /** true なら AI を止める */
   disabled: boolean;
@@ -236,10 +246,13 @@ export async function aiKillSwitchResponse(uid?: string): Promise<NextResponse |
       // 判定できないときは通さない（止血が目的）
       console.error('[ai-kill-switch] 購入済み残高の確認に失敗', e);
     }
-    return NextResponse.json({ error: state.purchasedMessage }, { status: 503 });
+    return NextResponse.json(
+      { error: state.purchasedMessage, code: AI_DISABLED_CODE },
+      { status: 503 },
+    );
   }
 
-  return NextResponse.json({ error: state.message }, { status: 503 });
+  return NextResponse.json({ error: state.message, code: AI_DISABLED_CODE }, { status: 503 });
 }
 
 /** AI 機能を停止中に投げる型。プロバイダ層の最後の砦（課金が発生しないことの保証） */

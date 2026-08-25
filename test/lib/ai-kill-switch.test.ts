@@ -16,7 +16,7 @@ vi.mock('../../src/app/api/lib/firebase-admin', () => ({
 
 import {
   getAiKillSwitch, aiKillSwitchResponse, assertAiEnabled,
-  AiDisabledError, resetAiKillSwitchCache, resetAiExemptionCache,
+  AiDisabledError, resetAiKillSwitchCache, resetAiExemptionCache, AI_DISABLED_CODE,
 } from '../../src/app/api/lib/ai-kill-switch';
 
 /** global_settings/ai_kill_switch と account_subscriptions/{uid} だけ持つ最小フェイク */
@@ -112,6 +112,21 @@ describe('返すレスポンス（iOS がそのまま画面に出す）', () => 
     expect(typeof body.error).toBe('string');
     expect(body.error).toContain('一時停止');
     expect(body.error.length).toBeGreaterThan(10);
+  });
+
+  // ホスティング側の一時障害も 503 を返しうる。取り違えると障害中に
+  // 「AI 一時停止しています」という嘘の説明をしてしまうので、機械可読な印で分ける
+  it('停止であることを code で示す（障害の 503 と区別できる）', async () => {
+    mocks.getDb.mockReturnValue(makeDb({ [SWITCH_PATH]: { disabled: true, allowPurchasedCredits: false } }));
+    const body = await (await aiKillSwitchResponse('u1'))!.json();
+    expect(body.code).toBe(AI_DISABLED_CODE);
+    expect(AI_DISABLED_CODE).toBe('AI_DISABLED');
+  });
+
+  it('購入者向けの応答にも同じ code が入る', async () => {
+    mocks.getDb.mockReturnValue(makeDb({ [SWITCH_PATH]: { disabled: true, allowPurchasedCredits: true } }));
+    const body = await (await aiKillSwitchResponse('u-nopurchase'))!.json();
+    expect(body.code).toBe(AI_DISABLED_CODE);
   });
 
   it('creditsRemaining を返さない（残高表示を壊さない）', async () => {
