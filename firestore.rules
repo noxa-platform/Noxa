@@ -237,7 +237,8 @@ service cloud.firestore {
         // POS 会計は店舗内の共同作業＝メンバー全ロールが登録/修正できる。
         // 旧「castUid==自分」条件は、一般キャストが他人担当伝票の会計をすると
         // permission-denied になり現場が詰まるため役割ベースへ変更（2026-07-03）。
-        allow create, update: if isShopMember(shopId);
+        // `x`（段 5 の自由項目）はキー数だけ縛る。持たない記録はそのまま通る
+        allow create, update: if isShopMember(shopId) && hasSaneXMap(request.resource.data);
         allow delete: if isShopOwnerLike(shopId);
       }
 
@@ -406,6 +407,21 @@ service cloud.firestore {
         allow read: if isShopMember(shopId);
         allow write: if isShopOwnerLike(shopId);
       }
+
+      // 記録エンジン段 5（2026-08-25）: 店ごとの自由項目の定義。
+      //
+      // **単一 doc（settings/record_schema）**に置く。コレクションにすると、
+      // ここを `get()` で参照する側（記録の検証・段 6 の制約）が**どの doc を読めばいいか
+      // rules で決められない**（繰り返しが書けず、参照 doc 数にも上限がある）。
+      // P144 で `orgPath` を非正規化したのと同じ制約。複数版が要る段になったら移す。
+      //
+      // 読みは店のメンバー全員（記録画面が項目を出すのに要る）。
+      // 書きは owner のみ——**項目の形はワークスペース全体の集計の切り口**なので、
+      // キャストが増やせると店の数字の意味が勝手に変わる。
+      match /settings/{settingId} {
+        allow read: if isShopMember(shopId);
+        allow write: if isShopOwnerLike(shopId);
+      }
       match /menus/{menuId} {
         allow read: if isShopMember(shopId);
         allow write: if isShopOwnerLike(shopId);
@@ -499,7 +515,8 @@ service cloud.firestore {
     }
 
     match /personal_customers/{uid}/items/{cid} {
-      allow read, write: if isSelf(uid);
+      allow read: if isSelf(uid);
+      allow write: if isSelf(uid) && hasSaneXMap(request.resource.data);
       match /logs/{lid} { allow read, write: if isSelf(uid); }
       match /gifts/{gid} { allow read, write: if isSelf(uid); }
     }
@@ -522,7 +539,9 @@ service cloud.firestore {
     }
 
     match /personal_sales/{uid}/items/{sid} {
-      allow read, write: if isSelf(uid);
+      allow read: if isSelf(uid);
+      // 段 5: `x` はキー数だけ縛る（rules ではキー名も値の型も検査できない）
+      allow write: if isSelf(uid) && hasSaneXMap(request.resource.data);
     }
 
     match /personal_reminders/{uid}/items/{rid} {
@@ -937,6 +956,21 @@ service cloud.firestore {
     // スレッド(post): 作成は本人 uid・カウンタ 0・本文 1000 字以内。
     // 更新は likeCount/commentCount/lastActivityAt のみ誰でも（認証必須）か、本人による本文編集。
     // 会員判定: 招待制コミュニティのメンバー（noxa_users に doc がある）or admin
+    // 記録エンジン段 5（2026-08-25）: 自由項目 `x` の最低限の縛り。
+    //
+    // ⚠️ **rules はマップのキーを 1 つずつ検査できない**（繰り返しが書けない）。
+    // ここで守れるのは「マップであること」と「キー数の上限」だけで、
+    // **キー名の形も値の型も rules では検査できない**。
+    // それらは `src/lib/record-engine/record-schema.ts` の検証関数が唯一の番人で、
+    // 書き手（Web / iOS / nomishugy / CF）は全員そこを通す約束になっている。
+    //
+    // キー数だけでも縛るのは、無制限だと 1 記録が青天井に膨らみ、
+    // 一覧の読み取りが重くなって**他の機能まで巻き添えで遅くなる**ため。
+    // `x` を持たない記録（＝既存データの全部）はそのまま通る。
+    function hasSaneXMap(d) {
+      return !('x' in d) || (d.x is map && d.x.keys().size() <= 50);
+    }
+
     function isCommunityMember() {
       return isAuth()
         && (exists(/databases/$(database)/documents/noxa_users/$(request.auth.uid)) || isAdmin());
