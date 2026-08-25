@@ -59,6 +59,8 @@ const PASTED_TEXT_MASKED = [
   // P148（生成系の 2 本目）: 入力は店の説明の自由文。項目名の提案に連絡先は要らないので、
   // マスクしても機能は落ちない（pos-config と同じ理由）
   'ai/schema-suggest/route.ts',
+  // P151（生成系の 3 本目・段 7）: 入力は店の説明の自由文。項目と式の提案に連絡先は要らない
+  'ai/rule-pack/route.ts',
 ];
 
 /**

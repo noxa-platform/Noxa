@@ -38,6 +38,9 @@ const GUARDED = [
   // P148（生成系の 2 本目）: 入力は店長が書く店の説明。他店資料や顧客のメッセージが
   // 貼られることがあり、出力先は**店全体の集計の切り口**なので指示として読ませない
   'ai/schema-suggest/route.ts',
+  // P151（生成系の 3 本目・段 7）: 入力は店の説明。出力先は**集計の切り口と計算式**なので
+  // 指示として読ませない。式は段 6 の parseExpr で別途検証する
+  'ai/rule-pack/route.ts',
   // 保存済みの chatHistory（＝相手が書いた LINE 本文）をそのまま載せる
   'ai/message/route.ts',
   'ai/message/reply/route.ts',
