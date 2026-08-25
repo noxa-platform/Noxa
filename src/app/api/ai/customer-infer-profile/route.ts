@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { aiKillSwitchResponse } from '@/app/api/lib/ai-kill-switch';
+import { aiKillSwitchResponse, aiDisabledResponse } from '@/app/api/lib/ai-kill-switch';
 import { logAiUsage } from '@/app/api/lib/credits';
 import { generateText } from '../ai-provider';
 import { withInjectionGuard, wrapUntrustedInput } from '@/lib/ai-knowledge/injection-guard';
@@ -241,6 +241,10 @@ export async function POST(request: NextRequest) {
       });
     }, 'customer-infer-profile');
   } catch (error) {
+    // 入口を通った後に停止へ切り替わると安全網が throw する。裸の 500 にせず
+    // `code: AI_DISABLED` を必ず載せる（P154）
+    const aiStopped = aiDisabledResponse(error);
+    if (aiStopped) return aiStopped;
     if (error instanceof AuthError) {
       return NextResponse.json({ error: '認証が必要です' }, { status: 401 });
     }

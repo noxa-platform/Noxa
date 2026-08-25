@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { aiKillSwitchResponse } from '@/app/api/lib/ai-kill-switch';
+import { aiKillSwitchResponse, aiDisabledResponse } from '@/app/api/lib/ai-kill-switch';
 import { logAiUsage } from '@/app/api/lib/credits';
 import { generateText } from '../ai-provider';
 import { estimateAiCost } from '@/lib/ai-cost';
@@ -124,6 +124,10 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ ...result, creditsRemaining: remaining });
     });
   } catch (e) {
+    // 入口を通った後に停止へ切り替わると安全網が throw する。裸の 500 にせず
+    // `code: AI_DISABLED` を必ず載せる（P154）
+    const aiStopped = aiDisabledResponse(e);
+    if (aiStopped) return aiStopped;
     if (e instanceof AuthError) {
       return NextResponse.json({ error: e.message }, { status: 401 });
     }

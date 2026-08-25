@@ -16,7 +16,7 @@
 // （Day127＝「書込み側だから免除」という分類の前提が実態と違っていた件の再発防止）。
 // 料金設定に連絡先は不要なので、マスクしても機能は落ちない。
 import { NextRequest, NextResponse } from 'next/server';
-import { aiKillSwitchResponse } from '@/app/api/lib/ai-kill-switch';
+import { aiKillSwitchResponse, aiDisabledResponse } from '@/app/api/lib/ai-kill-switch';
 import { logAiUsage } from '@/app/api/lib/credits';
 import { verifyRequest, AuthError } from '../../lib/firebase-admin';
 import { resolveAccessContext } from '../../lib/access-context';
@@ -162,6 +162,10 @@ export async function POST(request: NextRequest) {
       });
     }, 'pos-config');
   } catch (error) {
+    // 入口を通った後に停止へ切り替わると安全網が throw する。裸の 500 にせず
+    // `code: AI_DISABLED` を必ず載せる（P154）
+    const aiStopped = aiDisabledResponse(error);
+    if (aiStopped) return aiStopped;
     if (error instanceof AuthError) {
       return NextResponse.json({ error: '認証が必要です' }, { status: 401 });
     }

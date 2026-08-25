@@ -10,7 +10,7 @@
 // - 既存顧客リストを受け取れば「nameHint と部分一致する顧客」の候補を返す
 // - 全フィールドが空（= 顧客情報を含まない画像）なら hasContent=false で返す
 import { NextRequest, NextResponse } from 'next/server';
-import { aiKillSwitchResponse } from '@/app/api/lib/ai-kill-switch';
+import { aiKillSwitchResponse, aiDisabledResponse } from '@/app/api/lib/ai-kill-switch';
 import { logAiUsage } from '@/app/api/lib/credits';
 import { verifyRequest, AuthError } from '../../lib/firebase-admin';
 import { resolveAccessContext } from '../../lib/access-context';
@@ -229,6 +229,10 @@ export async function POST(request: NextRequest) {
       return NextResponse.json(response);
     }, 'customer-context-extract');
   } catch (error) {
+    // 入口を通った後に停止へ切り替わると安全網が throw する。裸の 500 にせず
+    // `code: AI_DISABLED` を必ず載せる（P154）
+    const aiStopped = aiDisabledResponse(error);
+    if (aiStopped) return aiStopped;
     if (error instanceof AuthError) {
       return NextResponse.json({ error: '認証が必要です' }, { status: 401 });
     }

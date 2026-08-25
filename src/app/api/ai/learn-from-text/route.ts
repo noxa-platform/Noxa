@@ -15,7 +15,7 @@
 //     ガードは実在しなかった
 //   - 1MB 上限、最低 20 字
 import { NextRequest, NextResponse } from 'next/server';
-import { aiKillSwitchResponse } from '@/app/api/lib/ai-kill-switch';
+import { aiKillSwitchResponse, aiDisabledResponse } from '@/app/api/lib/ai-kill-switch';
 import { generateText } from '../ai-provider';
 import { reserveAiCredit, refundAiCredit, logAiLedger } from '../../lib/credits';
 import { estimateAiCost } from '@/lib/ai-cost';
@@ -258,6 +258,12 @@ export async function POST(request: NextRequest) {
         /* noop */
       }
     }
+    // 入口を通った後に停止へ切り替わると安全網が throw する。裸の 500 にせず
+    // `code: AI_DISABLED` を必ず載せる（P154）。
+    // ⚠️ **払い戻しの保険より後**に置く。ここだけ汎用 catch が返金を持っているので、
+    //    先に return すると停止の瞬間に予約が戻らない（他の 20 経路は返金が内側にある）。
+    const aiStopped = aiDisabledResponse(error);
+    if (aiStopped) return aiStopped;
     console.error('learn-from-text failed:', error);
     return NextResponse.json({ error: 'テキスト学習に失敗しました' }, { status: 500 });
   }

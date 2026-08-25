@@ -17,6 +17,7 @@ vi.mock('../../src/app/api/lib/firebase-admin', () => ({
 import {
   getAiKillSwitch, aiKillSwitchResponse, assertAiEnabled,
   AiDisabledError, resetAiKillSwitchCache, resetAiExemptionCache, AI_DISABLED_CODE,
+  aiDisabledResponse, aiDisabledSseEvent, isAiDisabledError,
 } from '../../src/app/api/lib/ai-kill-switch';
 import { enterAiRequest } from '../../src/app/api/lib/ai-request-context';
 
@@ -443,5 +444,107 @@ describe('無料クレジットの配布停止', () => {
   it('明示的に false のときだけ配る', async () => {
     mocks.getDb.mockReturnValue(makeDb({ [SWITCH_PATH]: { disabled: false, stopFreeCreditGrants: false } }));
     expect((await getAiKillSwitch()).stopFreeCreditGrants).toBe(false);
+  });
+});
+
+// P154: 入口を通った**後**に停止へ切り替わると、安全網（assertAiEnabled）が throw し、
+// 各ルートの汎用 catch が **`code` も停止の文言も無い裸の 500** を返していた。
+// 完了条件は「503 に揃える」ではなく「**`code: AI_DISABLED` を必ず載せる**」。
+// iOS の AIAvailabilityPlan は `code` を先に見て status は後に見るため、
+// `code` があれば 500 でも停止バナーが出るし、`code` の無い 503 は停止扱いにならない。
+describe('P154 停止由来のエラーを `code` つきで返す', () => {
+  it('停止由来なら 503 + code、本文は停止の文言そのもの', async () => {
+    const message = 'テスト用の停止文言';
+    mocks.getDb.mockReturnValue(makeDb({ [SWITCH_PATH]: { disabled: true, message } }));
+    let caught: unknown;
+    try {
+      await assertAiEnabled();
+    } catch (e) {
+      caught = e;
+    }
+    expect(caught).toBeInstanceOf(AiDisabledError);
+
+    const res = aiDisabledResponse(caught);
+    expect(res).not.toBeNull();
+    expect(res!.status).toBe(503);
+    const body = await res!.json();
+    expect(body.code).toBe(AI_DISABLED_CODE);
+    // 入口が返す文言と同じものを載せる（ユーザーが読む唯一の説明）
+    expect(body.error).toBe(message);
+  });
+
+  // ⚠️ 429 は iOS が insufficientCredits として残高表示を書き換えるので使わない
+  it('停止で 429 は返さない', async () => {
+    mocks.getDb.mockReturnValue(makeDb({ [SWITCH_PATH]: { disabled: true } }));
+    const res = aiDisabledResponse(new AiDisabledError('停止中'));
+    expect(res!.status).not.toBe(429);
+  });
+
+  it('停止由来でないエラーは素通りさせる（従来の 500 を壊さない）', () => {
+    expect(aiDisabledResponse(new Error('OpenRouter 500'))).toBeNull();
+    expect(aiDisabledResponse(undefined)).toBeNull();
+    expect(aiDisabledResponse('文字列')).toBeNull();
+    expect(isAiDisabledError(new Error('別物'))).toBe(false);
+    expect(isAiDisabledError(new AiDisabledError('停止中'))).toBe(true);
+  });
+
+  // SSE は 200 のヘッダを送った後なので HTTP ステータスが使えない。本文に code を載せる
+  it('SSE は本文に code を載せる（新しいイベント型は増やさない）', () => {
+    const ev = aiDisabledSseEvent(new AiDisabledError('停止中です'));
+    expect(ev).toEqual({ type: 'error', message: '停止中です', code: AI_DISABLED_CODE });
+    // 既存クライアントが読む type は 'error' のまま
+    expect(ev!.type).toBe('error');
+    expect(aiDisabledSseEvent(new Error('別物'))).toBeNull();
+  });
+});
+
+// ここも本丸。1 経路でも漏れると、その経路だけ停止中に裸の 500 を返す
+describe('P154 AI ルートの汎用 catch がすべて停止を見分ける', () => {
+  const API_AI_ROOT = join(process.cwd(), 'src/app/api/ai');
+  function aiRoutes(): string[] {
+    const files: string[] = [];
+    (function walk(d: string) {
+      for (const e of readdirSync(d, { withFileTypes: true })) {
+        const f = join(d, e.name);
+        if (e.isDirectory()) walk(f);
+        else if (e.name === 'route.ts') files.push(f);
+      }
+    })(API_AI_ROOT);
+    return files;
+  }
+
+  it('入口を通す route は汎用 catch でも aiDisabledResponse を通す', () => {
+    const guarded = aiRoutes().filter((f) => /aiKillSwitchResponse\(/.test(readFileSync(f, 'utf8')));
+    expect(guarded.length).toBeGreaterThan(0); // 検出ロジックの番人
+    const missing = guarded
+      .filter((f) => !/aiDisabledResponse\(/.test(readFileSync(f, 'utf8')))
+      .map((f) => relative(API_AI_ROOT, f).split(/[\\/]/).join('/'));
+    expect(missing).toEqual([]);
+  });
+
+  // 汎用 catch は AuthError 判定を必ず持つので、そこと同じ catch にあることを見る
+  it('停止判定と AuthError 判定が同じ catch にある', () => {
+    const misplaced = aiRoutes()
+      .filter((f) => /aiDisabledResponse\(/.test(readFileSync(f, 'utf8')))
+      .filter((f) => {
+        const src = readFileSync(f, 'utf8');
+        const catches = [...src.matchAll(/\} catch \((\w+)\) \{/g)];
+        // aiDisabledResponse に渡している変数名が、どこかの catch の引数と一致すること
+        const passed = [...src.matchAll(/aiDisabledResponse\((\w+)\)/g)].map((m) => m[1]);
+        return passed.some((v) => !catches.some((c) => c[1] === v));
+      })
+      .map((f) => relative(API_AI_ROOT, f).split(/[\\/]/).join('/'));
+    expect(misplaced).toEqual([]);
+  });
+
+  // SSE を流す route（chat）は本文に code を載せる必要がある。
+  // ⚠️ ここを外すと、テキストチャットだけが停止中に「生成に失敗しました」と嘘をつく
+  it('SSE を流す route は本文にも code を載せている', () => {
+    const sse = aiRoutes().filter((f) => /text\/event-stream/.test(readFileSync(f, 'utf8')));
+    expect(sse.length).toBeGreaterThan(0); // 検出ロジックの番人
+    const missing = sse
+      .filter((f) => !/aiDisabledSseEvent\(/.test(readFileSync(f, 'utf8')))
+      .map((f) => relative(API_AI_ROOT, f).split(/[\\/]/).join('/'));
+    expect(missing).toEqual([]);
   });
 });

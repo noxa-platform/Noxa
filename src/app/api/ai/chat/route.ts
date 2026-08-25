@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { aiKillSwitchResponse } from '@/app/api/lib/ai-kill-switch';
+import { aiKillSwitchResponse, aiDisabledResponse, aiDisabledSseEvent } from '@/app/api/lib/ai-kill-switch';
 import { generateChatStream, analyzeImages, resolveChatModel, type ChatHistoryEntry } from '../ai-provider';
 import { buildInjectionGuardBlock, wrapUntrustedInput } from '@/lib/ai-knowledge/injection-guard';
 import { reserveAiCredit, refundAiCredit, logAiLedger } from '../../lib/credits';
@@ -665,8 +665,13 @@ export async function POST(request: NextRequest) {
         } catch (err) {
           console.error('AI chat stream error:', err);
           await refundAiCredit(uid, chatCost, reserved);
+          // 停止由来なら本文に `code: AI_DISABLED` を載せる（P154）。
+          // 200 のヘッダを送った後なので HTTP ステータスは使えないが、iOS は `code` を
+          // 先に見るので**これだけで停止として扱われる**（新しいイベント型は要らない）。
+          // 当初「SSE は構造的に救えない」と判断していたのは誤りだった。
+          const stopped = aiDisabledSseEvent(err);
           controller.enqueue(encoder.encode(
-            `data: ${JSON.stringify({ type: 'error', message: 'AI応答の生成に失敗しました' })}\n\n`,
+            `data: ${JSON.stringify(stopped ?? { type: 'error', message: 'AI応答の生成に失敗しました' })}\n\n`,
           ));
           controller.close();
         }
@@ -682,6 +687,10 @@ export async function POST(request: NextRequest) {
       },
     });
   } catch (error) {
+    // 入口を通った後に停止へ切り替わると安全網が throw する。裸の 500 にせず
+    // `code: AI_DISABLED` を必ず載せる（P154）
+    const aiStopped = aiDisabledResponse(error);
+    if (aiStopped) return aiStopped;
     if (error instanceof AuthError) {
       return NextResponse.json({ error: '認証が必要です' }, { status: 401 });
     }

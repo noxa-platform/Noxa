@@ -288,3 +288,50 @@ export async function assertAiEnabled(): Promise<void> {
   if (await isExemptUid(state, currentAiUid())) return;
   throw new AiDisabledError(state.message);
 }
+
+/**
+ * 停止由来のエラーか（P154）。
+ *
+ * `AiDisabledError` は**このモジュールでしか生成されない**ので `instanceof` で足りる。
+ * ⚠️ 型を増やして別ファイルから投げるようにするなら、ここも一緒に直すこと。
+ */
+export function isAiDisabledError(e: unknown): e is AiDisabledError {
+  return e instanceof AiDisabledError;
+}
+
+/**
+ * 各ルートの汎用 catch で使う（P154）。停止由来なら 503 + `code` の応答、違えば null。
+ *
+ * ## なぜ要るか
+ * 入口（`aiKillSwitchResponse`）を通った**後**・プロバイダ呼び出しの**前**に停止へ切り替わると、
+ * 安全網（`assertAiEnabled`）が throw し、ルートの汎用 catch が
+ * **`code` も停止の文言も無い裸の 500** を返していた。切替の瞬間だけの競合だが、
+ * 停止操作は「今すぐ止めたい」ときに行うので**まさにその瞬間に人が使っている**。
+ *
+ * ## 完了条件は「503 にすること」ではなく「`code` を載せること」
+ * iOS の `AIAvailabilityPlan.stoppedMessage` は **`code` を先に見て status は後**に見る。
+ * `code` があれば停止バナーが出るし、**`code` の無い 503 は停止扱いにならない**
+ * （ホスティング側が返す 503 と区別できないため意図的にそうしてある）。
+ *
+ * ⚠️ **429 は使わない**。iOS が `insufficientCredits` として残高表示を書き換える。
+ *
+ * 💡 購入済みクレジット保持者がこの競合を踏むと、購入者向けではなく一般の文言が出る
+ *    （安全網は残高を読み直さない・P147）。**再試行すれば入口が購入者として通す**ので
+ *    1 リクエスト分で解消する。文言のためだけに読み取りを増やさない。
+ */
+export function aiDisabledResponse(error: unknown): NextResponse | null {
+  if (!isAiDisabledError(error)) return null;
+  return NextResponse.json({ error: error.message, code: AI_DISABLED_CODE }, { status: 503 });
+}
+
+/**
+ * SSE 経路（chat）用（P154）。200 のヘッダを送った後なので HTTP ステータスは使えないが、
+ * **本文に `code` を載せれば停止として扱われる**（iOS `7be0fd7` で対応済み・新しい
+ * イベント型は要らない）。停止由来でなければ null を返し、呼び出し側は従来の文言を流す。
+ */
+export function aiDisabledSseEvent(
+  error: unknown,
+): { type: 'error'; message: string; code: string } | null {
+  if (!isAiDisabledError(error)) return null;
+  return { type: 'error', message: error.message, code: AI_DISABLED_CODE };
+}

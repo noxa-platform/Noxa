@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { aiKillSwitchResponse } from '@/app/api/lib/ai-kill-switch';
+import { aiKillSwitchResponse, aiDisabledResponse } from '@/app/api/lib/ai-kill-switch';
 import { analyzeImages } from '../../ai-provider';
 import { reserveAiCredit, refundAiCredit, logAiLedger } from '../../../lib/credits';
 import { estimateAiCost } from '@/lib/ai-cost';
@@ -402,6 +402,10 @@ JSON配列で3つの返信案:
       creditsRemaining: reserved.remaining,
     });
   } catch (error) {
+    // 入口を通った後に停止へ切り替わると安全網が throw する。裸の 500 にせず
+    // `code: AI_DISABLED` を必ず載せる（P154）
+    const aiStopped = aiDisabledResponse(error);
+    if (aiStopped) return aiStopped;
     if (error instanceof AuthError) {
       return NextResponse.json({ error: '認証が必要です' }, { status: 401 });
     }
