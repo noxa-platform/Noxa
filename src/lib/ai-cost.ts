@@ -32,9 +32,12 @@ import { findModelMeta, estimateUsdCost } from './ai-models';
  * トークン数は yorulog の `docs/AI_CREDIT_COST_AUDIT.md` §3「中（顧客＋履歴あり）」の実測。
  * 固定プロンプト 4,793 字 + 顧客コンテキスト + 履歴 20 件で input 6,764 tok / output 600 tok。
  *
- * ⚠️ `referenceModelId` は **本番の FAST モデルだと yorulog が申告している値**。
- * 本番の `AI_PRIMARY_MODEL_FAST` は Vercel の Sensitive 指定で読めないため、
- * **こちらでは確認できていない**（単価そのものは OpenRouter 公開 API で実測済み）。
+ * `referenceModelId` は **本番の `AI_PRIMARY_MODEL_FAST` の実測値**
+ * （`vercel env pull --environment=production` で 2026-08-25 に確認。THINK は
+ * `openrouter:openai/gpt-5.6-luna`）。単価も OpenRouter 公開 API で実測済み。
+ * ⚠️ 読めないのは `OPENROUTER_API_KEY` の方（こちらは Sensitive のまま空文字で返る）。
+ * ⚠️ 本番に `AI_PRIMARY_MODEL_LITE` は**無い**ので、lite の 3 経路（suggest / briefing / tags）は
+ * 現状 FAST の単価で回っている（P153 ⑤ のログで気づける）。
  */
 export const COST_BASIS = {
   /** 原価の話をするときの物差しにするモデル */
