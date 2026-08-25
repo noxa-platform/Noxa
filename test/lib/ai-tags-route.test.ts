@@ -73,6 +73,45 @@ describe('ai/tags POST（自動タグ付け・手動 reserve/refund 境界）', 
     expect(mocks.refund).not.toHaveBeenCalled();
   });
 
+  // ⚠️ **同伴・アフターは `type` に出ない**（来店ログのサブアクション）。旧実装は
+  // `type` / `memo` / `place` の 3 つしか読んでおらず、利用者が入れた同伴の場所と金額が
+  // タグ生成に 1 つも効いていなかった（P153-PM18）。「和食派」「同伴常連」はここからしか出ない。
+  it('同伴・アフターの場所と金額がプロンプトに載る', async () => {
+    await POST(req({
+      customerName: 'A',
+      logs: [{
+        type: '来店', memo: '楽しかった', place: '本店',
+        withDouhan: true, douhanPlace: '寿司 銀座', douhanAmount: 12000,
+        withAfter: true, afterPlace: 'バー', afterAmount: 3000,
+      }],
+    }));
+    const prompt = mocks.gen.mock.calls.at(-1)![0] as string;
+    expect(prompt).toContain('[同伴: 寿司 銀座 12000円]');
+    expect(prompt).toContain('[アフター: バー 3000円]');
+  });
+
+  it('同伴が無ければ 1 文字も足さない（プロンプトを膨らませない）', async () => {
+    await POST(req({ customerName: 'A', logs: [{ type: '来店', memo: 'm', place: 'p' }] }));
+    const prompt = mocks.gen.mock.calls.at(-1)![0] as string;
+    expect(prompt).not.toContain('[同伴');
+    expect(prompt).not.toContain('[アフター');
+  });
+
+  it('同伴フラグだけで場所が無くても落とさない（金額のみ・場所のみも通る）', async () => {
+    await POST(req({ customerName: 'A', logs: [{ type: '来店', withDouhan: true }] }));
+    expect(mocks.gen.mock.calls.at(-1)![0] as string).toContain('[同伴: 場所不明]');
+  });
+
+  it('同伴の場所に書かれた電話番号もマスクされる（組み立て後にマスクする形を崩さない）', async () => {
+    await POST(req({
+      customerName: 'A',
+      logs: [{ type: '来店', withDouhan: true, douhanPlace: '焼肉 090-1234-5678' }],
+    }));
+    const prompt = mocks.gen.mock.calls.at(-1)![0] as string;
+    expect(prompt).toContain('[電話番号非表示]');
+    expect(prompt).not.toContain('090-1234-5678');
+  });
+
   it('generateText 失敗時は refund してから 500（確保分を戻す）', async () => {
     mocks.gen.mockRejectedValue(new Error('LLM down'));
     const res = await POST(req({ customerName: 'A' }));

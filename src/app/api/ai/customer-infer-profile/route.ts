@@ -59,7 +59,11 @@ interface LogDoc {
   giftGiven?: string | null;
   giftReceived?: string | null;
   withDouhan?: boolean;
+  douhanPlace?: string;
+  douhanAmount?: number;
   withAfter?: boolean;
+  afterPlace?: string;
+  afterAmount?: number;
 }
 
 export async function POST(request: NextRequest) {
@@ -117,8 +121,10 @@ export async function POST(request: NextRequest) {
         if (l.visitType) parts.push(`visitType=${l.visitType}`);
         if (l.place) parts.push(`場所=${l.place}`);
         if (l.salesAmount) parts.push(`売上=${l.salesAmount}`);
-        if (l.withDouhan) parts.push('同伴');
-        if (l.withAfter) parts.push('アフター');
+        // 同伴・アフターは**場所と金額まで**渡す（P153-PM18）。旗だけだと
+        // 「同伴した」しか伝わらず、どこへ行ったか・いくら使ったかが助言に効かない
+        if (l.withDouhan) parts.push(`同伴${l.douhanPlace ? `=${l.douhanPlace}` : ''}${l.douhanAmount ? `(${l.douhanAmount}円)` : ''}`);
+        if (l.withAfter) parts.push(`アフター${l.afterPlace ? `=${l.afterPlace}` : ''}${l.afterAmount ? `(${l.afterAmount}円)` : ''}`);
         if (l.giftGiven) parts.push(`贈った=${l.giftGiven}`);
         if (l.giftReceived) parts.push(`貰った=${l.giftReceived}`);
         if (l.rating != null) parts.push(`★${l.rating}`);

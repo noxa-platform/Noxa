@@ -32,8 +32,27 @@ export async function POST(request: NextRequest) {
 
     // 来店ログの memo は**保存済みの顧客フリーテキスト**（Day12 ポリシーのマスク対象）。
     // 旧実装は「書き込み側」として分類され素通しになっていた（Day127 で是正）
+    // ⚠️ **同伴・アフターは `type` に出ない**（来店ログのサブアクション＝ `withDouhan` /
+    // `withAfter` のフラグ + 専用の場所・金額。`type` は `visit` のまま）。
+    // 旧実装は `type` / `memo` / `place` の 3 つしか読んでおらず、**利用者が入れた
+    // 同伴の場所と金額がタグ生成に 1 つも効いていなかった**（P153-PM18。
+    // 出口違いの同型を PM17 で `suggest` / `briefing` / `message` に入れた）。
+    // 「和食派」「同伴常連」のようなタグは、まさにここからしか出ない。
+    // ⚠️ 記録が無ければ何も足さないのでプロンプトは 1 文字も増えない（P143 の圧縮を維持）。
+    // ⚠️ マスクは**組み立て後の文字列**に掛けるので、場所名を足しても掛かり方は変わらない。
+    const outingPart = (l: Record<string, unknown>, on: unknown, place: unknown, amount: unknown, label: string) => {
+      if (!on) return '';
+      void l;
+      const where = typeof place === 'string' && place.trim() ? place : '場所不明';
+      const yen = typeof amount === 'number' && Number.isFinite(amount) && amount > 0 ? ` ${amount}円` : '';
+      return ` [${label}: ${where}${yen}]`;
+    };
     const logsContext = Array.isArray(logs)
-      ? maskContactInfo(logs.map((l: Record<string, unknown>) => `${l.type}: ${l.memo || ''} (場所: ${l.place || '不明'})`).join('\n'))
+      ? maskContactInfo(logs.map((l: Record<string, unknown>) =>
+          `${l.type}: ${l.memo || ''} (場所: ${l.place || '不明'})`
+          + outingPart(l, l.withDouhan, l.douhanPlace, l.douhanAmount, '同伴')
+          + outingPart(l, l.withAfter, l.afterPlace, l.afterAmount, 'アフター'),
+        ).join('\n'))
       : 'ログなし';
 
     // 顧客名・メモとも、相手が名乗った文字列や相手の発言の書き写しが入る。
