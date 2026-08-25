@@ -63,7 +63,10 @@ export function jstDayWindow(d: Date = new Date()): { startIso: string; endIso: 
  *
  * ## 受ける形（緩い側に揃える）
  *
- * Firestore の `Timestamp`（`toMillis()` を持つ / `seconds` を持つ）・`Date`・**number（ミリ秒）**。
+ * Firestore の `Timestamp`（`toMillis()` を持つ / `seconds` を持つ）・`Date`・**number（ミリ秒）**・
+ * **ISO 8601 の文字列**（`calendar/lib.ts` が Google トークンの期限を ISO で保存している。
+ * 日付として読める文字列すべてではなく **ISO の形をしたものだけ**——「7」のような
+ * 数字だけの文字列が年や日として解釈されると、まったく違う時刻になる）。
  * ⚠️ **厳しい側に揃えない**——number を弾く実装に統一すると、いま number で保存されている
  * データを表示している画面（勤怠・送迎・給与）が**一斉に「—」になる**。読み手を緩くしても
  * 壊れるものは無いが、逆は表示を消す。
@@ -72,12 +75,22 @@ export function jstDayWindow(d: Date = new Date()): { startIso: string; endIso: 
  * 並べ替えやクエリの範囲指定は型が揃っていないと成立しない。
  *
  * 分からないものは **null**（0 に倒すと 1970-01-01 という意味のある時刻に化ける）。
+ *
+ * ⚠️ **fail-closed へ倒すときは、先にこの網を広げること**（nomishugy 部隊の指摘・2026-08-26）。
+ * 「読めなければ期限切れ」に変える前に読める形を広げておかないと、**有効な期限を
+ * 「読めない」と誤判定して、正当な権利を落とす**——倒す方向を間違えたのと同じ事故になる。
  */
 export function toMillis(v: unknown): number | null {
   if (v == null) return null;
   if (typeof v === 'number') return Number.isFinite(v) ? v : null;
   if (v instanceof Date) {
     const ms = v.getTime();
+    return Number.isFinite(ms) ? ms : null;
+  }
+  if (typeof v === 'string') {
+    // ISO 8601 の形だけを受ける（`2026-08-26T12:34:56Z` / `+09:00` / ミリ秒つき）
+    if (!/^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}(:\d{2}(\.\d+)?)?(Z|[+-]\d{2}:?\d{2})?$/.test(v.trim())) return null;
+    const ms = Date.parse(v.trim());
     return Number.isFinite(ms) ? ms : null;
   }
   if (typeof v === 'object') {

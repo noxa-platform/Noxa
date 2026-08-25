@@ -119,6 +119,20 @@ describe('toMillis — 時刻をミリ秒へ揃える（P153-PM12）', () => {
     expect(toMillis(0)).toBe(0); // 1970 も「値がある」なので null にしない
   });
 
+  // ⚠️ **fail-closed へ倒す前に網を広げる**（nomishugy 部隊の指摘）。読める形が狭いまま
+  // 「読めなければ期限切れ」にすると、**有効な期限を落とす**という逆向きの事故になる。
+  it('ISO 8601 の文字列を受ける（calendar のトークン期限が ISO 保存）', () => {
+    expect(toMillis('2026-08-26T00:00:00.000Z')).toBe(Date.parse('2026-08-26T00:00:00.000Z'));
+    expect(toMillis('2026-08-26T09:00:00+09:00')).toBe(Date.parse('2026-08-26T09:00:00+09:00'));
+    expect(toMillis('  2026-08-26T00:00:00Z  ')).toBe(Date.parse('2026-08-26T00:00:00Z'));
+  });
+
+  it('ISO の形をしていない文字列は null（「7」が年や日に化けるのを防ぐ）', () => {
+    for (const v of ['7', '2026', '2026-08-26', '明日', 'Aug 26 2026', '26/08/2026']) {
+      expect(toMillis(v)).toBeNull();
+    }
+  });
+
   it('Date も受ける', () => {
     expect(toMillis(new Date(1_700_000_000_000))).toBe(1_700_000_000_000);
   });
