@@ -10,6 +10,7 @@
 //   - 抽出結果はそのまま保存しない。クライアントが「更新しますか？」ダイアログで
 //     確認させてから saveSelfBaseStyle / updateWorkspace を呼ぶ。
 import { NextRequest, NextResponse } from 'next/server';
+import { aiKillSwitchResponse } from '@/app/api/lib/ai-kill-switch';
 import { verifyRequest, AuthError } from '../../lib/firebase-admin';
 import { resolveAccessContext } from '../../lib/access-context';
 import { analyzeImages } from '../ai-provider';
@@ -90,6 +91,13 @@ const EXTRACT_SYSTEM_INSTRUCTION = `あなたはホスト/キャバクラ業界�
 export async function POST(request: NextRequest) {
   try {
     const uid = await verifyRequest(request);
+
+    // AI 緊急停止（2026-08-25）。**クレジット予約より手前**で弾く
+    // （予約→拒否→返金の往復を作らない）。停止中は 503 + 日本語文言を返し、
+    // iOS の APIError.serverError がその文字列をそのまま画面に出す。
+    // ⚠️ 429 は使わない（iOS が insufficientCredits として残高表示を書き換えるため）
+    const killed = await aiKillSwitchResponse(uid);
+    if (killed) return killed;
     const body = (await request.json().catch(() => ({}))) as ExtractRequestBody;
     const { workspaceId, images } = body;
     if (!workspaceId || !Array.isArray(images) || images.length === 0) {

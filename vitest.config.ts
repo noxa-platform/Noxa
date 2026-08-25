@@ -9,5 +9,8 @@ export default defineConfig({
     include: ['test/**/*.test.ts'],
     exclude: ['**/node_modules/**', '**/.git/**', 'test/rules/**'],
     testTimeout: 15000,
+    // AI 緊急停止スイッチ（2026-08-25）は**既定が停止**（fail-closed）。
+    // 単体テストは各ルートの本来の挙動を見るものなので、明示的に「動かす」側に固定する。
+    env: { AI_KILL_SWITCH: '0' },
   },
 });

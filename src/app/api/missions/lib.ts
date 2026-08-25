@@ -11,6 +11,7 @@ import { getAdminDb } from '../lib/firebase-admin';
 import { grantBonusCredits } from '../lib/credits';
 import { FieldValue } from 'firebase-admin/firestore';
 import { getMission, type MissionId } from '@/lib/missions';
+import { getAiKillSwitch } from '../lib/ai-kill-switch';
 
 export interface ClaimResult {
   granted: number;
@@ -25,6 +26,15 @@ export interface ClaimResult {
 export async function tryClaimMission(uid: string, missionId: MissionId | string): Promise<ClaimResult> {
   const def = getMission(missionId);
   if (!def) {
+    return { granted: 0, alreadyClaimed: false, missionId };
+  }
+
+  // 無料クレジットの配布停止（2026-08-25・予算逼迫）。
+  // ミッション報酬も紹介報酬（referral/redeem が本ヘルパー経由）もここを通る。
+  // **claimed フラグを立てる前に返す**のが要点——先に受領済みにしてから配布を
+  // 飛ばすと、再開後にユーザーが二度と受け取れなくなる（報酬の永久消失）。
+  const killSwitch = await getAiKillSwitch();
+  if (killSwitch.stopFreeCreditGrants) {
     return { granted: 0, alreadyClaimed: false, missionId };
   }
 
