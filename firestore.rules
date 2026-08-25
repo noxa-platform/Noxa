@@ -91,6 +91,35 @@ service cloud.firestore {
       }
     }
 
+    // ========================================
+    // グループ（org）階層 — 記録エンジン段 4（2026-08-25）
+    // ========================================
+    //
+    // 店は `shop_shops/{shopId}.orgPath` に**祖先を全部並べた配列**を持つ（直属は末尾）。
+    // ⚠️ **rules は木をたどれない**（繰り返しが書けず、1 リクエストで参照できる doc 数にも
+    // 上限がある）ため、親を 1 段ずつ上がる書き方は段が増えた瞬間に破綻する。
+    // 配列にしてあるので `orgId in orgPath` の 1 回で配下判定ができる。
+    //
+    // **クライアントは org_orgs を直接読まない。** 表示に要る情報（orgPath と、必要なら
+    // グループ名）は店の doc へ非正規化して載せる（membership index に shopName を
+    // 載せているのと同じ考え方）。こうしないと「自分の所属店のどれかがこの org 配下か」を
+    // rules で判定するために**新しい逆引き index とそれを維持する CF** が要る。
+    // 実体の無い index を参照する rules は、書く側が無いまま deny だけが残る。
+    //
+    // 権限の既定は**全部オフ**。オンにするのは policy への明示的な書込みだけ
+    // （事故は「見えすぎ」の方が重い）。解決は src/lib/org.ts の resolveOrgPermissions で、
+    // **段の上から下へ・下は厳しくすることしかできない**。
+    match /org_orgs/{orgId} {
+      // 正本は運営が持ち、読み書きはサーバ（Admin SDK）経由に限る。
+      // 親の付け替えは配下全店の orgPath 書き直しを伴うため、クライアントには開けない
+      // （移動であって編集なので履歴も要る）。
+      allow read, write: if isAdmin();
+
+      match /policy/{policyId} {
+        allow read, write: if isAdmin();
+      }
+    }
+
     match /account_subscriptions/{uid} {
       allow read: if isSelf(uid) || isAdmin();
       allow write: if false; // API Route (Admin SDK) のみ
@@ -161,16 +190,24 @@ service cloud.firestore {
     match /shop_shops/{shopId} {
       // 内部運営: members のみ read 可能 (集客側は shop_public_profiles を参照)
       allow read: if isShopMember(shopId) || isAdmin();
-      allow create: if isAuth() && (
-        // 通常: ownerUid が自分
-        request.resource.data.ownerUid == request.auth.uid
-        // UGC: ownerUid null + source='ugc' (誰でも投稿可、後でクレーム)
-        || (request.resource.data.ownerUid == null
-            && request.resource.data.source == 'ugc')
-      );
+      // 作成時に orgPath を持ち込ませない（作った瞬間に系列へ潜り込むのを防ぐ）
+      allow create: if isAuth()
+        && !request.resource.data.keys().hasAny(['orgPath'])
+        && (
+          // 通常: ownerUid が自分
+          request.resource.data.ownerUid == request.auth.uid
+          // UGC: ownerUid null + source='ugc' (誰でも投稿可、後でクレーム)
+          || (request.resource.data.ownerUid == null
+              && request.resource.data.source == 'ugc')
+        );
+      // `orgPath` を保護対象に追加（2026-08-25・記録エンジン段 4）。
+      // ここが書けると、店が自分でグループへ潜り込んで**系列他店の売上・顧客を覗ける**。
+      // 付け替えは配下全店の書き直しを伴う「移動」なのでサーバ側の一括処理に限る。
+      // `organizationId` は旧称で名前だけ残っていたもの。両方塞いでおく。
       allow update: if isAdmin() || (isAuth()
         && resource.data.ownerUid == request.auth.uid
-        && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['ownerUid', 'organizationId', 'source']));
+        && !request.resource.data.diff(resource.data).affectedKeys()
+             .hasAny(['ownerUid', 'organizationId', 'orgPath', 'source']));
       allow delete: if isAdmin();
 
       match /members/{uid} {
