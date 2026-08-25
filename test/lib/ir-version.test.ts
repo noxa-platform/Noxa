@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
+import { join, relative } from 'node:path';
 import {
   IR_VERSION, IR_VERSION_LEGACY, IR_VERSION_FIELD,
   stampIrVersion, readIrVersion, isFutureIrVersion, nextIrVersion,
@@ -82,20 +83,24 @@ describe('nextIrVersion — 移行は単調増加のみ', () => {
 describe('版の巻き戻りを作らない（更新経路で刻まない）', () => {
   // 版を刻む経路の一覧。**すべて新規作成点であること**を確認したうえで載せる。
   // （addDoc は常に新規／POS 会計は毎回新しい伝票）
-  const files = [
-    'src/lib/pos/store.ts',
-    'src/components/modules/sales/SalesClient.tsx',
-    'src/components/modules/customers/CustomersClient.tsx',
-    'src/components/modules/schedule/ScheduleClient.tsx',
-    'src/components/modules/attendance/AttendanceClient.tsx',
-    'src/components/modules/business-card/BusinessCardClient.tsx',
-    'src/components/modules/unpaid/UnpaidClient.tsx',
-    'src/components/modules/risk/RiskClient.tsx',
-    'src/components/modules/inventory/InventoryClient.tsx',
-    'src/components/modules/transport/TransportClient.tsx',
-    'src/components/modules/reservation/ReservationClient.tsx',
-    'src/components/modules/trial/TrialClient.tsx',
-  ];
+  //
+  // P145: 手書きの一覧は「新しい作成点を足したときの刻み忘れ」を捕まえられないため、
+  // **リポジトリを走査して stampIrVersion を使っている全ファイル**に置き換えた。
+  // 「刻むべき経路が漏れていないか」の網羅は ir-version-coverage.test.ts が見張る。
+  const files = (function walk(dir: string, out: string[] = []): string[] {
+    for (const e of readdirSync(dir, { withFileTypes: true })) {
+      const p = join(dir, e.name);
+      if (e.isDirectory()) walk(p, out);
+      else if (/\.tsx?$/.test(e.name) && readFileSync(p, 'utf8').includes('stampIrVersion(')) {
+        out.push(relative(process.cwd(), p).replace(/\\/g, '/'));
+      }
+    }
+    return out;
+  })(join(process.cwd(), 'src')).filter((f) => !f.endsWith('src/lib/ir-version.ts'));
+
+  it('刻んでいるファイルが十分ある（走査が壊れていない）', () => {
+    expect(files.length).toBeGreaterThan(15);
+  });
 
   it.each(files)('%s は stampIrVersion を使っている', (f) => {
     expect(readFileSync(f, 'utf8')).toContain('stampIrVersion(');

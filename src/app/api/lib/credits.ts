@@ -7,6 +7,7 @@ import { getAdminDb } from './firebase-admin';
 import { FieldValue } from 'firebase-admin/firestore';
 import { PLAN_LIMITS } from '@/lib/types';
 import type { PlanTier } from '@/lib/types';
+import { stampIrVersion } from '@/lib/ir-version';
 
 /**
  * AI クレジット消費を Noxa 共通の v2 schema `account_credit_ledger` に記録。
@@ -43,13 +44,13 @@ async function writeLedgerEntry(uid: string, feature: string, amount: number, ch
   try {
     const db = getAdminDb();
     const ref = db.collection(`account_credit_ledger/${uid}/entries`).doc();
-    await ref.set({
+    await ref.set(stampIrVersion({
       service: 'noxa',
       feature,
       amount,
       charged,
       createdAt: FieldValue.serverTimestamp(),
-    });
+    }));
   } catch (error) {
     console.error('logAiLedger error: uid:', uid, 'feature:', feature, error);
   }

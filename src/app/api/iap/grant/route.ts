@@ -33,6 +33,7 @@ import { verifyRequest, getAdminDb, AuthError } from '../../lib/firebase-admin';
 import { getIapProduct } from '@/lib/iap/products';
 import { verifyAppleJws, decodeAppleJwsPayload } from '@/lib/iap/verify-apple-jws';
 import { FieldValue } from 'firebase-admin/firestore';
+import { stampIrVersion } from '@/lib/ir-version';
 
 interface GrantBody {
   /** Apple のトランザクション ID（数値 string）。冪等キーとして使用 */
@@ -117,7 +118,7 @@ export async function POST(request: NextRequest) {
       if (txSnap.exists) {
         return { ok: false as const, reason: 'ALREADY_PROCESSED' as const };
       }
-      tx.set(txRef, {
+      tx.set(txRef, stampIrVersion({
         uid,
         productId,
         credits: product.credits,
@@ -127,7 +128,7 @@ export async function POST(request: NextRequest) {
         signedDateMs: payload.signedDate ?? null,
         // 署名検証済みか（本番は常に true。開発の decode-only 付与は false で痕跡を残す）
         jwsVerified: jwsResult.verified,
-      });
+      }));
       tx.set(
         subRef,
         {

@@ -273,7 +273,7 @@ export function usePosStore(user: User): UsePosStore {
     await Promise.all(names.map((name, i) => {
       const id = `tbl_${i + 1}`;
       if (existingIds.has(id)) return Promise.resolve();
-      return setDoc(doc(db, `shop_shops/${shopId}/seating_tables/${id}`), { ...createEmptyTable(id, name), updatedAt: serverTimestamp() });
+      return setDoc(doc(db, `shop_shops/${shopId}/seating_tables/${id}`), stampIrVersion({ ...createEmptyTable(id, name), updatedAt: serverTimestamp() }));
     }));
   }, [shopId, configRef]);
 
@@ -415,7 +415,7 @@ export function usePosStore(user: User): UsePosStore {
           })
         : null;
       if (unpaidEntry) {
-        tx.set(doc(collection(db, `shop_shops/${shopId}/unpaid`)), { ...unpaidEntry, createdAt: serverTimestamp() });
+        tx.set(doc(collection(db, `shop_shops/${shopId}/unpaid`)), stampIrVersion({ ...unpaidEntry, createdAt: serverTimestamp() }));
       }
       // 記録の版は**新規作成のときだけ**刻む（段 3）。会計は毎回新しい伝票なのでここが作成点
       tx.set(saleRef, stampIrVersion({

@@ -9,6 +9,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { Timestamp, FieldValue } from 'firebase-admin/firestore';
 import { verifyRequest, getAdminDb, AuthError } from '../../lib/firebase-admin';
+import { stampIrVersion } from '@/lib/ir-version';
 
 // 新規会員に付与する初期招待枠（シード期は太め。運営が後で調整＝ダイヤル制）
 const INITIAL_INVITE_CREDITS = 5;
@@ -45,7 +46,7 @@ export async function POST(request: NextRequest) {
       issuedBy = inv.issuedBy ?? null;
 
       tx.update(inviteRef, { status: 'used', usedBy: uid, usedAt: Timestamp.now() });
-      tx.set(userRef, {
+      tx.set(userRef, stampIrVersion({
         uid,
         invitedBy: issuedBy,
         invitedAt: Timestamp.now(),
@@ -53,7 +54,7 @@ export async function POST(request: NextRequest) {
         invitePrivilegeRevoked: false,
         signupIp: ip, // 監査用（多重アカ検知）
         createdAt: FieldValue.serverTimestamp(),
-      });
+      }));
     });
 
     // 招待元へ通知（トランザクション外・ベストエフォート）

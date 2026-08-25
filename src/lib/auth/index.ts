@@ -25,6 +25,7 @@ import {
 } from 'firebase/auth';
 import { doc, setDoc, getDoc, serverTimestamp } from 'firebase/firestore';
 import { auth, db, googleProvider } from '@/lib/firebase/config';
+import { stampIrVersion } from '@/lib/ir-version';
 
 export const ALLOWED_REDIRECT_HOSTS = [
   'yorulog.vercel.app',
@@ -328,7 +329,7 @@ export async function ensureAccountUser(user: User, displayName?: string): Promi
     return;
   }
   // 新規
-  await setDoc(ref, {
+  await setDoc(ref, stampIrVersion({
     id: user.uid,
     email: user.email ?? null,
     displayName: displayName ?? user.displayName ?? null,
@@ -339,7 +340,7 @@ export async function ensureAccountUser(user: User, displayName?: string): Promi
     createdAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
     lastLoginAt: serverTimestamp(),
-  });
+  }));
 }
 
 /**

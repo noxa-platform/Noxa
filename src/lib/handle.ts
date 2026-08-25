@@ -15,6 +15,7 @@ export type { Visibility };
 // 純ルール（検証・候補生成）は firebase 非依存の handle-rules に分離（テスト対象・Day25）
 export { HANDLE_RE, validateHandle, suggestHandle } from '@/lib/handle-rules';
 import { validateHandle, planHandleChange } from '@/lib/handle-rules';
+import { stampIrVersion } from '@/lib/ir-version';
 
 export type ProfileType = 'user' | 'shop';
 
@@ -50,7 +51,7 @@ export async function claimHandle(handleRaw: string, input: ClaimInput): Promise
   await runTransaction(db, async (tx) => {
     const existing = await tx.get(pageRef);
     if (existing.exists()) throw new Error('HANDLE_TAKEN');
-    tx.set(pageRef, {
+    tx.set(pageRef, stampIrVersion({
       handle: h,
       type: input.type,
       ownerUid: input.ownerUid,
@@ -63,7 +64,7 @@ export async function claimHandle(handleRaw: string, input: ClaimInput): Promise
       visibility: 'private',   // 新規は非公開で作成（published:false と整合）
       createdAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
-    });
+    }));
     tx.set(ownerRef, { handle: h, updatedAt: serverTimestamp() }, { merge: true });
   });
   return h;

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getAdminDb, verifyRequest, AuthError } from '../../lib/firebase-admin';
 import { resolveAccessContext, pathAiThreads } from '../../lib/access-context';
+import { stampIrVersion } from '@/lib/ir-version';
 
 /**
  * AI チャットスレッド（複数会話セッション）の一覧取得 / 新規作成。
@@ -82,14 +83,14 @@ export async function GET(request: NextRequest) {
         const title = firstUserMsg
           ? deriveTitleFromContent(firstUserMsg.content)
           : MIGRATION_TITLE;
-        const newThread = await threadsRef.add({
+        const newThread = await threadsRef.add(stampIrVersion({
           ownerUid: uid,
           title,
           createdAt: legacyData?.updatedAt || now,
           updatedAt: now,
           messageCount: legacyMessages.length,
           messages: legacyMessages,
-        });
+        }));
         // 取込成功後にだけ印を付ける（先に付けると add 失敗で履歴が永久に取り込めなくなる）。
         // 旧 doc 自体は消さずフィールド追加のみ＝rollback 可能性を維持。
         await legacyRef.set({ migratedToThreadsAt: now }, { merge: true });
@@ -129,14 +130,14 @@ export async function POST(request: NextRequest) {
 
     const db = getAdminDb();
     const threadsRef = db.collection(pathAiThreads(ctx));
-    const docRef = await threadsRef.add({
+    const docRef = await threadsRef.add(stampIrVersion({
       ownerUid: uid,
       title,
       createdAt: now,
       updatedAt: now,
       messageCount: 0,
       messages: [],
-    });
+    }));
 
     return NextResponse.json({
       thread: {

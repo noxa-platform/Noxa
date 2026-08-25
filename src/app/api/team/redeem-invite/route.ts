@@ -11,6 +11,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { FieldValue, Timestamp } from 'firebase-admin/firestore';
 import { verifyRequest, getAdminDb, AuthError } from '../../lib/firebase-admin';
+import { stampIrVersion } from '@/lib/ir-version';
 
 function toMs(v: unknown): number {
   if (v instanceof Timestamp) return v.toMillis();
@@ -65,22 +66,22 @@ export async function POST(request: NextRequest) {
           if (unlinked) {
             tx.set(unlinked.ref, { uid, updatedAt: FieldValue.serverTimestamp() }, { merge: true });
           } else {
-            tx.set(castsCol.doc(), {
+            tx.set(castsCol.doc(), stampIrVersion({
               name, rank: '新人', hourlyWage: 0, isLocked: false, baseStatus: 'Free',
               uid, createdAt: FieldValue.serverTimestamp(),
-            });
+            }));
           }
         }
       }
 
-      tx.set(memberRef, {
+      tx.set(memberRef, stampIrVersion({
         role,
         status: 'active',
         castDisplayName: name,
         invitedBy: invite.createdBy ?? null,
         addedVia: 'invite',
         joinedAt: FieldValue.serverTimestamp(),
-      });
+      }));
       tx.set(inviteRef, { usedBy: uid, usedAt: FieldValue.serverTimestamp() }, { merge: true });
       return { status: 200 as const, role };
     });

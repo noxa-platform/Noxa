@@ -30,6 +30,7 @@ import type {
   AddReplyInput, CommunityRepository, CreateThreadInput, EditReplyInput, EditThreadInput,
   LikeTarget, ReportTarget,
 } from './repository';
+import { stampIrVersion } from '@/lib/ir-version';
 
 const C = {
   boards: 'noxa_boards',
@@ -156,7 +157,7 @@ export class FirestoreCommunityRepository implements CommunityRepository {
   }
 
   async createThread(input: CreateThreadInput): Promise<Thread> {
-    const ref = await addDoc(collection(db, C.posts), {
+    const ref = await addDoc(collection(db, C.posts), stampIrVersion({
       boardId: input.boardId,
       title: input.title,
       body: input.body,
@@ -169,7 +170,7 @@ export class FirestoreCommunityRepository implements CommunityRepository {
       commentCount: 0,
       createdAt: serverTimestamp(),
       lastActivityAt: serverTimestamp(),
-    });
+    }));
     const created = await this.getThread(ref.id);
     if (!created) throw new Error('createThread: 作成直後の取得に失敗');
     return created;
@@ -182,7 +183,7 @@ export class FirestoreCommunityRepository implements CommunityRepository {
       const postSnap = await tx.get(postRef);
       if (!postSnap.exists()) throw new Error(`post not found: ${threadId}`);
       const resNo = (postSnap.data().commentCount ?? 0) + 2;
-      tx.set(commentRef, {
+      tx.set(commentRef, stampIrVersion({
         postId: threadId,
         resNo,
         authorUid: this.uid,
@@ -191,7 +192,7 @@ export class FirestoreCommunityRepository implements CommunityRepository {
         jobTag: input.jobTag ?? null,
         likeCount: 0,
         createdAt: serverTimestamp(),
-      });
+      }));
       tx.update(postRef, { commentCount: increment(1), lastActivityAt: serverTimestamp() });
     });
     const updated = await this.getThread(threadId);
@@ -248,13 +249,13 @@ export class FirestoreCommunityRepository implements CommunityRepository {
         tx.delete(likeRef);
         tx.update(targetRef, { likeCount: increment(-1) });
       } else {
-        tx.set(likeRef, {
+        tx.set(likeRef, stampIrVersion({
           uid: this.uid,
           kind: target.kind,
           targetId,
           postId: target.threadId,
           createdAt: serverTimestamp(),
-        });
+        }));
         tx.update(targetRef, { likeCount: increment(1) });
       }
     });
@@ -270,14 +271,14 @@ export class FirestoreCommunityRepository implements CommunityRepository {
     const ref = doc(db, C.reports, reportDocId(target.kind, targetId, this.uid));
     const existing = await getDoc(ref);
     if (existing.exists()) return;
-    await setDoc(ref, {
+    await setDoc(ref, stampIrVersion({
       targetType: target.kind,
       targetId,
       postId: target.threadId,
       reporterUid: this.uid,
       status: 'open',
       createdAt: serverTimestamp(),
-    });
+    }));
   }
 
   /** ユーザーが既にいいね済みの like キー集合を取得（初期表示用） */

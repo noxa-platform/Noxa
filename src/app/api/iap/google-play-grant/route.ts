@@ -24,6 +24,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { verifyRequest, getAdminDb, AuthError } from '../../lib/firebase-admin';
 import { getIapProductByAndroidId } from '@/lib/iap/products';
 import { FieldValue } from 'firebase-admin/firestore';
+import { stampIrVersion } from '@/lib/ir-version';
 
 interface GrantBody {
   /** Android アプリの packageName（例: jp.egshugy.yorulog） */
@@ -179,7 +180,7 @@ export async function POST(request: NextRequest) {
       if (txSnap.exists) {
         return { ok: false as const, reason: 'ALREADY_PROCESSED' as const };
       }
-      tx.set(txRef, {
+      tx.set(txRef, stampIrVersion({
         uid,
         platform: 'android',
         productId: product.productId,
@@ -189,7 +190,7 @@ export async function POST(request: NextRequest) {
         credits: product.credits,
         priceJpy: product.priceJpy,
         processedAt: FieldValue.serverTimestamp(),
-      });
+      }));
       tx.set(
         subRef,
         {

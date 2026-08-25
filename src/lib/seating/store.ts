@@ -42,6 +42,7 @@ import {
   computeCasts, rotateOrder, nextDailySequence, canStartSet,
   removeCastPatch, buildAssignPatches, stripCastPatches, toggleInArray, sendToBackOfOrder, pruneCastStartTimes, type TablePatch,
 } from './logic';
+import { stampIrVersion } from '@/lib/ir-version';
 
 type StoredCast = {
   id: string; name: string; rank: Rank; hourlyWage: number; isLocked: boolean;
@@ -244,10 +245,10 @@ export function useSeatingStore(user: User): UseSeatingStore {
   // ── cast ops
   const addCast = useCallback<Raw<UseSeatingStore['addCast']>>(async (c) => {
     if (!shopId) return;
-    await addDoc(collection(db, `shop_shops/${shopId}/seating_casts`), {
+    await addDoc(collection(db, `shop_shops/${shopId}/seating_casts`), stampIrVersion({
       name: c.name, rank: c.rank, hourlyWage: c.hourlyWage, isLocked: false, baseStatus: 'Free',
       uid: c.uid ?? null, createdAt: serverTimestamp(),
-    });
+    }));
   }, [shopId]);
   const updateCast = useCallback<Raw<UseSeatingStore['updateCast']>>(async (id, updates) => {
     if (!shopId) return;
@@ -305,7 +306,7 @@ export function useSeatingStore(user: User): UseSeatingStore {
     names.forEach((name, i) => {
       const id = `tbl_${i + 1}`;
       if (existingIds.has(id)) return;
-      batch.set(doc(db, `shop_shops/${shopId}/seating_tables/${id}`), { ...createEmptyTable(id, name), setTimeLength: setLen, rotationTimeLength: rotLen, updatedAt: serverTimestamp() });
+      batch.set(doc(db, `shop_shops/${shopId}/seating_tables/${id}`), stampIrVersion({ ...createEmptyTable(id, name), setTimeLength: setLen, rotationTimeLength: rotLen, updatedAt: serverTimestamp() }));
       created++;
     });
     if (created > 0) await batch.commit();
@@ -556,7 +557,7 @@ export function useSeatingStore(user: User): UseSeatingStore {
   // ── queue ops
   const addToQueue = useCallback<Raw<UseSeatingStore['addToQueue']>>(async (item) => {
     if (!shopId) return;
-    await addDoc(collection(db, `shop_shops/${shopId}/seating_queue`), { ...item, joinedAt: Date.now(), createdAt: serverTimestamp() });
+    await addDoc(collection(db, `shop_shops/${shopId}/seating_queue`), stampIrVersion({ ...item, joinedAt: Date.now(), createdAt: serverTimestamp() }));
   }, [shopId]);
   const removeFromQueue = useCallback<Raw<UseSeatingStore['removeFromQueue']>>(async (id) => {
     if (!shopId) return;

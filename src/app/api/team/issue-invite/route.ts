@@ -10,6 +10,7 @@ import { FieldValue, Timestamp } from 'firebase-admin/firestore';
 import { verifyRequest, getAdminDb, AuthError } from '../../lib/firebase-admin';
 import { requireShopRole } from '../../lib/team-auth';
 import { isSafeDocId } from '../../lib/doc-id';
+import { stampIrVersion } from '@/lib/ir-version';
 
 const INVITE_ROLES = ['cast', 'manager', 'accounting'] as const;
 type InviteRole = (typeof INVITE_ROLES)[number];
@@ -46,13 +47,13 @@ export async function POST(request: NextRequest) {
 
     const code = generateCode();
     const expiresAt = Timestamp.fromMillis(Date.now() + EXPIRE_DAYS * 86400000);
-    await db.doc(`shop_shops/${shopId}/invites/${code}`).set({
+    await db.doc(`shop_shops/${shopId}/invites/${code}`).set(stampIrVersion({
       role,
       createdBy: uid,
       createdAt: FieldValue.serverTimestamp(),
       expiresAt,
       // usedBy は未使用のうちは付けない（使用時に redeem API が書く）
-    });
+    }));
 
     const origin = request.headers.get('origin') ?? request.nextUrl.origin;
     const url = `${origin}/store/join?shop=${encodeURIComponent(shopId)}&code=${encodeURIComponent(code)}`;

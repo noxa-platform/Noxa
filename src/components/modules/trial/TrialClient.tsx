@@ -804,10 +804,10 @@ export function TrialClient({ user }: { user: User }) {
       try {
         const existing = await getDocs(query(collection(db, `shop_shops/${shop.shopId}/seating_casts`), where('name', '==', c.name)));
         if (existing.empty) {
-          const ref = await addDoc(collection(db, `shop_shops/${shop.shopId}/seating_casts`), {
+          const ref = await addDoc(collection(db, `shop_shops/${shop.shopId}/seating_casts`), stampIrVersion({
             name: c.name, rank: '新人', hourlyWage: c.wage && c.wage > 0 ? c.wage : 0,
             isLocked: false, baseStatus: 'Free', uid: null, fromTrialId: c.id, createdAt: serverTimestamp(),
-          });
+          }));
           castId = ref.id; castCreated = true;
         } else {
           castId = existing.docs[0].id;

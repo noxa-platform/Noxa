@@ -8,6 +8,7 @@
 // 発行アルゴリズム: 8 文字英数字。衝突時は最大 5 回リトライ。
 import { NextRequest, NextResponse } from 'next/server';
 import { verifyRequest, getAdminDb, AuthError } from '../../lib/firebase-admin';
+import { stampIrVersion } from '@/lib/ir-version';
 
 const CODE_LENGTH = 8;
 const CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // 0/O/1/I/l などの紛らわしい文字を除外
@@ -63,11 +64,11 @@ export async function GET(request: NextRequest) {
         // 万一の衝突。次回の GET で再試行されるよう例外を投げる
         throw new Error('CODE_COLLISION');
       }
-      tx.create(codeRef, {
+      tx.create(codeRef, stampIrVersion({
         ownerUid: uid,
         createdAt: new Date(),
         usedCount: 0,
-      });
+      }));
       tx.set(ownerRef, { code, updatedAt: new Date() }, { merge: true });
       return code;
     });

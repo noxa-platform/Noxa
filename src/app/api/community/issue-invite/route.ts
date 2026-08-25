@@ -9,6 +9,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { randomBytes } from 'crypto';
 import { Timestamp } from 'firebase-admin/firestore';
 import { verifyRequest, getAdminDb, AuthError } from '../../lib/firebase-admin';
+import { stampIrVersion } from '@/lib/ir-version';
 
 const INVITE_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7日
 
@@ -33,10 +34,10 @@ export async function POST(request: NextRequest) {
     let remaining: number | null = null;
 
     await db.runTransaction(async (tx) => {
-      const inviteBase = {
+      const inviteBase = stampIrVersion({
         code, issuedBy: uid, issuedAt: Timestamp.now(), expiresAt,
         status: 'active', usedBy: null, usedAt: null,
-      };
+      });
       if (isAdmin) {
         tx.set(inviteRef, inviteBase);
         return;

@@ -9,6 +9,7 @@ import { db } from '@/lib/firebase/config';
 import { shopCodeFromId } from '@/lib/shop-identity';
 import { AuthGuard } from '@/components/AuthGuard';
 import { AccountShell } from '@/components/AccountShell';
+import { stampIrVersion } from '@/lib/ir-version';
 
 /**
  * 店舗登録（ガワ）。登録すると店舗運営モジュールが解放され、店舗端末用の
@@ -36,7 +37,7 @@ const DEFAULT_DEVICE_PROFILES = [
 
 async function createShop(uid: string, name: string, biz: string, area: string, pin: string): Promise<void> {
   // yorulog createWorkspace（type='business'）と同等スキーマで shop_shops を作成。
-  const ref = await addDoc(collection(db, 'shop_shops'), {
+  const ref = await addDoc(collection(db, 'shop_shops'), stampIrVersion({
     name,
     ownerUid: uid,
     type: 'business',
@@ -51,13 +52,13 @@ async function createShop(uid: string, name: string, biz: string, area: string, 
     aiContribution: true,
     createdAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
-  });
+  }));
   // 店舗コードを保存（doc id から決定的に導出＝改名しても不変・Day126）。
   // 保存しておくとコード検索や帳票からの逆引きができる（表示は導出でも出せる）
   await setDoc(ref, { shopCode: shopCodeFromId(ref.id) }, { merge: true });
 
   // オーナーをメンバーに
-  await setDoc(doc(db, `shop_shops/${ref.id}/members/${uid}`), { role: 'owner', joinedAt: serverTimestamp() });
+  await setDoc(doc(db, `shop_shops/${ref.id}/members/${uid}`), stampIrVersion({ role: 'owner', joinedAt: serverTimestamp() }));
 
   // 端末プロファイルを作成（同一 PIN を初期値に。給与等は allowedModules 外＝端末で非表示）
   if (pin) {

@@ -26,6 +26,7 @@ import {
   type MenuOrderCast, type MenuPanel,
 } from './types';
 import { buildFirstVisitPatch, type FirstVisitTableDoc } from './logic';
+import { stampIrVersion } from '@/lib/ir-version';
 
 type RawCast = DocumentData & {
   id: string; name?: string; rank?: string; ruby?: string; title?: string;
@@ -189,12 +190,12 @@ export function useMenuStore(user: User): UseMenuStore {
   const addCastPanel = useCallback<UseMenuStore['addCastPanel']>(async (v) => {
     if (!shopId) return '';
     const maxOrder = panels.reduce((m, p) => Math.max(m, p.order), 0);
-    const ref = await addDoc(castCol(), {
+    const ref = await addDoc(castCol(), stampIrVersion({
       name: v.name, ruby: v.ruby ?? '', title: v.title ?? '',
       rank: '非役職', hourlyWage: 0, isLocked: false, baseStatus: 'Free',
       isNewFace: false, selectable: true, menuVisible: true, menuOrder: maxOrder + 1,
       imgX: 50, imgY: 50, imgScale: 100, createdAt: serverTimestamp(),
-    });
+    }));
     return ref.id;
   }, [shopId, panels, castCol]);
 
@@ -231,9 +232,9 @@ export function useMenuStore(user: User): UseMenuStore {
   const addInfoCard = useCallback<UseMenuStore['addInfoCard']>(async (label) => {
     if (!shopId) return '';
     const maxOrder = panels.reduce((m, p) => Math.max(m, p.order), 0);
-    const ref = await addDoc(collection(db, `shop_shops/${shopId}/menu_info_cards`), {
+    const ref = await addDoc(collection(db, `shop_shops/${shopId}/menu_info_cards`), stampIrVersion({
       label, menuVisible: true, menuOrder: maxOrder + 1, imgX: 50, imgY: 50, imgScale: 100, createdAt: serverTimestamp(),
-    });
+    }));
     return ref.id;
   }, [shopId, panels]);
 
@@ -247,10 +248,11 @@ export function useMenuStore(user: User): UseMenuStore {
     for (const g of groups) {
       const table = tables.find((t) => t.name === g.seat);
       const orderRef = doc(collection(db, `shop_shops/${shopId}/menu_orders`));
-      const orderData = {
+      // オーダーは毎回新規（doc id は都度採番）＝新規作成点なので版を刻む
+      const orderData = stampIrVersion({
         seat: g.seat, tableId: table?.id ?? null, customerName: g.customerName, memo: g.memo,
         color: g.color, casts: g.casts, source, createdAt: serverTimestamp(),
-      };
+      });
       if (!table) { await setDoc(orderRef, orderData); continue; }
       // 席回し連携: オーダー記録と卓反映を単一トランザクションに。
       // 卓は tx 内で最新を読み直してパッチ（変更フィールドのみ）を作る
