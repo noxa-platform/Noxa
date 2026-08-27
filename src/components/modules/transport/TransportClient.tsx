@@ -19,6 +19,7 @@ import { useShopConfig, type ChoiceItem } from '@/lib/shopConfig';
 import { describeFirestoreError } from '@/lib/firestore-error';
 import { describeMissingShop } from '@/lib/shop-id-state';
 import { stampIrVersion } from '@/lib/ir-version';
+import { isOverwritable, describeUnknownValue } from '@/lib/unknown-value';
 import { toMillis } from '@/lib/datetime';
 
 /**
@@ -40,6 +41,12 @@ type Vehicle = {
   name: string;
   driver?: string;
   status: VehicleStatus;
+  /**
+   * **保存されている生の値**（P157）。`status` は未知だと `standby` に丸めているので、
+   * **書き戻しの判断はこちらで行う**。丸めた値で上書きすると、別のアプリが書いた
+   * 新しい状態が黙って消える。
+   */
+  statusRaw: unknown;
   note?: string;
 };
 
@@ -61,6 +68,8 @@ type TransportRequest = {
   target: string;
   area: string;
   status: RequestStatus;
+  /** **保存されている生の値**（P157）。未知を丸めた `status` で上書きしないための控え */
+  statusRaw: unknown;
   vehicleId?: string;
   driver?: string;
   memo?: string;
@@ -207,6 +216,7 @@ export function TransportClient({ user }: { user: User }) {
           target: (v.target as string) ?? '',
           area: (v.area as string) ?? '',
           status: isReqStatus(v.status) ? v.status : 'waiting',
+          statusRaw: v.status,
           vehicleId: (v.vehicleId as string) ?? undefined,
           driver: (v.driver as string) ?? undefined,
           memo: (v.memo as string) ?? undefined,
@@ -235,6 +245,7 @@ export function TransportClient({ user }: { user: User }) {
           name: (v.name as string) ?? '',
           driver: (v.driver as string) ?? undefined,
           status: isVehStatus(v.status) ? v.status : 'standby',
+          statusRaw: v.status,
           note: (v.note as string) ?? undefined,
         });
       });
@@ -278,6 +289,11 @@ export function TransportClient({ user }: { user: User }) {
   };
   const advanceStatus = async (req: TransportRequest) => {
     if (!reqPath || busy) return;
+    // ⚠️ 未知の状態を丸めた `req.status` から「次」を決めて書くと、別のアプリの状態が消える（P157）
+    if (!isOverwritable(req.statusRaw, isReqStatus)) {
+      setOpError(describeUnknownValue(req.statusRaw));
+      return;
+    }
     const next = NEXT_STATUS[req.status];
     if (!next) return;
     setBusy(true); setOpError(null);
@@ -288,6 +304,11 @@ export function TransportClient({ user }: { user: User }) {
   };
   const setRequestStatus = async (req: TransportRequest, status: RequestStatus) => {
     if (!reqPath || busy) return;
+    // ここは**人が状態を名指しで選ぶ**操作なので上書きしてよい。ただし知らない値を
+    // 潰すことは伝える（黙って消すのと、断ったうえで消すのは別・P157）
+    if (!isOverwritable(req.statusRaw, isReqStatus)) {
+      if (!window.confirm(`${describeUnknownValue(req.statusRaw)}\n\nこのまま「${status}」で上書きしますか？`)) return;
+    }
     setBusy(true); setOpError(null);
     try { await updateDoc(doc(db, `${reqPath}/${req.id}`), { status }); }
     catch (e) { setOpError(describeFirestoreError(e, 'ステータスの更新')); }
@@ -298,8 +319,15 @@ export function TransportClient({ user }: { user: User }) {
     setBusy(true); setOpError(null);
     try {
       const veh = vehicles.find((v) => v.id === vehicleId);
+      // ⚠️ 未知の状態なら **status を patch に載せない**（P157）。車両の割り当ては通しつつ、
+      // 丸めた値での上書きを避ける。「割り当てもできない」にすると機能が退化する
+      const keepStatus = !isOverwritable(req.statusRaw, isReqStatus);
       const patch: Record<string, unknown> = vehicleId
-        ? compact({ vehicleId, driver: veh?.driver, status: req.status === 'waiting' ? 'assigned' : req.status })
+        ? compact({
+            vehicleId,
+            driver: veh?.driver,
+            ...(keepStatus ? {} : { status: req.status === 'waiting' ? 'assigned' : req.status }),
+          })
         : { vehicleId: '', driver: '' };
       await updateDoc(doc(db, `${reqPath}/${req.id}`), patch);
     } catch (e) {
@@ -336,6 +364,11 @@ export function TransportClient({ user }: { user: User }) {
   };
   const cycleVehicleStatus = async (veh: Vehicle) => {
     if (!vehPath || busy) return;
+    // ⚠️ 未知の状態を丸めた `veh.status` から「次」を決めて書かない（P157）
+    if (!isOverwritable(veh.statusRaw, isVehStatus)) {
+      setOpError(describeUnknownValue(veh.statusRaw));
+      return;
+    }
     const idx = VEHICLE_STATUS_ORDER.indexOf(veh.status);
     const next = VEHICLE_STATUS_ORDER[(idx + 1) % VEHICLE_STATUS_ORDER.length];
     setBusy(true); setOpError(null);
