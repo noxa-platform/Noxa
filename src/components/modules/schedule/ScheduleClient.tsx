@@ -7,6 +7,7 @@ import { describeFirestoreError } from '@/lib/firestore-error';
 import type { User } from 'firebase/auth';
 import { db } from '@/lib/firebase/config';
 import { stampIrVersion } from '@/lib/ir-version';
+import { resolveScheduleDate } from '@/lib/schedule/item-date';
 
 /**
  * スケジュール — Noxa OS 個人機能（実データ）
@@ -19,8 +20,21 @@ const KIND_COLOR: Record<string, string> = { 出勤: 'var(--noxa-accent-primary)
 
 type Item = { id: string; title: string; date: string; kind: string; note?: string };
 
+/**
+ * doc を画面の 1 行にする。
+ *
+ * ⚠️ 日付の決定は `resolveScheduleDate` に切り出した（**同じコレクションに Web と iOS の
+ * 2 つの書き方が混ざっている**ため。理由と経緯はそちらの冒頭に書いてある）。
+ * ⚠️ 読めないときは `''` のままにし、**「過去」に混ぜない**（呼び出し側で分ける）。
+ */
 function mapItem(id: string, d: DocumentData): Item {
-  return { id, title: (d.title as string) ?? '（無題）', date: (d.date as string) ?? '', kind: (d.kind as string) ?? 'その他', note: (d.note as string) ?? '' };
+  return {
+    id,
+    title: (d.title as string) ?? '（無題）',
+    date: resolveScheduleDate(d as Record<string, unknown>) ?? '',
+    kind: (d.kind as string) ?? 'その他',
+    note: (d.note as string) ?? '',
+  };
 }
 
 export function ScheduleClient({ user }: { user: User }) {
@@ -91,8 +105,11 @@ export function ScheduleClient({ user }: { user: User }) {
 
   const sorted = useMemo(() => [...items].sort((a, b) => a.date.localeCompare(b.date)), [items]);
   const today = new Date().toISOString().slice(0, 10);
-  const upcoming = sorted.filter((i) => i.date >= today);
-  const past = sorted.filter((i) => i.date < today).reverse();
+  // ⚠️ **日付が読めないものを「過去」に混ぜない**（P156）。旧実装は `'' < today` が真なので
+  // 黙って履歴へ落としていた。「別の日だった」と「日付が読めない」は別のこと（P154-PM2）
+  const undated = sorted.filter((i) => !i.date);
+  const upcoming = sorted.filter((i) => i.date && i.date >= today);
+  const past = sorted.filter((i) => i.date && i.date < today).reverse();
 
   const add = async () => {
     if (!title.trim()) return;
@@ -159,6 +176,15 @@ export function ScheduleClient({ user }: { user: User }) {
           <Section label="過去">
             {past.length === 0 ? <Empty>履歴はありません。</Empty> : past.slice(0, 20).map((i) => <Row key={i.id} item={i} onRemove={() => remove(i.id)} dim />)}
           </Section>
+          {/* ⚠️ 黙って「過去」に混ぜない（P156）。ふだんは 0 件なのでセクションごと出さない */}
+          {undated.length > 0 && (
+            <Section label="日付が読めない予定">
+              <p role="alert" style={{ margin: '0 0 8px', fontSize: 12, color: 'var(--noxa-status-warning)' }}>
+                日付を読み取れなかった予定が {undated.length} 件あります（別のアプリで作られた可能性があります）。予定が無いのではなく、日付だけが読めていません。
+              </p>
+              {undated.map((i) => <Row key={i.id} item={i} onRemove={() => remove(i.id)} dim />)}
+            </Section>
+          )}
         </div>
       )}
     </Shell>
