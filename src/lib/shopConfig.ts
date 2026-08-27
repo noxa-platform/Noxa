@@ -162,6 +162,38 @@ function usableTerm(v: unknown): string | undefined {
   return t || undefined;
 }
 
+/**
+ * 設定を読めなかったときに画面へ出す一文（P159）。読めていれば `null`。
+ *
+ * ## なぜ要るか
+ * 読み取りに失敗しても画面は既定値で動く（止めると何も使えなくなる）。
+ * ⚠️ **問題は、その既定値が「この店の呼び名」の顔で出ること。**
+ * ホストクラブなのに「キャスト」と表示され、**利用者にはそれが設定なのか
+ * 読めなかった結果なのか区別が付かない**。
+ * これまで `configError` を見ていたのは**設定画面だけ**で（既定値での上書き保存を防ぐため）、
+ * 呼び名を実際に表示する他の全画面は**黙って既定を出していた**。
+ *
+ * ## 文言の作り方（yorulog の `TerminologyPlan` と揃える）
+ * - ⚠️ **「呼び名が設定されていません」と言わない。** 対処が「設定する」と「開き直す」で
+ *   まったく違うのに、同じ文言だと利用者は設定しに行ってしまう。
+ * - **何が既定なのか**を言う（呼び名なのか、業種プリセットが当たらないのか）。
+ * - 読めていないだけで**データは無事**だと添える（設定が消えたと誤解されるのが一番まずい）。
+ */
+export function describeConfigFallback(
+  configError: string | null | undefined,
+  industryError: string | null | undefined,
+): string | null {
+  if (configError) {
+    return '店舗設定を読み込めていません。表示中の呼び名・モジュール構成は、この店の設定ではなく既定値です'
+      + '（設定が消えたわけではありません）。通信状況を確認して画面を開き直してください。';
+  }
+  if (industryError) {
+    // 店の上書きは効いているが、業種プリセットが当たらない＝上書きの無い呼び名だけ既定に出る
+    return '店舗情報を読み込めていません。設定していない呼び名は、業種に合わせたものではなく既定値で表示されています。';
+  }
+  return null;
+}
+
 export function resolveTerm(config: ShopConfig | null, industry: string | undefined, key: ConceptId | string): string {
   return usableTerm(config?.terminology?.[key])
     ?? usableTerm(industry ? INDUSTRY_TERMS[industry]?.[key] : undefined)
@@ -196,6 +228,12 @@ export type UseShopConfig = {
    * 在庫カテゴリが**既定値で上書き**されて消える。
    */
   configError: string | null;
+  /**
+   * 読めなかったときに**画面に出す一文**（P159）。読めていれば `null`。
+   * ⚠️ `configError` は「編集を止める」ための印で、**設定画面しか見ていなかった**。
+   * 呼び名を表示する全画面が「これは既定です」と言えるように、文言を hook から配る。
+   */
+  configNotice: string | null;
   industry: string | undefined;
   config: ShopConfig;
   /** 用語解決（店舗上書き → 業種プリセット → 既定） */
@@ -260,9 +298,15 @@ export function useShopConfig(user: User): UseShopConfig {
     await setDoc(doc(db, `shop_shops/${shop.shopId}/config/settings`), { ...patch, updatedAt: serverTimestamp() }, { merge: true });
   }, [shop.shopId]);
 
+  const inScope = !!shop.shopId && cfgSnap?.shopId === shop.shopId;
+  const cfgReadError = inScope ? (cfgSnap?.error ?? null) : null;
+  const configError = inScope ? (cfgSnap?.error ?? industryError) : industryError;
+  // ⚠️ 2 つの失敗を**畳まない**。設定 doc が読めない（呼び名もモジュールも既定）と、
+  // 業種が読めない（店の上書きは効くが、上書きの無い呼び名だけ既定）では説明が違う
+  const configNotice = describeConfigFallback(cfgReadError, industryError);
+
   const t = useCallback((key: string) => resolveTerm(config, industry, key), [config, industry]);
 
-  const configError = shop.shopId && cfgSnap?.shopId === shop.shopId ? (cfgSnap.error ?? industryError) : industryError;
 
-  return { loading: shop.loading || (!!shop.shopId && cfgSnap?.shopId !== shop.shopId), shopId: shop.shopId, canManage: shop.canManage, shopError: shop.shopError, configError, industry, config, t, save };
+  return { loading: shop.loading || (!!shop.shopId && cfgSnap?.shopId !== shop.shopId), shopId: shop.shopId, canManage: shop.canManage, shopError: shop.shopError, configError, configNotice, industry, config, t, save };
 }

@@ -309,6 +309,18 @@ export function AccountShell({ user, children }: { user: User; children: React.R
       {/* Main */}
       <main className="flex-1 overflow-auto px-5 md:px-10 pt-20 md:pt-9 pb-24 md:pb-10">
         {!device.isDevice && <EmailVerifyBanner user={user} />}
+        {/*
+          ⚠️ 設定を読めなかったことを**全画面で**言う（P159）。
+          これまで `configError` を見ていたのは設定画面だけで（既定値での上書き保存を防ぐため）、
+          呼び名を実際に表示する他の画面は**黙って既定を出していた**。
+          ホストクラブなのに「キャスト」と出て、利用者には設定なのか読めなかった結果なのか
+          区別が付かない。文言は `describeConfigFallback`（理由ごとに変える）。
+        */}
+        {cfg.configNotice && (
+          <div role="alert" style={{ margin: '0 0 16px', padding: '10px 14px', borderRadius: 12, fontSize: 13, lineHeight: 1.6, background: 'rgba(245,212,114,0.08)', border: '1px solid var(--noxa-status-warning)' }}>
+            {cfg.configNotice}
+          </div>
+        )}
         {children}
       </main>
 
