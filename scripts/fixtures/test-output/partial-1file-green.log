@@ -1,0 +1,15 @@
+
+> noxa@0.1.0 test
+> bash scripts/run-tests.sh --run test/lib/datetime.test.ts
+
+
+ RUN  v4.1.9 /home/wpuhs/dev/noxa-platform/noxa
+
+
+ Test Files  1 passed (1)
+      Tests  22 passed (22)
+   Start at  07:33:35
+   Duration  161ms (transform 36ms, setup 0ms, import 48ms, tests 8ms, environment 0ms)
+
+❌ 1 ファイル / 22 件しか走っていません（下限 120 / 1700）
+   ③部分的な沈黙。走らなかったぶんは**落ちなかったのではなく、走っていません**

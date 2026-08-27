@@ -41,3 +41,6 @@ firebase-adminsdk-*.json
 # Playwright MCP artifacts / screenshots
 .playwright-mcp/
 /noxa-*.png
+
+# npm test の生ログ（走り切ったかの判定に使う・P155）
+.test-output.log

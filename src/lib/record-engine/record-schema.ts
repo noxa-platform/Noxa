@@ -300,7 +300,7 @@ export function validateXMap(raw: unknown, schema?: RecordSchema): ValidateXResu
     }
     const checked = checkValue(value, byKey.get(key));
     if ('reason' in checked) { rejected.push({ key, reason: checked.reason }); continue; }
-    for (const reason of checked.trimmed ?? []) trimmed.push({ key, reason });
+    for (const reason of checked.trimmed) trimmed.push({ key, reason });
     x[key] = checked.value;
   }
   return { x, rejected, trimmed };
@@ -314,16 +314,16 @@ export function validateXMap(raw: unknown, schema?: RecordSchema): ValidateXResu
 function checkValue(
   value: unknown,
   def: FieldDef | undefined,
-): { value: unknown; trimmed?: string[] } | { reason: string } {
-  if (value === null || value === undefined) return { value: null };
+): { value: unknown; trimmed: string[] } | { reason: string } {
+  if (value === null || value === undefined) return { value: null, trimmed: [] };
 
   if (typeof value === 'number') {
     // **`NaN` / `Infinity` は 1 個混ざるだけで合計が全部 NaN になる。**
     // Firestore は保存できてしまうので、ここで止めるしかない
     if (!Number.isFinite(value)) return { reason: '数値が有限ではありません' };
-    return { value };
+    return { value, trimmed: [] };
   }
-  if (typeof value === 'boolean') return { value };
+  if (typeof value === 'boolean') return { value, trimmed: [] };
   if (typeof value === 'string') {
     if (value.length > MAX_STRING_LENGTH) {
       return {
@@ -331,7 +331,7 @@ function checkValue(
         trimmed: [`${MAX_STRING_LENGTH} 字を超えたため ${value.length - MAX_STRING_LENGTH} 字を切りました`],
       };
     }
-    return { value };
+    return { value, trimmed: [] };
   }
   if (Array.isArray(value)) {
     // `tags` 想定。要素は文字列に限る（入れ子の配列/マップは集計不能で、深さの上限も要る）
@@ -348,7 +348,7 @@ function checkValue(
     if (longs > 0) notes.push(`${longs} 個の値が ${MAX_STRING_LENGTH} 字を超えたため切りました`);
     return {
       value: items.map((v) => (v.length > MAX_STRING_LENGTH ? v.slice(0, MAX_STRING_LENGTH) : v)),
-      ...(notes.length ? { trimmed: notes } : {}),
+      trimmed: notes,
     };
   }
   if (typeof value === 'object') {
@@ -360,7 +360,7 @@ function checkValue(
   return { reason: '保存できない型です' };
 }
 
-function checkPeriod(v: Record<string, unknown>): { value: unknown } | { reason: string } {
+function checkPeriod(v: Record<string, unknown>): { value: unknown; trimmed: string[] } | { reason: string } {
   const num = (k: string): number | null => {
     const raw = v[k];
     if (raw === null || raw === undefined) return null;
@@ -372,7 +372,7 @@ function checkPeriod(v: Record<string, unknown>): { value: unknown } | { reason:
   if (Number.isNaN(start) || Number.isNaN(end)) return { reason: 'period の start / end が数値ではありません' };
   // end は開区間（§1.2）。start > end は期間として成立しない
   if (start !== null && end !== null && start > end) return { reason: 'period の start が end より後です' };
-  return { value: { start: start ?? null, end: end ?? null } };
+  return { value: { start: start ?? null, end: end ?? null }, trimmed: [] };
 }
 
 /**

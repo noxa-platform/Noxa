@@ -1,0 +1,14 @@
+
+> noxa@0.1.0 test
+> bash scripts/run-tests.sh --run
+
+
+ RUN  v4.1.9 /home/wpuhs/dev/noxa-platform/noxa
+
+
+ Test Files  148 passed (148)
+      Tests  1935 passed (1935)
+   Start at  07:33:30
+   Duration  4.88s (transform 11.17s, setup 0ms, import 25.33s, tests 3.16s, environment 17ms)
+
+✅ 148 ファイル / 1935 件を実行して全緑（下限 120 / 1700）

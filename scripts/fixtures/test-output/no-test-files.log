@@ -1,0 +1,9 @@
+
+ RUN  v4.1.9 /home/wpuhs/dev/noxa-platform/noxa
+
+No test files found, exiting with code 1
+
+filter: test/lib/__nope.test.ts
+include: test/**/*.test.ts
+exclude:  **/node_modules/**, **/.git/**, test/rules/**
+
