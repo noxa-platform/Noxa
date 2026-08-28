@@ -19,7 +19,7 @@ import { useShopConfig, type ChoiceItem } from '@/lib/shopConfig';
 import { describeFirestoreError } from '@/lib/firestore-error';
 import { describeMissingShop } from '@/lib/shop-id-state';
 import { stampIrVersion } from '@/lib/ir-version';
-import { isOverwritable, describeUnknownValue } from '@/lib/unknown-value';
+import { isOverwritable, describeUnknownValue, isUnknownValue, unknownValueLabel } from '@/lib/unknown-value';
 import { toMillis } from '@/lib/datetime';
 
 /**
@@ -549,7 +549,11 @@ export function TransportClient({ user }: { user: User }) {
             style={{ gap: 'clamp(10px, 1.4vw, 14px)' }}
           >
             {vehicles.map((v) => {
-              const meta = VEHICLE_STATUS_META[v.status];
+              // 車両も同じ（P160）。知らない状態を「待機」の顔で出さない
+              const vehUnknown = isUnknownValue(v.statusRaw, isVehStatus);
+              const meta = vehUnknown
+                ? { label: unknownValueLabel(v.statusRaw), color: 'var(--noxa-status-warning)', bg: 'rgba(245,212,114,0.10)' }
+                : VEHICLE_STATUS_META[v.status];
               return (
                 <div
                   key={v.id}
@@ -713,9 +717,16 @@ export function TransportClient({ user }: { user: User }) {
               <ul style={{ listStyle: 'none', margin: 0, padding: 0 }} role="list" aria-label="送迎リクエスト">
                 {requests.map((req, idx) => {
                   const typeMeta = typeMetaOf(reqTypes, req.type);
-                  const statusMeta = REQUEST_STATUS_META[req.status];
+                  // ⚠️ 知らない状態を**丸めたラベルで出さない**（P160）。`arrived` を「待機」と
+                  // 表示すると、画面は別のアプリが進めた状態を「まだ待機中」と言い切る。
+                  // P157 で書き込みは守ったが、**表示は丸めたままだった**
+                  const statusUnknown = isUnknownValue(req.statusRaw, isReqStatus);
+                  const statusMeta = statusUnknown
+                    ? { label: unknownValueLabel(req.statusRaw), color: 'var(--noxa-status-warning)', bg: 'rgba(245,212,114,0.10)' }
+                    : REQUEST_STATUS_META[req.status];
                   const isSelected = req.id === selectedRequestId;
-                  const next = NEXT_STATUS[req.status];
+                  // 知らない状態から「次」は決められない（決めると本物を潰す・P157）
+                  const next = statusUnknown ? null : NEXT_STATUS[req.status];
 
                   return (
                     <li
@@ -820,7 +831,9 @@ export function TransportClient({ user }: { user: User }) {
                           e.stopPropagation();
                           advanceStatus(req);
                         }}
-                        aria-label={`${req.target} のリクエストを${NEXT_STATUS_LABEL[req.status]}`}
+                        aria-label={statusUnknown
+                          ? `${req.target} のリクエストは状態を読み取れないため進められません`
+                          : `${req.target} のリクエストを${NEXT_STATUS_LABEL[req.status]}`}
                         disabled={busy || next === null}
                         style={{
                           appearance: 'none',
@@ -841,7 +854,9 @@ export function TransportClient({ user }: { user: User }) {
                           boxShadow: next === null ? 'none' : 'var(--noxa-glow-soft)',
                         }}
                       >
-                        {NEXT_STATUS_LABEL[req.status]}
+                        {/* ⚠️ 進められないのに「配車済にする」と書くと、押せない理由が
+                            「完了済みだから」に見える（P160） */}
+                        {statusUnknown ? '状態不明' : NEXT_STATUS_LABEL[req.status]}
                       </button>
                     </li>
                   );
@@ -1057,7 +1072,11 @@ export function TransportClient({ user }: { user: User }) {
             {selectedRequest && (() => {
               const req = selectedRequest;
               const typeMeta = typeMetaOf(reqTypes, req.type);
-              const statusMeta = REQUEST_STATUS_META[req.status];
+              // ⚠️ 一覧と詳細で**2 箇所ある**（P160）。片方だけ直すと、一覧では「不明」なのに
+              // 詳細では「待機」と出て、かえって分からなくなる
+              const statusMeta = isUnknownValue(req.statusRaw, isReqStatus)
+                ? { label: unknownValueLabel(req.statusRaw), color: 'var(--noxa-status-warning)', bg: 'rgba(245,212,114,0.10)' }
+                : REQUEST_STATUS_META[req.status];
               return (
                 <div
                   aria-label={`${req.target} のリクエスト詳細`}
@@ -1119,13 +1138,15 @@ export function TransportClient({ user }: { user: User }) {
 
                   {/* ステータス手動切替 */}
                   <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                    {/* ⚠️ 未知の値のときは、どれも選択中に見せない（P160）。
+                        「待機」が選ばれて見えると、画面が別のアプリの状態を自分の語彙で言い切る */}
                     {(Object.keys(REQUEST_STATUS_META) as RequestStatus[]).map((st) => (
                       <button
                         key={st}
                         type="button"
                         onClick={() => setRequestStatus(req, st)}
                         disabled={busy}
-                        style={chip(req.status === st)}
+                        style={chip(!isUnknownValue(req.statusRaw, isReqStatus) && req.status === st)}
                       >
                         {REQUEST_STATUS_META[st].label}
                       </button>

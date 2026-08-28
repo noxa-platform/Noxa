@@ -32,3 +32,29 @@ export function describeUnknownValue(raw: unknown): string {
   const shown = typeof raw === 'string' ? raw : JSON.stringify(raw);
   return `このアプリが知らない状態（${shown}）のため、上書きしませんでした。別のアプリで更新された可能性があります。`;
 }
+
+/**
+ * 保存値が「こちらの知らない値」か（P160）。表示の判断に使う。
+ *
+ * ⚠️ `isOverwritable` とは**別の問い**。あちらは「書いてよいか」で、
+ * **未設定は書いてよい**（まだ誰も書いていないので）。こちらは「そのまま出してよいか」で、
+ * **未設定は既定の見え方でよい**（値が無いだけ）。**知らない値が入っているときだけ**、
+ * 丸めた表示が**嘘**になる。
+ */
+export function isUnknownValue(raw: unknown, known: (v: unknown) => boolean): boolean {
+  if (raw === undefined || raw === null || raw === '') return false;
+  return !known(raw);
+}
+
+/**
+ * 知らない値をそのまま見せるときの表示（P160）。
+ *
+ * ⚠️ **丸めた既定のラベルで出さない。** `status: 'arrived'` を「待機」と表示すると、
+ * 画面は**別のアプリが進めた状態を、まだ待機中だと言い切る**。
+ * P157 で書き込みは守ったが、**表示は丸めたままだった**——「切ったことを言わずに
+ * 全体の顔で出す」の表示版で、書き込みより先に人の目に入る。
+ */
+export function unknownValueLabel(raw: unknown): string {
+  const shown = typeof raw === 'string' ? raw : JSON.stringify(raw);
+  return `不明（${shown}）`;
+}
