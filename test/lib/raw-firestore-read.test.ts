@@ -94,11 +94,35 @@ const FILES = sourceFiles(ROOT).map((p) => ({
 /** `snap.data() as T` / `d.data() as Partial<T>` … 実行時に検証されない読み */
 const RAW_READ = /\.data\(\) as /g;
 
+/**
+ * ⚠️ **`as` の付かない `.data()` は、この走査から丸ごと外れる**（P161-PM4 で実測）。
+ * 全域で **110 対 111** ——「`.data() as` が 110 件」は**全体の半分の綴りを数えた数**だった。
+ * 🔴 これは P161 起票時の「63 件」（`src/app/api` を数え忘れ）と**同じ誤り**で、
+ * あのときは**走査範囲**、今回は**走査する綴り**を書かずに数字だけ渡していた。
+ *
+ * 中身は一様ではない: `mapReservation(d.id, d.data())` のように**項目ごとに検証する
+ * 写像関数へ渡す**（＝正しい形）ものと、`d.data().hourlyWage as number` のように
+ * **生のまま項目を取り出す**ものが混在する。前者は直す対象ではない。
+ * ここでは**分類せず母集団だけ固定**する（分類は P162。yorulog の
+ * 「変種は走査の側で潰す／名前付き型へ寄せる方針は取らない」と同じ判断）。
+ */
+const RAW_READ_UNCAST = /\.data\(\)(?! as )/g;
+
 const counts = new Map<string, number>();
 for (const f of FILES) {
   const n = [...f.src.matchAll(RAW_READ)].length;
   if (n > 0) counts.set(f.path, n);
 }
+
+/**
+ * `as` の付かない `.data()` の総数（母集団のもう半分・P161-PM4）。
+ * ⚠️ **111 であって 110 ではない。** シェルの `grep -c` は **行単位**で数えるので、
+ * `src/lib/useTheme.ts:48` の**1 行に 2 つある `.data()`** を 1 と数えていた。
+ * ＝ **綴りを直した走査が、今度は数え方（行 vs 出現）で外していた。**
+ * 目視で 1 件確かめるまで、この 1 件差は「まあ 110 だろう」で通っていた。
+ */
+const UNCAST_TOTAL = 111;
+const uncastTotal = FILES.reduce((acc, f) => acc + [...f.src.matchAll(RAW_READ_UNCAST)].length, 0);
 
 describe('生データ経路のラチェット（.data() as）', () => {
   // ⚠️ グロブが破綻して 0 件になれば、このテストは**全部緑**で通ってしまう（沈黙の段 1）
@@ -118,6 +142,11 @@ describe('生データ経路のラチェット（.data() as）', () => {
       .map(([p, n]) => `${p}: ${BASELINE[p] ?? 0} → ${n}`);
     // 新しい生読みを足すなら、まず寄せ先（型検証を通す関数）へ通すこと
     expect(grown).toEqual([]);
+  });
+
+  // ⚠️ 走査が **1 つの綴りしか見ていない**と、母集団は静かに半分になる（P161-PM4）
+  it('`as` の付かない `.data()` も母集団として固定されている', () => {
+    expect(uncastTotal).toBe(UNCAST_TOTAL);
   });
 
   it('減った分は理由を確かめてから baseline を下げる', () => {
