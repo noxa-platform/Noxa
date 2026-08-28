@@ -20,6 +20,7 @@ import { useShopId } from '@/lib/useShopId';
 import { describeFirestoreError } from '@/lib/firestore-error';
 import { describeMissingShop } from '@/lib/shop-id-state';
 import { stampIrVersion } from '@/lib/ir-version';
+import { describeUnknownValue, isOverwritable, isUnknownValue, unknownValueLabel } from '@/lib/unknown-value';
 
 /**
  * 体験入店 — Noxa OS モジュール（実データ）
@@ -43,6 +44,8 @@ type Candidate = {
   contact: string;
   note: string;
   status: TrialStatus;
+  /** 保存されている生の値（丸める前）。⚠️ 書き戻し・表示・集計の判断はこちらで行う（P161） */
+  statusRaw: unknown;
 };
 
 const SOURCES: Source[] = ['SNS', '紹介', '求人'];
@@ -110,9 +113,12 @@ function toSource(v: unknown): Source {
   return v === '紹介' || v === '求人' ? v : 'SNS';
 }
 
+function isTrialStatus(v: unknown): v is TrialStatus {
+  return v === 'applied' || v === 'scheduled' || v === 'ongoing' || v === 'review' || v === 'hired' || v === 'rejected';
+}
+
 function toStatus(v: unknown): TrialStatus {
-  const all: TrialStatus[] = ['applied', 'scheduled', 'ongoing', 'review', 'hired', 'rejected'];
-  return all.includes(v as TrialStatus) ? (v as TrialStatus) : 'applied';
+  return isTrialStatus(v) ? v : 'applied';
 }
 
 function mapCandidate(id: string, d: DocumentData): Candidate {
@@ -126,6 +132,9 @@ function mapCandidate(id: string, d: DocumentData): Candidate {
     contact: (d.contact as string) ?? '',
     note: (d.note as string) ?? '',
     status: toStatus(d.status),
+    // ⚠️ 丸めた値だけを持つと、別のアプリが書いた段階を「応募」と言い切り、
+    // 名前を直しただけの保存でそれを消す（予約・送迎と同じ形・P161）
+    statusRaw: d.status,
   };
 }
 
@@ -146,9 +155,21 @@ function Stars({ rating }: { rating: number }) {
   );
 }
 
-/** ステータスバッジ */
-function StatusBadge({ status }: { status: TrialStatus }) {
-  const m = STATUS_META[status];
+/**
+ * ステータスバッジ。
+ * ⚠️ 知らない段階を**丸めたラベルで出さない**（P160 の体験入店版）。「応募」と出すと、
+ * 画面は別のアプリが進めた候補者を「まだ応募段階」だと言い切る。
+ */
+function StatusBadge({ status, statusRaw }: { status: TrialStatus; statusRaw?: unknown }) {
+  const unknown = isUnknownValue(statusRaw, isTrialStatus);
+  const m = unknown
+    ? {
+        label: unknownValueLabel(statusRaw),
+        color: 'var(--noxa-status-warning)',
+        bg: 'rgba(246,173,85,0.10)',
+        border: 'rgba(246,173,85,0.30)',
+      }
+    : STATUS_META[status];
   return (
     <span
       style={{
@@ -246,8 +267,11 @@ function CandidateRow({
   onDelete: (c: Candidate) => void;
   busy: boolean;
 }) {
-  const isFinalized = candidate.status === 'hired' || candidate.status === 'rejected';
-  const next = nextStatus(candidate.status);
+  // ⚠️ 知らない段階から「次」は決められない（決めると本物を潰す・P157）。
+  // 「体験予約へ進める」と書いたまま押させると、別のアプリの段階が黙って巻き戻る
+  const statusUnknown = isUnknownValue(candidate.statusRaw, isTrialStatus);
+  const isFinalized = !statusUnknown && (candidate.status === 'hired' || candidate.status === 'rejected');
+  const next = statusUnknown ? null : nextStatus(candidate.status);
   return (
     <li
       style={{
@@ -273,7 +297,7 @@ function CandidateRow({
         <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
           <span style={{ fontSize: 14, fontWeight: 600 }}>{candidate.name}</span>
           <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
-            <StatusBadge status={candidate.status} />
+            <StatusBadge status={candidate.status} statusRaw={candidate.statusRaw} />
             <span
               style={{
                 fontFamily: mono,
@@ -454,7 +478,11 @@ type DraftKey = 'new' | string;
 type Draft = {
   name: string;
   source: Source;
-  status: TrialStatus;
+  /**
+   * ⚠️ `null` は「こちらの語彙に無い値が保存されている」（P161）。
+   * 丸めた既定を初期値に入れると、名前を直しただけの保存で**別のアプリの段階が消える**。
+   */
+  status: TrialStatus | null;
   scheduledAt: string;
   wage: string;
   rating: number;
@@ -470,7 +498,7 @@ function draftFrom(c: Candidate): Draft {
   return {
     name: c.name,
     source: c.source,
-    status: c.status,
+    status: isUnknownValue(c.statusRaw, isTrialStatus) ? null : c.status,
     scheduledAt: c.scheduledAt,
     wage: c.wage == null ? '' : String(c.wage),
     rating: c.rating,
@@ -577,11 +605,18 @@ function Editor({
         <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
           <span style={lbl}>ステータス</span>
           <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+            {/* ⚠️ 未知の値のときは、どれも選択中に見せない（P160）。「応募」が選ばれて見えると、
+                画面が別のアプリの段階を自分の語彙で言い切る。押せば上書きは通る */}
             {(Object.keys(STATUS_META) as TrialStatus[]).map((s) => (
               <button key={s} type="button" onClick={() => set('status', s)} style={chip(d.status === s)}>
                 {STATUS_META[s].label}
               </button>
             ))}
+            {d.status === null && (
+              <span style={{ fontFamily: mono, fontSize: 10, color: 'var(--noxa-status-warning)', alignSelf: 'center' }}>
+                このアプリが知らない段階が保存されています（選ばなければそのまま保ちます）
+              </span>
+            )}
           </div>
         </div>
 
@@ -703,7 +738,8 @@ export function TrialClient({ user }: { user: User }) {
   const shop = useShopId(user);
   // 出所（path）つきスナップショットから candidates/loading を導出（set-state-in-effect 返済・Day18）
   const [candSnap, setCandSnap] = useState<{ path: string; list: Candidate[] } | null>(null);
-  const [filterStatus, setFilterStatus] = useState<TrialStatus | 'all'>('all');
+  // 'unknown' = こちらの語彙に無い段階。⚠️ 絞り込めないと、一覧に出ているのに探せない
+  const [filterStatus, setFilterStatus] = useState<TrialStatus | 'all' | 'unknown'>('all');
   const [busy, setBusy] = useState(false);
   // 保存・ステータス遷移・削除・本入店の失敗（旧実装は catch が無く完全に無音だった）
   const [opError, setOpError] = useState<string | null>(null);
@@ -747,10 +783,12 @@ export function TrialClient({ user }: { user: User }) {
     if (!path || busy || !d.name.trim()) return;
     setBusy(true); setOpError(null);
     try {
+      // ⚠️ 知らない段階のときは **status を payload に載せない**（P157 の「割り当てだけ通す」と同じ）。
+      // 「編集できない」にすると機能が退化するので、他の項目の保存は通す
       const payload: Record<string, unknown> = {
         name: d.name.trim(),
         source: d.source,
-        status: d.status,
+        ...(d.status === null ? {} : { status: d.status }),
         rating: d.rating, // 0=未評価
       };
       if (d.scheduledAt) payload.scheduledAt = d.scheduledAt;
@@ -772,6 +810,15 @@ export function TrialClient({ user }: { user: User }) {
     }
   };
 
+  /**
+   * 段階を書き換えてよいか（P161）。**人が名指しで選ぶ**操作なので上書きは通すが、
+   * 知らない値を潰すことは伝える（黙って消すのと、断ったうえで消すのは別・P157）。
+   */
+  const confirmOverwriteStatus = (c: Candidate, label: string): boolean => {
+    if (isOverwritable(c.statusRaw, isTrialStatus)) return true;
+    return window.confirm(`${describeUnknownValue(c.statusRaw)}\n\nこのまま「${label}」で上書きしますか？`);
+  };
+
   const patchStatus = async (c: Candidate, status: TrialStatus) => {
     if (!path || busy) return;
     setBusy(true); setOpError(null);
@@ -785,6 +832,9 @@ export function TrialClient({ user }: { user: User }) {
     }
   };
   const advance = (c: Candidate) => {
+    // ⚠️ 未知の段階を丸めた `c.status` から「次」を決めて書くと、別のアプリの段階が消える（P157）。
+    // ボタンは隠してあるが、判断は**書く側**にも置く（表示だけの防御は移設で外れる）
+    if (!isOverwritable(c.statusRaw, isTrialStatus)) { setOpError(describeUnknownValue(c.statusRaw)); return; }
     const next = nextStatus(c.status);
     if (next) void patchStatus(c, next);
   };
@@ -796,6 +846,7 @@ export function TrialClient({ user }: { user: User }) {
   // 招待発行は owner/manager のみ API が許可。失敗しても名簿反映は成立させる。
   const hire = async (c: Candidate) => {
     if (!path || !shop.shopId || busy) return;
+    if (!confirmOverwriteStatus(c, '本入店')) return;
     setBusy(true); setOpError(null);
     try {
       // ① 名簿へ（同名キャストが既にいれば作らない）
@@ -841,7 +892,10 @@ export function TrialClient({ user }: { user: User }) {
       setBusy(false);
     }
   };
-  const reject = (c: Candidate) => void patchStatus(c, 'rejected');
+  const reject = (c: Candidate) => {
+    if (!confirmOverwriteStatus(c, '不採用')) return;
+    void patchStatus(c, 'rejected');
+  };
 
   const remove = async (c: Candidate) => {
     if (!path || busy) return;
@@ -857,16 +911,23 @@ export function TrialClient({ user }: { user: User }) {
     }
   };
 
-  const active = candidates.filter((c) => c.status !== 'rejected');
+  // ⚠️ 知らない段階を既定（応募）に混ぜて数えない（P161）。「無い・分からない・ゼロを混ぜない」の集計版
+  const isUnknownCandidate = (c: Candidate) => isUnknownValue(c.statusRaw, isTrialStatus);
+  const known = candidates.filter((c) => !isUnknownCandidate(c));
+  const unknownCount = candidates.length - known.length;
+  const active = candidates.filter((c) => isUnknownCandidate(c) || c.status !== 'rejected');
   const today = ymd();
   const month = ym();
   const todayCount = candidates.filter((c) => c.scheduledAt === today).length;
   const monthCount = candidates.filter((c) => c.scheduledAt.startsWith(month)).length;
-  const hiredCount = candidates.filter((c) => c.status === 'hired').length;
-  const eligibleCount = candidates.filter((c) => c.status === 'hired' || c.status === 'review').length;
+  const hiredCount = known.filter((c) => c.status === 'hired').length;
+  const eligibleCount = known.filter((c) => c.status === 'hired' || c.status === 'review').length;
   const hireRate = eligibleCount > 0 ? `${Math.round((hiredCount / eligibleCount) * 100)}%` : '—';
 
-  const filtered = filterStatus === 'all' ? candidates : candidates.filter((c) => c.status === filterStatus);
+  const filtered =
+    filterStatus === 'all' ? candidates
+    : filterStatus === 'unknown' ? candidates.filter(isUnknownCandidate)
+    : known.filter((c) => c.status === filterStatus);
 
   const editorInitial = useMemo<Draft | null>(() => {
     if (editorKey === null) return null;
@@ -1043,7 +1104,7 @@ export function TrialClient({ user }: { user: User }) {
                 role="list"
               >
                 {PIPELINE_STEPS.map((step, i) => {
-                  const count = candidates.filter((c) => c.status === step.key).length;
+                  const count = known.filter((c) => c.status === step.key).length;
                   const isActive = filterStatus === step.key;
                   const meta = STATUS_META[step.key];
                   return (
@@ -1141,8 +1202,29 @@ export function TrialClient({ user }: { user: User }) {
                   cursor: 'pointer',
                 }}
               >
-                不採用（{candidates.filter((c) => c.status === 'rejected').length}）
+                不採用（{known.filter((c) => c.status === 'rejected').length}）
               </button>
+              {/* ⚠️ パイプラインのどの段にも入らないので、絞り込みが無いと
+                  「一覧には出ているのに探せない」候補者になる（P161） */}
+              {unknownCount > 0 && (
+                <button
+                  type="button"
+                  onClick={() => setFilterStatus(filterStatus === 'unknown' ? 'all' : 'unknown')}
+                  aria-pressed={filterStatus === 'unknown'}
+                  style={{
+                    padding: '5px 12px',
+                    background: filterStatus === 'unknown' ? 'rgba(246,173,85,0.10)' : 'transparent',
+                    border: `1px solid ${filterStatus === 'unknown' ? 'rgba(246,173,85,0.30)' : 'var(--noxa-border)'}`,
+                    borderRadius: 9999,
+                    fontFamily: mono,
+                    fontSize: 11,
+                    color: filterStatus === 'unknown' ? 'var(--noxa-status-warning)' : 'var(--noxa-text-faint)',
+                    cursor: 'pointer',
+                  }}
+                >
+                  不明（{unknownCount}）
+                </button>
+              )}
               <span
                 style={{
                   marginLeft: 'auto',

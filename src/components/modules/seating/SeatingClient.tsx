@@ -17,6 +17,7 @@ import { AI_CONSENT_TEXT } from '@/lib/ai-privacy';
 import { createDefaultStoreConfig } from '@/lib/pos/defaultConfig';
 import type { StoreConfig } from '@/lib/pos/types';
 import type { Cast, FloorTable, TableType, Customer, CastStatus, Rank } from '@/lib/seating/types';
+import { describeUnknownValue, isOverwritable, isUnknownValue, unknownValueLabel } from '@/lib/unknown-value';
 
 /**
  * ③ 席回し — フロア管理 / キャストローテーション（実データ）
@@ -34,6 +35,9 @@ const RANK_TINT: Record<Rank, string> = {
   BOSS: '#F5D472', 役職: '#B89CFB', 非役職: '#67E8F9', 新人: '#7BE8A1',
 };
 const STATUS_LABEL: Record<CastStatus, string> = { Free: '待機', Work: '在卓', Break: '休憩', Absent: '欠勤' };
+function isCastStatus(v: unknown): v is CastStatus {
+  return v === 'Free' || v === 'Work' || v === 'Break' || v === 'Absent';
+}
 
 const yen = (n: number) => `¥${Math.round(n).toLocaleString('ja-JP')}`;
 
@@ -799,6 +803,10 @@ function CastRoster({ casts, store, wageFor, castLabel = 'キャスト', pickups
   const cycleStatus = (c: Cast) => {
     // 在卓中は卓から外すまで変更不可。Free<->Break<->Absent を循環
     if (c.status === 'Work') return;
+    // ⚠️ 丸めは**読みだけでなく遷移の else 節にも住む**（P161）。ここは読みでは丸めていないのに、
+    // 三項の最後が既定 'Free' なので、**知らない状態のキャストを押すと「待機」で上書き**していた。
+    // `toStatus` のような関数が無いぶん grep でも見つからない形。
+    if (!isOverwritable(c.status, isCastStatus)) { window.alert(describeUnknownValue(c.status)); return; }
     const next = c.status === 'Free' ? 'Break' : c.status === 'Break' ? 'Absent' : 'Free';
     store.setCastBaseStatus(c.id, next);
   };
@@ -818,7 +826,7 @@ function CastRoster({ casts, store, wageFor, castLabel = 'キャスト', pickups
               {!c.uid && <span title="アカウント未連携（給与計算に乗りません）" style={{ fontSize: 9, color: 'var(--noxa-status-error)', marginLeft: 4 }}>未連携</span>}
             </span>
             <button type="button" onClick={() => setEditing(c)} title="編集（時給・アカウント連携）" style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--noxa-text-faint)', fontSize: 12 }}>✎</button>
-            <button type="button" onClick={() => cycleStatus(c)} title="状態切替" style={{ ...chipStyle(c.status === 'Work'), minHeight: 26, padding: '2px 8px', fontSize: 11, cursor: c.status === 'Work' ? 'default' : 'pointer' }}>{STATUS_LABEL[c.status]}</button>
+            <button type="button" onClick={() => cycleStatus(c)} title="状態切替" style={{ ...chipStyle(c.status === 'Work'), minHeight: 26, padding: '2px 8px', fontSize: 11, cursor: c.status === 'Work' ? 'default' : 'pointer' }}>{isUnknownValue(c.status, isCastStatus) ? unknownValueLabel(c.status) : STATUS_LABEL[c.status]}</button>
             <button type="button" onClick={() => store.toggleLock(c.id)} title="ロック（AI除外）" style={{ background: 'none', border: 'none', cursor: 'pointer', color: c.isLocked ? 'var(--noxa-accent-primary-ink)' : 'var(--noxa-text-faint)', fontSize: 13 }}>{c.isLocked ? '🔒' : '🔓'}</button>
           </div>
         ))}

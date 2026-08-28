@@ -21,6 +21,7 @@ import { describeFirestoreError } from '@/lib/firestore-error';
 import { valueForScope, type ScopedSnapshot } from '@/lib/scoped-snapshot';
 import { describeMissingShop } from '@/lib/shop-id-state';
 import { stampIrVersion } from '@/lib/ir-version';
+import { describeUnknownValue, isOverwritable, isUnknownValue, unknownValueLabel } from '@/lib/unknown-value';
 
 /**
  * 予約モジュール（実データ）
@@ -35,6 +36,9 @@ const mono = 'var(--noxa-font-mono)';
 // ステータス定義
 type ReservationStatus = '未来店' | '来店済' | 'キャンセル';
 const STATUSES: ReservationStatus[] = ['未来店', '来店済', 'キャンセル'];
+function isReservationStatus(v: unknown): v is ReservationStatus {
+  return v === '未来店' || v === '来店済' || v === 'キャンセル';
+}
 
 type Reservation = {
   id: string;
@@ -45,6 +49,8 @@ type Reservation = {
   guests: number;
   seat: string;       // 卓番号
   status: ReservationStatus;
+  /** 保存されている生の値（丸める前）。⚠️ 書き戻し・表示・集計の判断はこちらで行う（P161） */
+  statusRaw: unknown;
   memo?: string;
 };
 
@@ -86,7 +92,10 @@ function mapReservation(id: string, d: DocumentData): Reservation {
     cast: (d.cast as string) ?? '',
     guests: typeof d.guests === 'number' ? d.guests : 0,
     seat: (d.seat as string) ?? '',
-    status: (STATUSES as string[]).includes(status) ? (status as ReservationStatus) : '未来店',
+    status: isReservationStatus(status) ? status : '未来店',
+    // ⚠️ 丸めた値だけを持つと、別のアプリ（iOS）が書いた状態を「未来店」と言い切り、
+    // そのまま書き戻して消す（transport で実際に起きた形・P157/P160）
+    statusRaw: d.status,
     memo: (d.memo as string) ?? undefined,
   };
 }
@@ -227,11 +236,14 @@ export function ReservationClient({ user }: { user: User }) {
       .sort((a, b) => a.time.localeCompare(b.time));
   }, [reservations, dateFilter]);
 
+  // ⚠️ 知らない状態を「未来店」に混ぜない（P161）。「まだ来ていない人」として数えると、
+  // 現場は**来ない人を待つ**。「無い・分からない・ゼロを混ぜない」の集計版。
   const todayCounts = {
     total:     dayReservations.length,
-    arrived:   dayReservations.filter((r) => r.status === '来店済').length,
-    upcoming:  dayReservations.filter((r) => r.status === '未来店').length,
-    cancelled: dayReservations.filter((r) => r.status === 'キャンセル').length,
+    arrived:   dayReservations.filter((r) => !isUnknownValue(r.statusRaw, isReservationStatus) && r.status === '来店済').length,
+    upcoming:  dayReservations.filter((r) => !isUnknownValue(r.statusRaw, isReservationStatus) && r.status === '未来店').length,
+    cancelled: dayReservations.filter((r) => !isUnknownValue(r.statusRaw, isReservationStatus) && r.status === 'キャンセル').length,
+    unknown:   dayReservations.filter((r) => isUnknownValue(r.statusRaw, isReservationStatus)).length,
   };
 
   // VIP/常連：vip フラグ or rank があるものを優先。無ければ全件を来店回数順で表示。
@@ -292,11 +304,22 @@ export function ReservationClient({ user }: { user: User }) {
     try { await updateDoc(doc(db, `${resPath}/${id}`), { status }); }
     catch (e) { setOpError(describeFirestoreError(e, 'ステータスの変更')); }
   };
+  /**
+   * 状態を書き換えてよいか（P161）。**人が名指しで選ぶ**操作なので上書きは通すが、
+   * 知らない値を潰すことは伝える（黙って消すのと、断ったうえで消すのは別・P157）。
+   */
+  const confirmOverwriteStatus = (r: Reservation, label: string): boolean => {
+    if (isOverwritable(r.statusRaw, isReservationStatus)) return true;
+    return window.confirm(`${describeUnknownValue(r.statusRaw)}\n\nこのまま「${label}」で上書きしますか？`);
+  };
 
   // 来店済み: 予約の卓が空いていれば同一トランザクションで開卓＋POS初期伝票を作成
   // （予約→来店→会計の一気通貫。卓未指定/不一致/使用中はステータスのみ更新して知らせる）
   const checkIn = async (r: Reservation) => {
     if (!resPath || !shop.shopId || busy) return;
+    // ⚠️ 来店処理は status を上書きするだけでなく**開卓と初期伝票の作成**まで進む。
+    // 別のアプリが既に進めた予約を「未来店」と読んだまま押すと、二重に卓が開く（P161）
+    if (!confirmOverwriteStatus(r, '来店済')) return;
     // 料金が分からないまま開卓しない（既定料金の初期伝票が売上まで流れる・Day115）。
     // ステータスだけは進められるよう、開卓のみを止める
     if (posCfgError) {
@@ -497,6 +520,9 @@ export function ReservationClient({ user }: { user: User }) {
               <KpiCard label="来店済"     value={String(todayCounts.arrived)}   unit="件" accent />
               <KpiCard label="未来店"     value={String(todayCounts.upcoming)}  unit="件" />
               <KpiCard label="キャンセル" value={String(todayCounts.cancelled)} unit="件" warn />
+              {todayCounts.unknown > 0 && (
+                <KpiCard label="不明" value={String(todayCounts.unknown)} unit="件" warn />
+              )}
             </div>
 
             {/* タブ切り替え */}
@@ -611,7 +637,14 @@ export function ReservationClient({ user }: { user: User }) {
                     }}
                   >
                     {dayReservations.map((r) => {
-                      const s = STATUS_COLOR[r.status];
+                      // ⚠️ 知らない状態を**丸めたラベルで出さない**（P160 の予約版）。
+                      // 「未来店」と出すと画面は「まだ来ていない客」だと言い切る——
+                      // 送迎の「待機」より意味が具体的なぶん、現場の判断を直接誤らせる
+                      const statusUnknown = isUnknownValue(r.statusRaw, isReservationStatus);
+                      const s = statusUnknown
+                        ? { text: 'var(--noxa-status-warning)', bg: 'rgba(251,191,36,0.08)', border: 'rgba(251,191,36,0.30)' }
+                        : STATUS_COLOR[r.status];
+                      const statusLabel = statusUnknown ? unknownValueLabel(r.statusRaw) : r.status;
                       return (
                         <li
                           key={r.id}
@@ -660,7 +693,7 @@ export function ReservationClient({ user }: { user: User }) {
                                 <span style={{ fontSize: 15, fontWeight: 500 }}>{r.customerName}</span>
                                 {/* ステータスバッジ */}
                                 <span
-                                  aria-label={`ステータス: ${r.status}`}
+                                  aria-label={`ステータス: ${statusLabel}`}
                                   style={{
                                     display: 'inline-block',
                                     padding: '2px 8px',
@@ -673,7 +706,7 @@ export function ReservationClient({ user }: { user: User }) {
                                     border: `1px solid ${s.border}`,
                                   }}
                                 >
-                                  {r.status}
+                                  {statusLabel}
                                 </span>
                               </div>
                               <div
@@ -707,9 +740,15 @@ export function ReservationClient({ user }: { user: User }) {
 
                             {/* アクション：ステータス遷移 + 編集/削除 */}
                             <div style={{ display: 'flex', gap: 8, flexShrink: 0, flexWrap: 'wrap', alignItems: 'center' }}>
-                              {STATUSES.filter((st) => st !== r.status).map((st) => (
+                              {/* ⚠️ 未知のときは「現在値を除く」ができない（現在値がこちらの語彙に無い）。
+                                  丸めた値で除くと、本当は取り得る遷移が 1 つ消える（P161） */}
+                              {(statusUnknown ? STATUSES : STATUSES.filter((st) => st !== r.status)).map((st) => (
                                 <ActionButton key={st} label={`→ ${st}`}
-                                  onClick={() => (st === '来店済' ? checkIn(r) : changeStatus(r.id, st))}
+                                  onClick={() => {
+                                    if (st === '来店済') { void checkIn(r); return; }
+                                    if (!confirmOverwriteStatus(r, st)) return;
+                                    void changeStatus(r.id, st);
+                                  }}
                                   secondary={st !== '来店済'} />
                               ))}
                               <ActionButton label="編集" onClick={() => openEdit(r)} secondary />
