@@ -18,6 +18,13 @@ import { join, relative } from 'node:path';
 
 const API_ROOT = join(process.cwd(), 'src/app/api');
 
+/**
+ * `ai-provider` を経由する route の現在数（P161-PM3 のラチェット）。
+ * ⚠️ **増えたときだけ上げる。減ったら、減った理由を確かめてから下げる。**
+ * 減少は「route を消した」か「検出の正規表現から漏れた」かで意味がまったく違う。
+ */
+const AI_ROUTE_COUNT = 20;
+
 /** 顧客の自由記述フィールド。ここに電話番号・メールが書かれる。 */
 const FREE_TEXT_FIELDS = /likesNote|dislikesNote|ngNote|importantMemo|chatHistory/;
 
@@ -143,7 +150,14 @@ describe('AI route の PII マスク網羅（Day12 ポリシー）', () => {
       .sort();
 
     it('AI へ投げる route が 1 本以上検出できている（検出ロジック自体の番人）', () => {
+      // ⚠️ 下限は「**全部消えた**」を捕まえるが「**1 本だけ漏れた**」は捕まえない（P161-PM3）。
+      // 母集団は `from '…/ai-provider'` という**正規表現 1 本**に乗っているので、
+      // import の書き方が変わると**黙って縮む**。＝ 沈黙の段②は塞げても段③が開いている。
+      // そこで下限に加えて**前回値との差分**（ラチェット）を置く。
+      // 💡 baseline を**ファイルではなく定数**で持つのは意図的——書き換えは人の編集としてレビューに乗り、
+      // 自己テストが本番の値を汚す事故（yorulog が実測）も起きない。増減はどちらも赤にする。
       expect(aiRoutes.length).toBeGreaterThanOrEqual(10);
+      expect(aiRoutes.length).toBe(AI_ROUTE_COUNT);
       expect(aiRoutes).toContain('ai/sales-message/route.ts');
     });
 

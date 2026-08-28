@@ -30,6 +30,12 @@ const API_ROOT = join(process.cwd(), 'src/app/api');
  * 信頼できない文字列（相手が書いた／相手の文面から機械生成した）をプロンプトに載せる route。
  * `withInjectionGuard` または `buildInjectionGuardBlock` を通していること。
  */
+/**
+ * `ai-provider` を経由する route の現在数（P161-PM3 のラチェット）。
+ * ⚠️ **増えたときだけ上げる。減ったら、減った理由を確かめてから下げる。**
+ */
+const AI_ROUTE_COUNT = 20;
+
 const GUARDED = [
   // 貼り付けテキスト（LINE 履歴そのもの）
   'ai/customer-extract/route.ts',
@@ -90,7 +96,10 @@ const read = (rel: string) => stripComments(readFileSync(join(API_ROOT, rel), 'u
 
 describe('AI route の prompt-injection ガード網羅（P130）', () => {
   it('AI へ投げる route が検出できている（検出ロジック自体の番人）', () => {
+    // ⚠️ 下限は「全部消えた」しか捕まえない（P161-PM3）。母集団は正規表現 1 本に乗っており、
+    // import の書き方が変われば**1 本だけ黙って漏れる**。前回値との差分で段③を塞ぐ。
     expect(aiRoutes.length).toBeGreaterThanOrEqual(15);
+    expect(aiRoutes.length).toBe(AI_ROUTE_COUNT);
     expect(aiRoutes).toContain('ai/customer-extract/route.ts');
   });
 
