@@ -22,6 +22,23 @@ import { readFileSync } from 'node:fs';
 // ⚠️ 文字列とテンプレートリテラルの中身は残る（`aria-label={\`…\`}` を見る assert があるため）。
 const read = (p: string) => stripComments(readFileSync(p, 'utf8'));
 
+/**
+ * ⚠️ **このガードの測り方で外した履歴**（次に触る人はここを先に読むこと）。
+ * 静的ガードは「守りが在るか」を文字で見るので、**測り方の粒度がそのまま判定の粒度**になる。
+ *
+ * 1. **生ソースに当てた**（P161-PM）… 守りを**コメントにする**と 17/17 緑のまま通った。
+ *    → `stripComments` を通す。⚠️ 「消す」と「コメントにする」は**別の壊し方**。
+ * 2. **ファイル単位で戻して測った**（P161-PM5 で判明）… 3 段目を「ファイルを丸ごと前の版へ戻す」で
+ *    測ると、**守りの関数ごと消える**ので粗く落ちる。**1 行だけ壊すと通る**穴を隠していた。
+ *    → **経路ごとに 1 行だけ壊して測る**。
+ * 3. **裸の綴りを `indexOf` で探した**（P161-PM5）… `advance` の中の
+ *    `isOverwritable(c.statusRaw, isTrialStatus)` を壊しても、**`confirmOverwriteStatus` の中にある
+ *    同じ式**を拾って緑になった。＝ **消費側が 1 つでもあれば緑**。
+ *    → **関数の本体に閉じてから**探す。
+ *
+ * 現在の担保: **4 経路 × 2 通りの壊し方（コメント化 / 削除）= 8 通りすべてで赤**を実測済み。
+ */
+
 describe('ReservationClient — 予約の「未来店」は来ていない人として扱われる', () => {
   const SRC = 'src/components/modules/reservation/ReservationClient.tsx';
   const src = read(SRC);
@@ -82,9 +99,15 @@ describe('TrialClient — 名前を直しただけの保存で段階が消えて
     expect(src).toMatch(/status: isUnknownValue\(c\.statusRaw, isTrialStatus\) \? null : c\.status/);
   });
 
+  // 🔴 裸の綴りを `indexOf` で探すと、**別の場所にある同じ呼び出し**を拾って緑になる（P161-PM5）。
+  // ここは `confirmOverwriteStatus` の中にも同じ式があるため、`advance` 側をコメントにしても
+  // 通っていた（＝ **消費側が 1 つでもあれば緑**）。関数の本体に閉じて見る。
   it('未知の段階から「次」を決めない', () => {
-    const guard = src.indexOf('isOverwritable(c.statusRaw, isTrialStatus)');
-    const use = src.indexOf('const next = nextStatus(c.status)');
+    const advance = src.match(/const advance = \(c: Candidate\) => \{[\s\S]*?\n  \};/);
+    expect(advance).not.toBeNull();
+    const body = advance![0];
+    const guard = body.indexOf('isOverwritable(c.statusRaw, isTrialStatus)');
+    const use = body.indexOf('const next = nextStatus(c.status)');
     expect(guard).toBeGreaterThan(-1);
     expect(use).toBeGreaterThan(guard);
   });
