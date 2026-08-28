@@ -31,6 +31,7 @@ vi.mock('../../src/app/api/ai/with-credits', () => ({
 import { AuthError } from '../../src/app/api/lib/firebase-admin';
 import { POST } from '../../src/app/api/ai/pos-config/route';
 import { createDefaultStoreConfig } from '../../src/lib/pos/defaultConfig';
+import { stripComments } from '../helpers/strip-comments';
 
 const req = (body: unknown) => ({ json: async () => body }) as never;
 const current = createDefaultStoreConfig('active', 'テスト店');
@@ -152,7 +153,7 @@ describe('ai/pos-config POST（AI 料金設定ビルダー）', () => {
     it('サーバは提案を返すだけ（Firestore への書き込み経路を持たない）', () => {
       // 書き込みを持たないことはソースで担保する（モックで「呼ばれない」を見ても
       // 経路が増えたときに気づけない）
-      const src = require('node:fs').readFileSync('src/app/api/ai/pos-config/route.ts', 'utf8');
+      const src = stripComments(require('node:fs').readFileSync('src/app/api/ai/pos-config/route.ts', 'utf8'));
       expect(src).not.toMatch(/getAdminDb|\.set\(|\.update\(|batch\(/);
     });
   });

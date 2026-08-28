@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
+import { stripComments } from '../helpers/strip-comments';
 
 // 丸め 3 経路の横展開ガード（P161）。
 //
@@ -16,7 +17,10 @@ import { readFileSync } from 'node:fs';
 // `a === 'Free' ? 'Break' : a === 'Break' ? 'Absent' : 'Free'` の**最後の else** に住んでいた。
 // ＝ 読みだけを grep していたら見つからない。
 
-const read = (p: string) => readFileSync(p, 'utf8');
+// 🔴 生ソースに当てると、**守りをコメントにするだけでガードが緑のまま通る**（P161-PM で実測）。
+// 「消す」と「コメントにする」は別の壊し方で、**後者だけが判定を素通りする**。
+// ⚠️ 文字列とテンプレートリテラルの中身は残る（`aria-label={\`…\`}` を見る assert があるため）。
+const read = (p: string) => stripComments(readFileSync(p, 'utf8'));
 
 describe('ReservationClient — 予約の「未来店」は来ていない人として扱われる', () => {
   const SRC = 'src/components/modules/reservation/ReservationClient.tsx';

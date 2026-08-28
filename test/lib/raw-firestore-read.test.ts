@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync, readdirSync } from 'node:fs';
 import { join, relative } from 'node:path';
+import { stripComments } from '../helpers/strip-comments';
 
 // 「型検証を通さず生データを読む」経路のラチェット（P161 新設）。
 //
@@ -82,9 +83,12 @@ function sourceFiles(dir: string): string[] {
   return out;
 }
 
+// ⚠️ 生ソースに当てると、**コメントの言及を実装として数える**（P161-PM で実測）。
+// 判定はコードだけに当てる（`test/helpers/strip-comments.ts` は Day121-PM からある共通ヘルパー。
+// 🔴 P161 で新設したとき、**既にあるこれを使っていなかった**）。
 const FILES = sourceFiles(ROOT).map((p) => ({
   path: relative(process.cwd(), p).split(/[\\/]/).join('/'),
-  src: readFileSync(p, 'utf8'),
+  src: stripComments(readFileSync(p, 'utf8')),
 }));
 
 /** `snap.data() as T` / `d.data() as Partial<T>` … 実行時に検証されない読み */

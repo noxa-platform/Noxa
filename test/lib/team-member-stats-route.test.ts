@@ -36,6 +36,7 @@ vi.mock('firebase-admin/firestore', () => {
 import { Timestamp } from 'firebase-admin/firestore';
 import { AuthError } from '../../src/app/api/lib/firebase-admin';
 import { POST } from '../../src/app/api/team/member-stats/route';
+import { stripComments } from '../helpers/strip-comments';
 
 type Doc = Record<string, unknown>;
 type Member = { uid: string; name: string; role: string; customerCount: number; monthSales: number; monthGroupCount: number };
@@ -434,7 +435,7 @@ describe('team/member-stats POST（キャスト別 当月成績）', () => {
 // サーバが `incomplete` を返しても、画面が読まなければ利用者にとっては無音のまま（Day116-PM）。
 // 受け手側の契約もここで固定する。
 describe('成績画面が incomplete を受け取って警告する（Day116-PM）', () => {
-  const src = readFileSync(resolve(__dirname, '../../src/components/modules/customers/CustomersClient.tsx'), 'utf8');
+  const src = stripComments(readFileSync(resolve(__dirname, '../../src/components/modules/customers/CustomersClient.tsx'), 'utf8'));
 
   it('応答の incomplete を読み、専用の警告 state へ入れる', () => {
     expect(src).toMatch(/incomplete\?: string\[\]/);   // 型に載っている

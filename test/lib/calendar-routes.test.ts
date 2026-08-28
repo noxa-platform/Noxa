@@ -29,6 +29,7 @@ import { GET as callbackGET } from '../../src/app/api/calendar/callback/route';
 import { GET as listGET } from '../../src/app/api/calendar/list/route';
 import { GET as eventsGET } from '../../src/app/api/calendar/events/route';
 import { signState } from '../../src/app/api/calendar/lib';
+import { stripComments } from '../helpers/strip-comments';
 
 const SECRET = 'grind-day111-calendar-secret';
 
@@ -231,7 +232,7 @@ describe('トークン交換の応答が壊れている場合（Day111-PM）', (
 // 連携結果バナーで**自分で持ち込んでいた**（`CALENDAR_RESULT[searchParams.get('calendar')]`）。
 // `?calendar=constructor` はプロトタイプ由来の関数を拾い、text が undefined の空バナーが出る。
 describe('連携結果バナー: クエリでオブジェクトを索引しない（Day111-PM）', () => {
-  const src = readFileSync(resolve(__dirname, '../../src/app/account/connections/page.tsx'), 'utf8');
+  const src = stripComments(readFileSync(resolve(__dirname, '../../src/app/account/connections/page.tsx'), 'utf8'));
 
   it('結果表は Map で引く（素のオブジェクト索引に戻さない）', () => {
     expect(src).toContain('CALENDAR_RESULT = new Map');

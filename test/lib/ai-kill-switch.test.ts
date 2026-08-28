@@ -20,6 +20,7 @@ import {
   aiDisabledResponse, aiDisabledSseEvent, isAiDisabledError,
 } from '../../src/app/api/lib/ai-kill-switch';
 import { enterAiRequest } from '../../src/app/api/lib/ai-request-context';
+import { stripComments } from '../helpers/strip-comments';
 
 /** global_settings/ai_kill_switch と account_subscriptions/{uid} だけ持つ最小フェイク */
 function makeDb(docs: Record<string, Record<string, unknown> | undefined>) {
@@ -400,7 +401,7 @@ describe('入口と安全網が食い違わない（P147）', () => {
 // ここが本丸。1 箇所でも漏れると課金が止まらない
 describe('外部 API を叩く経路がすべてスイッチを通る', () => {
   it('OpenRouter を叩く 2 関数の両方に assertAiEnabled がある', () => {
-    const src = readFileSync('src/app/api/ai/openrouter.ts', 'utf8');
+    const src = stripComments(readFileSync('src/app/api/ai/openrouter.ts', 'utf8'));
     // fetch(OR_ENDPOINT) の回数と assertAiEnabled の回数が一致すること
     const fetches = [...src.matchAll(/fetch\(OR_ENDPOINT/g)].length;
     const guards = [...src.matchAll(/await assertAiEnabled\(\)/g)].length;
@@ -409,7 +410,7 @@ describe('外部 API を叩く経路がすべてスイッチを通る', () => {
   });
 
   it('ai-provider の公開関数がすべてスイッチを通る', () => {
-    const src = readFileSync('src/app/api/ai/ai-provider.ts', 'utf8');
+    const src = stripComments(readFileSync('src/app/api/ai/ai-provider.ts', 'utf8'));
     const fns = [...src.matchAll(/export async function \w+/g)].length;
     const guards = [...src.matchAll(/await assertAiEnabled\(\)/g)].length;
     expect(guards).toBe(fns);
@@ -427,7 +428,7 @@ describe('外部 API を叩く経路がすべてスイッチを通る', () => {
       }
     })(API_ROOT);
 
-    const direct = files.filter((f) => /openrouter\.ai\/api/.test(readFileSync(f, 'utf8')));
+    const direct = files.filter((f) => /openrouter\.ai\/api/.test(stripComments(readFileSync(f, 'utf8'))));
     expect(direct.length).toBeGreaterThan(0); // 検出ロジックの番人
     const unguarded = direct
       .filter((f) => !/aiKillSwitchResponse\(|assertAiEnabled\(/.test(readFileSync(f, 'utf8')))
