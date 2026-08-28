@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest';
+import { stripComments } from '../helpers/strip-comments';
 import { readFileSync } from 'node:fs';
 import { isOverwritable, describeUnknownValue, isUnknownValue, unknownValueLabel } from '@/lib/unknown-value';
 
@@ -49,7 +50,7 @@ describe('describeUnknownValue — 黙って何も起きないのが一番まず
 // ⚠️ ガード自体が空振りしないよう、**対象ファイルを実際に読めていること**も見る
 describe('TransportClient の書き戻しが生の値で判断している', () => {
   const SRC = 'src/components/modules/transport/TransportClient.tsx';
-  const src = readFileSync(SRC, 'utf8');
+  const src = stripComments(readFileSync(SRC, 'utf8'));
 
   it('走査対象が取れている（空振り防止）', () => {
     expect(src.length).toBeGreaterThan(1000);
@@ -104,7 +105,7 @@ describe('isUnknownValue — 表示で丸めた嘘をつかない', () => {
 
 describe('TransportClient の表示が丸めた値を言い切らない', () => {
   const SRC = 'src/components/modules/transport/TransportClient.tsx';
-  const src = readFileSync(SRC, 'utf8');
+  const src = stripComments(readFileSync(SRC, 'utf8'));
 
   it('走査対象が取れている（空振り防止）', () => {
     expect(src).toContain('REQUEST_STATUS_META');

@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest';
+import { stripComments } from '../helpers/strip-comments';
 import { readFileSync, readdirSync } from 'node:fs';
 import { join, relative } from 'node:path';
 import {
@@ -393,7 +394,7 @@ describe('P154-PM4 検証関数の届く範囲を実測で固定する', () => {
   /** `fn` を**呼んでいる**ファイル。定義そのもの（`export function fn(`）は数えない */
   const callersOf = (fn: string) => srcFiles()
     .filter((f) => {
-      const src = readFileSync(f, 'utf8').replace(new RegExp(`(export )?function ${fn}\\(`, 'g'), '');
+      const src = stripComments(readFileSync(f, 'utf8')).replace(new RegExp(`(export )?function ${fn}\\(`, 'g'), '');
       return new RegExp(`${fn}\\(`).test(src);
     })
     .map((f) => relative(SRC_ROOT, f).split(/[\\/]/).join('/'))
@@ -424,7 +425,7 @@ describe('P154-PM4 検証関数の届く範囲を実測で固定する', () => {
     //    写しが増えることを止めたいのだから、**写しの存在そのもの**を見れば足りる。
     const CANON = 'lib/record-engine/record-schema.ts';
     const offenders = srcFiles()
-      .filter((f) => /唯一の番人/.test(readFileSync(f, 'utf8')))
+      .filter((f) => /唯一の番人/.test(stripComments(readFileSync(f, 'utf8'))))
       .map((f) => relative(SRC_ROOT, f).split(/[\\/]/).join('/'))
       .filter((rel) => rel !== CANON);
     expect(offenders).toEqual([]);

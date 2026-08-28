@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest';
+import { stripComments } from '../helpers/strip-comments';
 import { readFileSync, readdirSync, existsSync } from 'node:fs';
 import { join, relative } from 'node:path';
 
@@ -99,7 +100,7 @@ function listRouteFiles(dir: string): string[] {
 
 describe('AI route の PII マスク網羅（Day12 ポリシー）', () => {
   const touching = listRouteFiles(API_ROOT)
-    .filter((f) => FREE_TEXT_FIELDS.test(readFileSync(f, 'utf-8')))
+    .filter((f) => FREE_TEXT_FIELDS.test(stripComments(readFileSync(f, 'utf-8'))))
     .map((f) => relative(API_ROOT, f).split(/[\\/]/).join('/'))
     .sort();
 
@@ -117,14 +118,14 @@ describe('AI route の PII マスク網羅（Day12 ポリシー）', () => {
   });
 
   it.each([...MASKED, ...PASTED_TEXT_MASKED])('%s はマスクヘルパーを import している', (rel) => {
-    const src = readFileSync(join(API_ROOT, rel), 'utf-8');
+    const src = stripComments(readFileSync(join(API_ROOT, rel), 'utf-8'));
     expect(src).toMatch(/import\s*\{[^}]*(mask(Deep|ContactInfo)|pickForAi)[^}]*\}\s*from\s*'@\/lib\/ai-privacy'/);
   });
 
   // import だけ見ると、マスクした値を**使わずに**生のまま送っても緑になる
   // （Day122 の教訓: ガードは「呼んでいるか」ではなく「その式が何をしているか」を見る）
   it.each(PASTED_TEXT_MASKED)('%s は生の貼り付けテキストをプロンプトへ渡していない', (rel) => {
-    const src = readFileSync(join(API_ROOT, rel), 'utf-8');
+    const src = stripComments(readFileSync(join(API_ROOT, rel), 'utf-8'));
     expect(src).not.toMatch(/\$\{(text|content)\}/);
     expect(src).toMatch(/masked(Text|Content)/);
   });
@@ -137,7 +138,7 @@ describe('AI route の PII マスク網羅（Day12 ポリシー）', () => {
   // ここでは対象を「AI プロバイダを呼ぶ全 route」へ広げ、3 分類のいずれかへの割り当てを強制する。
   describe('AI プロバイダを呼ぶ route の全数分類（Day103）', () => {
     const aiRoutes = listRouteFiles(API_ROOT)
-      .filter((f) => /from '\.{1,2}(\/\.\.)*\/ai-provider'/.test(readFileSync(f, 'utf-8')))
+      .filter((f) => /from '\.{1,2}(\/\.\.)*\/ai-provider'/.test(stripComments(readFileSync(f, 'utf-8'))))
       .map((f) => relative(API_ROOT, f).split(/[\\/]/).join('/'))
       .sort();
 

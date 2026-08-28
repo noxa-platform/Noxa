@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest';
+import { stripComments } from '../helpers/strip-comments';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { buildPreviewScenarios, previewConfig, diffPreview } from '../../src/lib/pos/preview';
@@ -100,7 +101,7 @@ describe('持ち越し課題: calculateWithDefault', () => {
   it('★呼び出し元ゼロの既定料金計算を残さない（Day115 から持ち越し）', () => {
     // 「config を持たない場面の保険」として残っていたが、**既定料金で伝票を作る**入口そのもの。
     // Day115 / 123 で塞いだ事故と同じ形を、いつでも再発させられる関数を置いておかない。
-    const engine = readFileSync(join(process.cwd(), 'src/lib/pos/engine.ts'), 'utf-8');
+    const engine = stripComments(readFileSync(join(process.cwd(), 'src/lib/pos/engine.ts'), 'utf-8'));
     expect(engine).not.toMatch(/export function calculateWithDefault/);
   });
 });

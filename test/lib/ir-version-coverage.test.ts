@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest';
+import { stripComments } from '../helpers/strip-comments';
 import { readFileSync, readdirSync } from 'node:fs';
 import { join, relative } from 'node:path';
 
@@ -139,7 +140,7 @@ type Site = { file: string; line: number; args: string; stamped: boolean };
 function collectSites(): Site[] {
   const sites: Site[] = [];
   for (const abs of walk(SRC)) {
-    const src = readFileSync(abs, 'utf8');
+    const src = stripComments(readFileSync(abs, 'utf8'));
     // 変数経由で版を刻んでいる場合（`const payload = stampIrVersion({...})` を
     // 別行で `.set(ref, payload)` する形）を拾うための対応表
     const stampedVars = new Set(
@@ -200,7 +201,7 @@ describe('ir_version の網羅ガード（新規作成の刻み忘れを落と�
     // collectSites は merge を除外済みなので、ここは全走査で二重に見張る
     const offenders: string[] = [];
     for (const abs of walk(SRC)) {
-      const src = readFileSync(abs, 'utf8');
+      const src = stripComments(readFileSync(abs, 'utf8'));
       for (const m of src.matchAll(/stampIrVersion\(/g)) {
         const open = src.indexOf('(', m.index!);
         if (/merge:\s*true/.test(argsOf(src, open))) {

@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest';
+import { stripComments } from '../helpers/strip-comments';
 import { readFileSync, readdirSync } from 'node:fs';
 import { join, relative } from 'node:path';
 
@@ -57,7 +58,7 @@ function collectTargets(): { target: string; where: string }[] {
   ];
   const out: { target: string; where: string }[] = [];
   for (const file of walk(SRC_ROOT, (n) => n.endsWith('.tsx') || n.endsWith('.ts'))) {
-    const src = readFileSync(file, 'utf8');
+    const src = stripComments(readFileSync(file, 'utf8'));
     const where = relative(process.cwd(), file).split(/[\\/]/).join('/');
     for (const re of PATTERNS) {
       re.lastIndex = 0;
@@ -102,7 +103,7 @@ describe('内部リンクの遷移先が実在する', () => {
 
   it('パスワード再設定に到達できる（Day112 の実バグ。導線とページの両方を固定）', () => {
     expect(routeExists('/account/reset')).toBe(true);
-    const login = readFileSync(join(APP_ROOT, 'account/login/page.tsx'), 'utf8');
+    const login = stripComments(readFileSync(join(APP_ROOT, 'account/login/page.tsx'), 'utf8'));
     expect(login).toContain('/account/reset');
   });
 

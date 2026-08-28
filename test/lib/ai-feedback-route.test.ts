@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { stripComments } from '../helpers/strip-comments';
 import { readFileSync, readdirSync } from 'node:fs';
 import { join, relative } from 'node:path';
 
@@ -241,7 +242,7 @@ describe('ai_knowledge（ワークスペース横断）への書き出し口', (
   }
 
   const writers = listRouteFiles(API_ROOT)
-    .filter((f) => /ai_knowledge/.test(readFileSync(f, 'utf-8')))
+    .filter((f) => /ai_knowledge/.test(stripComments(readFileSync(f, 'utf-8'))))
     .map((f) => relative(API_ROOT, f).split(/[\\/]/).join('/'))
     .sort();
 
@@ -250,7 +251,7 @@ describe('ai_knowledge（ワークスペース横断）への書き出し口', (
   });
 
   it('書き出し口は伏字化（sanitizePii）と source allowlist を通している', () => {
-    const src = readFileSync(join(API_ROOT, 'ai/feedback/route.ts'), 'utf-8');
+    const src = stripComments(readFileSync(join(API_ROOT, 'ai/feedback/route.ts'), 'utf-8'));
     expect(src).toMatch(/sanitizePii\(/);
     expect(src).toMatch(/CONTRIBUTABLE_SOURCES\.has\(/);
   });

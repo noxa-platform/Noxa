@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { stripComments } from '../helpers/strip-comments';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { User } from 'firebase/auth';
@@ -125,7 +126,7 @@ describe('buildLoginRedirectUrl', () => {
 
 // 再発防止の静的ガード: 戻り先 URL の組み立てを AuthGuard 内でベタ書きに戻すと落ちる。
 describe('AuthGuard の戻り先組み立て（静的ガード）', () => {
-  const src = readFileSync(join(process.cwd(), 'src/components/AuthGuard.tsx'), 'utf8');
+  const src = stripComments(readFileSync(join(process.cwd(), 'src/components/AuthGuard.tsx'), 'utf8'));
 
   it('buildLoginRedirectUrl を経由している', () => {
     expect(src).toContain('buildLoginRedirectUrl');

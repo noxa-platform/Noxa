@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { stripComments } from '../helpers/strip-comments';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
@@ -36,7 +37,6 @@ vi.mock('firebase-admin/firestore', () => {
 import { Timestamp } from 'firebase-admin/firestore';
 import { AuthError } from '../../src/app/api/lib/firebase-admin';
 import { POST } from '../../src/app/api/team/member-stats/route';
-import { stripComments } from '../helpers/strip-comments';
 
 type Doc = Record<string, unknown>;
 type Member = { uid: string; name: string; role: string; customerCount: number; monthSales: number; monthGroupCount: number };

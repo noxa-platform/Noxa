@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest';
+import { stripComments } from '../helpers/strip-comments';
 import { readFileSync, readdirSync, existsSync } from 'node:fs';
 import { join, relative } from 'node:path';
 import {
@@ -81,11 +82,11 @@ function listRouteFiles(dir: string): string[] {
 }
 
 const aiRoutes = listRouteFiles(API_ROOT)
-  .filter((f) => /from '\.{1,2}(\/\.\.)*\/ai-provider'/.test(readFileSync(f, 'utf-8')))
+  .filter((f) => /from '\.{1,2}(\/\.\.)*\/ai-provider'/.test(stripComments(readFileSync(f, 'utf-8'))))
   .map((f) => relative(API_ROOT, f).split(/[\\/]/).join('/'))
   .sort();
 
-const read = (rel: string) => readFileSync(join(API_ROOT, rel), 'utf-8');
+const read = (rel: string) => stripComments(readFileSync(join(API_ROOT, rel), 'utf-8'));
 
 describe('AI route の prompt-injection ガード網羅（P130）', () => {
   it('AI へ投げる route が検出できている（検出ロジック自体の番人）', () => {

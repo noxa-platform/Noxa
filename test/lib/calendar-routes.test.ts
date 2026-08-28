@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { stripComments } from '../helpers/strip-comments';
 import crypto from 'crypto';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
@@ -29,7 +30,6 @@ import { GET as callbackGET } from '../../src/app/api/calendar/callback/route';
 import { GET as listGET } from '../../src/app/api/calendar/list/route';
 import { GET as eventsGET } from '../../src/app/api/calendar/events/route';
 import { signState } from '../../src/app/api/calendar/lib';
-import { stripComments } from '../helpers/strip-comments';
 
 const SECRET = 'grind-day111-calendar-secret';
 

@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest';
+import { stripComments } from '../helpers/strip-comments';
 import { readFileSync, readdirSync } from 'node:fs';
 import { join, relative } from 'node:path';
 import {
@@ -101,7 +102,7 @@ function files(dir: string): string[] {
 }
 
 const READERS = files(SRC)
-  .map((p) => ({ path: relative(process.cwd(), p).split(/[\\/]/).join('/'), src: readFileSync(p, 'utf8') }))
+  .map((p) => ({ path: relative(process.cwd(), p).split(/[\\/]/).join('/'), src: stripComments(readFileSync(p, 'utf8')) }))
   .filter((f) => f.path !== 'src/lib/membership.ts' && /\/memberships`\)/.test(f.src));
 
 /**
@@ -153,7 +154,7 @@ describe('逆引き index の読み手（定義のドリフト防止）', () => 
   });
 
   it('★サーバ（CF）とクライアントで在籍の既定が一致している', () => {
-    const cf = readFileSync(join(process.cwd(), 'functions/src/lib/workspaces.ts'), 'utf8');
+    const cf = stripComments(readFileSync(join(process.cwd(), 'functions/src/lib/workspaces.ts'), 'utf8'));
     // CF 側: status 未設定は 'active'、それ以外は対象外
     expect(cf).toMatch(/status[^\n]*\?\?\s*'active'/);
     expect(cf).toMatch(/status !== 'active'/);

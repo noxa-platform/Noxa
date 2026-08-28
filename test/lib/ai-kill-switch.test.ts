@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { stripComments } from '../helpers/strip-comments';
 import { readFileSync, readdirSync } from 'node:fs';
 import { join, relative } from 'node:path';
 
@@ -20,7 +21,6 @@ import {
   aiDisabledResponse, aiDisabledSseEvent, isAiDisabledError,
 } from '../../src/app/api/lib/ai-kill-switch';
 import { enterAiRequest } from '../../src/app/api/lib/ai-request-context';
-import { stripComments } from '../helpers/strip-comments';
 
 /** global_settings/ai_kill_switch と account_subscriptions/{uid} だけ持つ最小フェイク */
 function makeDb(docs: Record<string, Record<string, unknown> | undefined>) {

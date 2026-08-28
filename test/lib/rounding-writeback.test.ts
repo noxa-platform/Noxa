@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { readFileSync } from 'node:fs';
 import { stripComments } from '../helpers/strip-comments';
+import { readFileSync } from 'node:fs';
 
 // 丸め 3 経路の横展開ガード（P161）。
 //

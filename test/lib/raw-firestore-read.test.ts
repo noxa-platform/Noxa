@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
+import { stripComments } from '../helpers/strip-comments';
 import { readFileSync, readdirSync } from 'node:fs';
 import { join, relative } from 'node:path';
-import { stripComments } from '../helpers/strip-comments';
 
 // 「型検証を通さず生データを読む」経路のラチェット（P161 新設）。
 //

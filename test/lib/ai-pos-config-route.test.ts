@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { stripComments } from '../helpers/strip-comments';
 
 // ai/pos-config の POST（P129・NOXA 初の生成系 AI）。
 //
@@ -31,7 +32,6 @@ vi.mock('../../src/app/api/ai/with-credits', () => ({
 import { AuthError } from '../../src/app/api/lib/firebase-admin';
 import { POST } from '../../src/app/api/ai/pos-config/route';
 import { createDefaultStoreConfig } from '../../src/lib/pos/defaultConfig';
-import { stripComments } from '../helpers/strip-comments';
 
 const req = (body: unknown) => ({ json: async () => body }) as never;
 const current = createDefaultStoreConfig('active', 'テスト店');
