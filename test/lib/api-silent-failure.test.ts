@@ -219,6 +219,25 @@ describe('API route の無音の失敗ガード', () => {
     expect(offenders).toEqual([]);
   });
 
+  it('route は 503 を自分で組み立てない（停止は ai-kill-switch 経由だけ・P162-PM）', () => {
+    // 🔴 **これは Web だけを見ていても正しさが決まらない判定**（5 本目の経路＝別のリポが読む）。
+    // iOS は「`ai/` のパス・**503**・本文を復号できた」の 3 条件で **AI 全体の停止**を判定しており、
+    // `code` の有無を見ない版が端末に残っている。⇒ route が一時失敗で 503 を返すと、
+    // **顧客 1 人が読めなかっただけでアプリ全体の AI ボタンが無効**になる。
+    // ⚠️ `code` を足しても**旧版には効かない**（status だけで倒れる）。status の側で外すしかない。
+    // ⇒ 停止の 503 は `app/api/lib/ai-kill-switch.ts` が**必ず `code` 付きで**返す 3 箇所だけにする。
+    //   一時失敗は 500（新旧どちらの iOS でも停止扱いにならないことを yorulog が 3 通りで実測）。
+    // 💡 この事実は **`ai-kill-switch.ts:49-52` に元から書いてあった**。それでも 503 を書いたので、
+    //   「読めば分かる」ではなく**判定で止める**形にする。
+    const offenders: string[] = [];
+    for (const { path, src } of ROUTES) {
+      for (const m of src.matchAll(/status:\s*503/g)) {
+        offenders.push(`${path}:${src.slice(0, m.index ?? 0).split('\n').length}`);
+      }
+    }
+    expect(offenders).toEqual([]);
+  });
+
   it('通報一覧は「取得失敗」と「削除済み」を区別して返す', () => {
     const src = ROUTES.find((r) => r.path === 'src/app/api/community/admin/reports/route.ts')?.src ?? '';
     // 判定を持つだけでは足りない。**応答に載せて**初めて管理画面が区別できる

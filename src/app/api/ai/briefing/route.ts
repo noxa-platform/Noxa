@@ -179,10 +179,20 @@ export async function POST(request: NextRequest) {
       if (context.reason === 'notFound') {
         return NextResponse.json({ error: '顧客が見つかりません' }, { status: 404 });
       }
-      console.error('[api/ai/briefing] 顧客コンテキストが取得できないため、モデルへ送らず 503 を返す', { customerId });
+      // 🔴 **503 を使わない**（P162-PM）。iOS は「ai/ のパス・503・本文を復号できた」の
+      // 3 条件で **AI 全体の停止**を判定しており、`code` の有無を見ない版が端末に残っている。
+      // ＝ 503 にすると**顧客 1 人が読めなかっただけでアプリ全体の AI ボタンが無効**になり、
+      // 別の AI 呼び出しが成功するまで解除されない。⚠️ **`code` を足しても旧版には効かない**
+      // （旧版は status だけで倒れる）ので、status の側で外す。
+      // ✅ 500 は新旧どちらの版でも停止扱いにならないことを yorulog が 3 通りで実測
+      //（判定ロジックの全履歴 / 既存テストの `testOtherStatusesAreNotStopped` / 5xx の全走査）。
+      // ⚠️ 500 では **`error` の文言がそのまま利用者に出る**ので、この文面を変えないこと。
+      // ⚠️ この `console.error` は **5xx を返す直前に置く**（`api-silent-failure` の
+      // 「catch の外で返す 5xx も理由をログに残す」は**直前 6 行**しか見ない）。
+      console.error('[api/ai/briefing] 顧客コンテキストが取得できないため、モデルへ送らず 500 を返す', { customerId });
       return NextResponse.json(
         { error: '顧客データを取得できませんでした。時間をおいて再度お試しください。' },
-        { status: 503 },
+        { status: 500 },
       );
     }
 

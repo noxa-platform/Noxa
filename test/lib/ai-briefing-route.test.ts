@@ -9,7 +9,9 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 // P162（2026-08-29）で **取得結果を 3 状態に分けた**。それまでは
 // 「顧客 doc が読めない」も「顧客が居ない」も `'{}'` を組み立ててモデルへ送っており、
 // モデルが「特筆すべき情報が無い」と言い切って**利用者にはそれが答えとして見えていた**:
-//   - blocked（読めない）= 503・**generateText を呼ばない**（クレジットも予約しない）
+//   - blocked（読めない）= **500**・**generateText を呼ばない**（クレジットも予約しない）
+//     ⚠️ **503 にしない**（P162-PM）。iOS は「ai/ のパス・503・本文を復号できた」で
+//     **AI 全体の停止**と読む版が端末に残っており、顧客 1 人の失敗でアプリ全体が止まる。
 //   - blocked（居ない）  = 404（**読めなかったのと同じ値に畳まない**）
 //   - partial（一部だけ）= 200・プロンプトに断り文・応答 `incomplete: ['直近ログ']`
 //   - ready（本当に 0 件）= 200・断り文なし・`incomplete: []`（**0 件でも必ず配列**）
@@ -109,10 +111,12 @@ describe('ai/briefing POST（会話前ブリーフィング）', () => {
 
   // ---- P162: 取得結果の 3 状態 ----
 
-  it('①顧客 doc が読めない: 503・モデルへ送らない・クレジットを消費しない', async () => {
+  it('①顧客 doc が読めない: 500・モデルへ送らない・クレジットを消費しない', async () => {
     mocks.getDb.mockReturnValue(makeDb({ name: '太郎' }, [], { customer: true }));
     const res = await POST(req(okBody));
-    expect(res.status).toBe(503);
+    // 🔴 **503 ではない**。iOS が「AI 全体の停止」と読む版が端末に残っているため（P162-PM）
+    expect(res.status).toBe(500);
+    expect((await res.json()).error).toContain('顧客データを取得できませんでした');
     // 🔴 ここが本題。'{}' を渡していた頃は 200 が返り、モデルが
     // 「特筆すべき情報が無い」と言い切って利用者に届いていた
     expect(mocks.gen).not.toHaveBeenCalled();
