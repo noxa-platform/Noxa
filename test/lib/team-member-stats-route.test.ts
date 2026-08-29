@@ -337,7 +337,8 @@ describe('team/member-stats POST（キャスト別 当月成績）', () => {
         'personal_customers/cast1/items/c1/logs/other': { shopId: 's2', salesAmount: 90000, type: 'visit', datetime: ts('2026-08-03T21:00') },
       }).db);
       const json = await (await POST(req(body))).json();
-      expect(json.incomplete).toBeUndefined();
+      // P162: **0 件でも配列**（キーごと消すと「読めた」と「報告していない」が同じに見える）
+      expect(json.incomplete).toEqual([]);
       expect(typeof json.scopeNote).toBe('string');
       expect(json.scopeNote).toMatch(/当店/);
     });
@@ -425,9 +426,14 @@ describe('team/member-stats POST（キャスト別 当月成績）', () => {
       expect((json.members as Member[]).every((m) => m.customerCount === 0)).toBe(true); // 0 だが「実績なし」ではない
     });
 
-    it('すべて読めていれば incomplete は付かない（常時警告にしない）', async () => {
+    it('すべて読めていれば incomplete は空配列（常時警告にしないが、報告はする）', async () => {
+      // 🔴 P162 で契約を変えた。以前は空のときキーごと消しており、呼出側の
+      // `data.incomplete?.length` が **「読めなかった項目ゼロ」でも「報告していない応答」でも
+      // false** になっていた（＝読まない選択が目に見えない）。
+      // `record-engine/apply` の `trimmed` と同じく **0 件でも配列**で返す。
+      // 画面の警告は length で判断するので、常時警告にはならない。
       mocks.getDb.mockReturnValue(makeDb(BASE).db);
-      expect((await (await POST(req(body))).json()).incomplete).toBeUndefined();
+      expect((await (await POST(req(body))).json()).incomplete).toEqual([]);
     });
   });
 });

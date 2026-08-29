@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync, readdirSync } from 'node:fs';
 import { join, relative } from 'node:path';
+import { stripComments } from '../helpers/strip-comments';
 
 // サーバ側（`src/app/api`）の「無音の失敗」ガード（Day116 新設）。
 //
@@ -31,9 +32,14 @@ function routeFiles(dir: string): string[] {
   return out;
 }
 
+// ⚠️ **判定はコードだけに当てる**（P161-PM2 の一律適用）。生ソースのままだと
+// 「`return '{}'` と catch が同一だった」のような**注意書きのコメントを実装として摘発**し、
+// 逆に守りをコメントにするだけで緑のまま通る。
+// 🔴 P161-PM2 で「src/ を読むガード 17 本」に一律適用したとき、**この 1 本は数え漏れていた**
+// （P162 で新しい判定を足すときに、自分の説明コメントが自分の判定に引っかかって気付いた）。
 const ROUTES = routeFiles(API_ROOT).map((p) => ({
   path: relative(process.cwd(), p).split(/[\\/]/).join('/'),
-  src: readFileSync(p, 'utf8'),
+  src: stripComments(readFileSync(p, 'utf8')),
 }));
 
 /** catch 節の本体の範囲（開始/終了インデックス）を波括弧の対応で切り出す */
@@ -166,6 +172,51 @@ describe('API route の無音の失敗ガード', () => {
     const src = ROUTES.find((r) => r.path === 'src/app/api/team/member-stats/route.ts')?.src ?? '';
     expect(src).toMatch(/incomplete/);
     expect(src).toMatch(/incomplete\.push\(/);
+  });
+
+  it('AI へ渡す context は、取得失敗を空の JSON リテラルへ畳まない（P162 のラチェット）', () => {
+    // 🔴 `catch { return '{}' }` は **「読めなかった」を「データが無い」と同じ値にする**。
+    // モデルは「特筆すべき情報が無い」と自然文で**言い切り**、`console.error` はサーバログにしか
+    // 出ないので**利用者には正常な応答として届く**。表示側の「不明として出す」（P159/P160）が
+    // 構造的に当たらない唯一の経路がここ。
+    // ⚠️ 残っている 3 箇所は **両側（Web / iOS）から呼出元がゼロの route** の中にある
+    //（`insights` と `suggest` は iOS にクライアント自体が無い・2026-08-29 に両側で実測）。
+    // 到達しないので直すのは後回しにしたが、**増えるのは止める**ため完全一致で固定する。
+    // 直すときはこのリストから消すこと（消し忘れると赤くなる）。
+    const KNOWN = [
+      'src/app/api/ai/insights/route.ts:35',
+      'src/app/api/ai/insights/route.ts:83',
+      'src/app/api/ai/suggest/route.ts:33',
+    ];
+    const found: string[] = [];
+    for (const { path, src } of ROUTES) {
+      if (!path.startsWith('src/app/api/ai/')) continue;
+      for (const [a, b] of catchSpans(src)) {
+        for (const m of src.slice(a, b).matchAll(/return\s*(?:'|")(?:\{\}|\[\])(?:'|")/g)) {
+          found.push(`${path}:${src.slice(0, a + (m.index ?? 0)).split('\n').length}`);
+        }
+      }
+    }
+    expect(found.sort()).toEqual(KNOWN);
+  });
+
+  it('部分的に読めなかったことを伝えるキーは、空でもキーごと消さない（P162）', () => {
+    // `...(len > 0 ? { incomplete } : {})` は、呼出側から
+    // **「読めなかった項目がゼロ」と「そもそも報告していない」を同じに見せる**
+    // （`data.incomplete?.length` はどちらでも false）。
+    // 正しい版は `record-engine/apply` の `trimmed`＝**0 件でも配列**（P155 で型必須化）。
+    // ⚠️ 型では強制できない（HTTP 境界の `await res.json()` は `as` で名乗るだけ）ので
+    // **入口を静的に見る**。対象は「報告用の名前」だけに絞る（プロンプトの節約目的で
+    // キーを落とす `...(data.withDouhan ? …)` のような形は別物なので巻き込まない）。
+    const REPORT_KEY = /\.\.\.\([^)]*\?\s*\{\s*(incomplete|trimmed|skipped|rejected|failed|unattributed|undated)\b/;
+    const offenders: string[] = [];
+    for (const { path, src } of ROUTES) {
+      const lines = src.split('\n');
+      lines.forEach((line, i) => {
+        if (REPORT_KEY.test(line)) offenders.push(`${path}:${i + 1}`);
+      });
+    }
+    expect(offenders).toEqual([]);
   });
 
   it('通報一覧は「取得失敗」と「削除済み」を区別して返す', () => {

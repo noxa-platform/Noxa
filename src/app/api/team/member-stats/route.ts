@@ -217,11 +217,15 @@ export async function POST(request: NextRequest) {
       .map(([dateKey, v]) => ({ dateKey, amount: v.amount, count: v.count }))
       .sort((a, b) => a.dateKey.localeCompare(b.dateKey));
 
-    // 欠けたまま「0」を成績として見せない。クライアントは incomplete があれば警告を出す
+    // 欠けたまま「0」を成績として見せない。クライアントは incomplete があれば警告を出す。
+    // ⚠️ P162: **0 件でも必ず配列で返す**（`record-engine/apply` の `trimmed` と同じ契約）。
+    // 以前は `...(len > 0 ? { incomplete } : {})` でキーごと消しており、呼出側からは
+    // 「読めなかった項目はゼロ」と「そもそも報告していない」が**同じに見えていた**
+    // （`data.incomplete?.length` は前者でも後者でも false になる＝読まなくても通る）。
     const uniqueIncomplete = [...new Set(incomplete)];
     return NextResponse.json({
       members, dailyTotals, period: { year, month }, scopeNote: SHOP_SCOPE_NOTE,
-      ...(uniqueIncomplete.length > 0 ? { incomplete: uniqueIncomplete } : {}),
+      incomplete: uniqueIncomplete,
     });
   } catch (e) {
     if (e instanceof AuthError) {

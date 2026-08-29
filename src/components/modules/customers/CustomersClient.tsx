@@ -282,7 +282,13 @@ function TeamStatsPanel({ shopId, user }: { shopId: string; user: User }) {
         else {
           setRows(Array.isArray(data.members) ? data.members : []);
           // サーバ側で一部を読めていない場合（200 でも数字は欠けている）。
-          // 「今月0」と本物の0を区別できないと、成績や給与の判断を誤る（Day116）
+          // 「今月0」と本物の0を区別できないと、成績や給与の判断を誤る（Day116）。
+          // ⚠️ P162: サーバは **0 件でも必ず配列**を返す。キーが無いのは
+          // 「読めなかった項目がゼロ」ではなく**報告していない応答**（本文が壊れている等）なので、
+          // 静かに「異常なし」へ倒さずログに残す。
+          if (res.ok && !Array.isArray(data.incomplete)) {
+            console.warn('[member-stats] 応答に incomplete が無い（0 件と未報告を区別できない）');
+          }
           setWarn(data.incomplete?.length
             ? `${data.incomplete.join('・')}を読み込めませんでした。表示中の数字は実際より少ない可能性があります（0 でも「実績なし」とは限りません）。`
             : null);

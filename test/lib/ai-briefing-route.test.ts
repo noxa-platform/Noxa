@@ -5,7 +5,14 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 //   - workspaceId/customerId 欠落=400、認証401、越境（resolveAccessContext throw）=generic 500
 //   - 成功: LLM 生 JSON をパースして briefing＋creditsRemaining を返し ack（=消費確定）
 //   - パース失敗=500 かつ **ack しない**（＝withReservedCredits が refund する Day67 契約）
-//   - 顧客不在でも context='{}' で生成継続（404 にしない設計）
+//
+// P162（2026-08-29）で **取得結果を 3 状態に分けた**。それまでは
+// 「顧客 doc が読めない」も「顧客が居ない」も `'{}'` を組み立ててモデルへ送っており、
+// モデルが「特筆すべき情報が無い」と言い切って**利用者にはそれが答えとして見えていた**:
+//   - blocked（読めない）= 503・**generateText を呼ばない**（クレジットも予約しない）
+//   - blocked（居ない）  = 404（**読めなかったのと同じ値に畳まない**）
+//   - partial（一部だけ）= 200・プロンプトに断り文・応答 `incomplete: ['直近ログ']`
+//   - ready（本当に 0 件）= 200・断り文なし・`incomplete: []`（**0 件でも必ず配列**）
 //
 // 顧客ログ orderBy は datetime（Day88 で正準確認済み）。実バグは発見されず。executable spec。
 
@@ -34,10 +41,22 @@ vi.mock('../../src/app/api/ai/with-credits', () => ({
 import { AuthError } from '../../src/app/api/lib/firebase-admin';
 import { POST } from '../../src/app/api/ai/briefing/route';
 
-function makeDb(customer: Record<string, unknown> | undefined, logs: Record<string, unknown>[] = []) {
+function makeDb(
+  customer: Record<string, unknown> | undefined,
+  logs: Record<string, unknown>[] = [],
+  fail: { customer?: boolean; logs?: boolean } = {},
+) {
   return {
-    doc: () => ({ get: async () => ({ exists: customer !== undefined, data: () => customer }) }),
-    collection: () => ({ orderBy: () => ({ limit: () => ({ get: async () => ({ docs: logs.map((l) => ({ data: () => l })) }) }) }) }),
+    doc: () => ({
+      get: async () => {
+        if (fail.customer) throw new Error('permission-denied');
+        return { exists: customer !== undefined, data: () => customer };
+      },
+    }),
+    collection: () => ({ orderBy: () => ({ limit: () => ({ get: async () => {
+      if (fail.logs) throw new Error('deadline-exceeded');
+      return { docs: logs.map((l) => ({ data: () => l })) };
+    } }) }) }),
   };
 }
 const req = (body: unknown) => ({ json: async () => body }) as never;
@@ -76,6 +95,7 @@ describe('ai/briefing POST（会話前ブリーフィング）', () => {
     expect(await res.json()).toEqual({
       briefing: { stage: 'S3', topicCandidates: ['旅行', '猫', '映画'] },
       creditsRemaining: 6,
+      incomplete: [],
     });
     expect(mocks.ack).toHaveBeenCalledTimes(1);
   });
@@ -87,12 +107,51 @@ describe('ai/briefing POST（会話前ブリーフィング）', () => {
     expect(mocks.ack).not.toHaveBeenCalled();
   });
 
-  it('顧客不在でも context={} で生成継続（404 にしない）', async () => {
+  // ---- P162: 取得結果の 3 状態 ----
+
+  it('①顧客 doc が読めない: 503・モデルへ送らない・クレジットを消費しない', async () => {
+    mocks.getDb.mockReturnValue(makeDb({ name: '太郎' }, [], { customer: true }));
+    const res = await POST(req(okBody));
+    expect(res.status).toBe(503);
+    // 🔴 ここが本題。'{}' を渡していた頃は 200 が返り、モデルが
+    // 「特筆すべき情報が無い」と言い切って利用者に届いていた
+    expect(mocks.gen).not.toHaveBeenCalled();
+    expect(mocks.ack).not.toHaveBeenCalled();
+  });
+
+  it('①顧客が居ない: 404（「読めなかった」と同じ値に畳まない）', async () => {
     mocks.getDb.mockReturnValue(makeDb(undefined, []));
     const res = await POST(req(okBody));
+    expect(res.status).toBe(404);
+    expect(mocks.gen).not.toHaveBeenCalled();
+    expect(mocks.ack).not.toHaveBeenCalled();
+  });
+
+  it('②ログだけ読めない: 200 で送るが、断り文を渡し incomplete で名指しする', async () => {
+    mocks.getDb.mockReturnValue(makeDb({ name: '太郎', rank: 'VIP' }, [], { logs: true }));
+    const res = await POST(req(okBody));
     expect(res.status).toBe(200);
-    expect(mocks.gen).toHaveBeenCalledTimes(1);
-    expect(mocks.ack).toHaveBeenCalledTimes(1);
+    expect(await res.json()).toEqual({
+      briefing: { stage: 'S3', topicCandidates: ['旅行', '猫', '映画'] },
+      creditsRemaining: 6,
+      incomplete: ['直近ログ'],
+    });
+    // 止めない（記録が 1 件でも欠けた顧客で AI が死ぬ）が、黙って送らない
+    const sent = String(mocks.gen.mock.calls[0][0]);
+    expect(sent).toContain('直近ログ');
+    expect(sent).toContain('取得できませんでした');
+    // 読めた側（顧客本体）はちゃんと届いている
+    expect(sent).toContain('太郎');
+  });
+
+  it('③本当に 0 件: 200・断り文なし・incomplete は空配列（新規顧客を塞がない）', async () => {
+    mocks.getDb.mockReturnValue(makeDb({ name: '新規太郎' }, []));
+    const res = await POST(req(okBody));
+    expect(res.status).toBe(200);
+    expect((await res.json()).incomplete).toEqual([]);
+    const sent = String(mocks.gen.mock.calls[0][0]);
+    expect(sent).not.toContain('取得できませんでした');
+    expect(sent).toContain('新規太郎');
   });
 
   it('【回帰・Day99】顧客とログのフリーテキストは maskDeep されて AI に渡る', async () => {
