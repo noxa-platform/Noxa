@@ -1,4 +1,7 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { stripComments } from '../helpers/strip-comments';
 
 // ai/customer-context-extract の POST を検証する（Day93）。
 // 顧客との LINE/DM スクショから「相手（顧客）」の情報を抽出し顧客カルテ候補を返す
@@ -119,6 +122,28 @@ describe('ai/customer-context-extract POST（スクショ→顧客情報抽出�
     expect(json.extracted.nameHint).toBe('れん');
     expect(json.extracted.mood).toBe('neutral');
     expect(mocks.ack).toHaveBeenCalledTimes(1);
+  });
+
+  // 🔴 別リポとの契約（P162-PM2）。`hasContent` の消費者は iOS の
+  //   `ChatView.swift:558`（`guard result.hasContent else { return }`）**1 箇所だけ**で、
+  //   `?? false` で受けるため **省くと反映ダイアログが黙って出なくなる**（エラーも 0 件も出ない）。
+  //   ⇒ **200 を返す経路を 1 本に固定**して、載せ忘れる場所が増えないようにする。
+  //   ⚠️ 引き継ぎメモに書くだけでは**その行を触る人の目に入らない**ので、
+  //   コード（`ExtractResponse.hasContent` の docstring）とここの両方に置く。
+  it('200 を返す経路は 1 本だけ（増やすときは hasContent の同梱を確かめ、iOS へ連絡する）', () => {
+    const src = stripComments(readFileSync(join(process.cwd(), 'src/app/api/ai/customer-context-extract/route.ts'), 'utf8'));
+    // status 指定のない NextResponse.json( … ) ＝ 200 を返す経路
+    const okReturns = [...src.matchAll(/NextResponse\.json\(([^;]*?)\)\s*;/g)]
+      .filter((m) => !/status:\s*\d{3}/.test(m[1]));
+    expect(okReturns).toHaveLength(1);
+    expect(okReturns[0][1].trim()).toBe('response');
+  });
+
+  it('200 の本文には hasContent が必ず載る（省くと iOS が「中身なし」に畳む）', async () => {
+    mocks.analyze.mockResolvedValue('{"nameHint":"れん","mood":"neutral"}');
+    const json = await (await POST(req(okBody))).json();
+    expect(Object.keys(json)).toContain('hasContent');
+    expect(typeof json.hasContent).toBe('boolean');
   });
 
   // ▼ vision 抽出の設計: 不正 JSON でも hasContent=false を正直に返して ack（＝空が正当な結果）。

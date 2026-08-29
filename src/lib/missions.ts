@@ -6,6 +6,15 @@
 // 受領管理: reward_missions/{uid}.claimed: { [missionId]: ServerTimestamp }
 // 受領は冪等（既に claimed なら何もしない）。
 
+/**
+ * ミッションの分類。
+ *
+ * 🔴 **値を足すときは先に yorulog（iOS）へ連絡すること。**
+ * iOS は `/api/missions` の `category` を**非 optional でデコード**するので、
+ * 知らない値が 1 つ混ざると**一覧そのものがデコードに失敗する**（該当 1 件が消えるのではない）。
+ * ⚠️ 消すときも同じ（既存の値を返さなくなるのは安全側だが、iOS の分岐が死ぬ）。
+ * `test/lib/missions.test.ts` が値集合を固定しているので、増減すると赤くなる。
+ */
 export type MissionCategory = 'profile' | 'data' | 'referral';
 
 export interface MissionDefinition {

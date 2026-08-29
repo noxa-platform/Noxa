@@ -25,6 +25,17 @@ describe('MISSIONS の不変条件', () => {
   });
 });
 
+describe('別リポとの契約（yorulog-ios が非 optional でデコードする）', () => {
+  // 🔴 iOS は `/api/missions` の `category` を **非 optional** でデコードする。
+  // 知らない値が 1 つ混ざると **一覧そのものがデコードに失敗する**（該当 1 件が消えるのではない）。
+  // ⇒ **増減とも赤にして、変更前に yorulog へ連絡する手順を強制する。**
+  // ⚠️ この判定は **Web だけを見ていても正しさが決まらない**（相手のデコーダが根拠）。
+  //   相手が optional に変えたらここは緩められるが、**それは向こうからの連絡でしか分からない**。
+  it('category の値集合は固定（増やすときも減らすときも先に iOS へ連絡）', () => {
+    expect([...new Set(MISSIONS.map((m) => m.category))].sort()).toEqual(['data', 'profile', 'referral']);
+  });
+});
+
 describe('REFERRAL_BONUS とミッション定義の整合', () => {
   it('招待者ボーナス = invite_first_friend の報酬', () => {
     expect(REFERRAL_BONUS.referrer).toBe(getMission('invite_first_friend')!.rewardCredits);

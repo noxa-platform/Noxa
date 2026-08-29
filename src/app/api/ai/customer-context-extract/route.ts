@@ -56,6 +56,18 @@ export interface CustomerContextExtracted {
 }
 
 interface ExtractResponse {
+  /**
+   * 顧客情報を含む画像か（`isPlausibleCustomerContent` の判断）。
+   *
+   * 🔴 **200 で必ず載せる。省いた版を出すときは先に yorulog（iOS）へ連絡すること。**
+   * 消費者は 1 箇所だけ: **`ChatView.swift:558` の `guard result.hasContent else { return }`**
+   * （2026-08-30 に iOS 側が全数で実測。出現 14 のうち実消費 1）。
+   * iOS は `?? false` で受けるので、**省くと「中身なし」に畳んで反映ダイアログが黙って出なくなる**
+   * ——エラーも 0 件も出ない。**こちらからは何も起きない**ので気付けない。
+   * ⚠️ **`hasContent` は「こちらが顧客情報らしいと判断したか」であって、
+   * 「相手の新規登録に足りるか」ではない**（別の問い。画像取り込みは iOS 側で数えている）。
+   * **同じ名前で 2 つの問いに答えさせない。**
+   */
   hasContent: boolean;
   extracted: CustomerContextExtracted;
   /** knownCustomers から名前で部分一致した候補（複数あり得る） */
@@ -217,6 +229,9 @@ export async function POST(request: NextRequest) {
         nextVisitHint: typeof parsedRaw.nextVisitHint === 'string' && parsedRaw.nextVisitHint.trim() ? parsedRaw.nextVisitHint.trim() : null,
       };
 
+      // ⚠️ **200 を返す経路はここ 1 本だけ**にしてある（`ExtractResponse` を必ず経由する）。
+      // 経路を増やすと `hasContent` を載せ忘れられるので、
+      // `test/lib/ai-customer-context-extract-route.test.ts` が本数を固定している。
       const response: ExtractResponse = {
         hasContent: isPlausibleCustomerContent(extracted),
         extracted,
