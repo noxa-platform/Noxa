@@ -9,11 +9,18 @@
 /**
  * ミッションの分類。
  *
- * 🔴 **値を足すときは先に yorulog（iOS）へ連絡すること。**
- * iOS は `/api/missions` の `category` を**非 optional でデコード**するので、
- * 知らない値が 1 つ混ざると**一覧そのものがデコードに失敗する**（該当 1 件が消えるのではない）。
- * ⚠️ 消すときも同じ（既存の値を返さなくなるのは安全側だが、iOS の分岐が死ぬ）。
- * `test/lib/missions.test.ts` が値集合を固定しているので、増減すると赤くなる。
+ * ✅ **値を足しても iOS は落ちない**（2026-08-30・yorulog が現物の行で実測）。
+ * `MissionService.swift:19-50` の `MissionCategory` は**独自の `init(from:)`** を持ち、
+ * 未知の値は `.unknown(raw)` になって **throw しない**（`rawValue` も潰さない）。
+ * 実測テスト `ForwardCompatEnumsP131Tests.testUnknownCategoryDoesNotDropTheWholeMissionList`
+ * が、実際の入れ子で未知の値を混ぜても**一覧が全件残る**ことを固定している。
+ * ⚠️ **この前方互換は iOS の P131 で入ったもの**で、それ以前は非 optional だった。
+ * 外す・厳しくするときは向こうから連絡が来る（`MissionCategory` の docstring に記載済み）。
+ *
+ * 🔴 **落ちる引き金は `category` ではない。** `MissionItem` の他 6 フィールド
+ * （`id` / `title` / `description` / `rewardCredits` / `order` / `claimed`）が**非 optional**で、
+ * **欠けるか型が変わると一覧ごと throw する**。締める対象はそちら
+ * （`test/lib/missions.test.ts` の「/api/missions の応答の必須 6 キー」）。
  */
 export type MissionCategory = 'profile' | 'data' | 'referral';
 
