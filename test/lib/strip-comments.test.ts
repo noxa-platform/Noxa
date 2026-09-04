@@ -52,6 +52,40 @@ describe('stripComments の不変条件', () => {
     expect(out).toContain('const keep = 1;');
   });
 
+  it('🔴 消しすぎない①: 正規表現リテラルの中身は残る（ガードが探す式がそこに在る）', () => {
+    // ⚠️ **「壊れなくなった」は「正しく落としている」の証拠にならない**（yorulog の指摘・2026-09-04）。
+    // 落とし漏れ（下のリポ走査）だけを見ていると、**何も落とさない実装**でも
+    // **落としすぎる実装**でも通り得る。⇒ **逆方向をここで測る。**
+    // 🔴 これは実際に自分で作りかけた穴——正規表現リテラルを空白へ潰していたので、
+    // **ガードが探す式が正規表現の中にあると静かに空振り**していた（この pass で直した）。
+    expect(stripComments(`const r = s.replace(/ai-provider/g, '');`)).toContain('ai-provider');
+    expect(stripComments(`if (/\\.data\\(\\) as /.test(x)) {}`)).toContain('.data');
+    // 実ファイルでも見る（合成入力だけだと「その形しか通らない実装」に気付けない）
+    const chat = stripComments(readFileSync('src/app/api/ai/chat/route.ts', 'utf8'));
+    expect(chat).toContain('maskDeep');       // 判定対象の import が残っている
+    expect(chat).toContain("status: 429");    // 判定対象のコードが残っている
+  });
+
+  it('🔴 消しすぎない②: strip は「空白へ置き換える」以外のことをしない（リポ全体）', () => {
+    // 文字位置ごとに **原文と同じか、空白か** のどちらかであること。
+    // ＝ 行数も長さも変わらず、**別の文字に化けることはない**。
+    // これはコメント除去の定義そのものなので、ヒューリスティックを足さずに全ファイルへ当てられる。
+    const files = [...walk('src'), ...walk('functions/src')];
+    const offenders: string[] = [];
+    for (const f of files) {
+      const raw = readFileSync(f, 'utf8');
+      const out = stripComments(raw);
+      if (out.length !== raw.length) { offenders.push(`${f}: 長さが変わった`); continue; }
+      for (let i = 0; i < raw.length; i++) {
+        if (out[i] !== raw[i] && out[i] !== ' ') {
+          offenders.push(`${f.split(/[\\/]/).join('/')}: ${i} 文字目が空白以外へ化けた`);
+          break;
+        }
+      }
+    }
+    expect(offenders).toEqual([]);
+  });
+
   it('リポ全体で「コメントが残るファイル」はテンプレート内の既知 2 件だけ', () => {
     // ⚠️ 残り 2 件は**テンプレートリテラルの中に書かれたコメント**で、
     // 素朴な走査では消せない（テンプレートの中身は文字列として正しい）。
