@@ -8,6 +8,7 @@ import { resolveWorkspaceContext } from '../../src/lib/ai-knowledge/prompt-helpe
 import {
   buildSelfBaseBlock,
   buildStoreProfileBlock,
+  STORE_STYLE_MAX_CHARS,
   composePlaybookAndSelf,
   STRICT_RULES_BLOCK,
 } from '../../src/lib/ai-knowledge/prompt-helpers';
@@ -74,6 +75,40 @@ describe('buildStoreProfileBlock', () => {
     expect(out).not.toContain('業種: cabaret');
   });
 
+  // ▼ P164: チュートリアルで入力させているのに AI へ届いていなかった 2 項目
+  it('🔴 店のルール・接客スタイル（selfBaseStyle）をプロンプトへ載せる', () => {
+    // `NewWorkspaceTutorialView` の自由入力は shop doc 直下の `selfBaseStyle` に入る。
+    // 🔴 `night-work-playbook` は「**必ず selfBaseStyle を最優先に反映**」とモデルに指示していたのに、
+    // **値を渡していなかった**（利用者は入力させられ、モデルは守れと言われ、中身だけ無い状態）。
+    const out = buildStoreProfileBlock({ name: 'X', storeTypeName: 'バー', selfBaseStyle: '同伴の話は自分から振らない' });
+    expect(out).toContain('同伴の話は自分から振らない');
+    expect(out).toContain('最優先で従う');
+  });
+
+  it('アップロードしたテキスト（aiProfile.textNotes）も載せる', () => {
+    const out = buildStoreProfileBlock({ name: 'X', storeTypeName: 'バー', aiProfileNotes: ['[接客.txt]\n語尾は柔らかく'] });
+    expect(out).toContain('語尾は柔らかく');
+  });
+
+  it('ルールだけ入力して名前も業種も空でも、ルールは届く', () => {
+    // ⚠️ `minimalSignal` に足していないと、**入力したのに丸ごと出ない**（弱シグナル扱いで空文字）
+    expect(buildStoreProfileBlock({ selfBaseStyle: '週末は同伴を優先' })).toContain('週末は同伴を優先');
+  });
+
+  it('🔴 上限で切ったときは「切れている」と本文に書く（黙って捨てない）', () => {
+    const long = 'あ'.repeat(STORE_STYLE_MAX_CHARS + 50);
+    const out = buildStoreProfileBlock({ name: 'X', storeTypeName: 'バー', selfBaseStyle: long });
+    expect(out).toContain('上限');
+    expect(out).toContain('推測で補わないこと');
+    // 切ったうえで、切った分は入っていない
+    expect(out.match(/あ/g)?.length).toBe(STORE_STYLE_MAX_CHARS);
+  });
+
+  it('上限以内なら「切れている」とは言わない（0 件と切り捨てを混ぜない）', () => {
+    const out = buildStoreProfileBlock({ name: 'X', storeTypeName: 'バー', selfBaseStyle: '短いルール' });
+    expect(out).not.toContain('上限');
+  });
+
   it('電話番号はプロンプトに出さない（PII を AI へ渡さない）', () => {
     const out = buildStoreProfileBlock({ name: 'X', storeTypeName: 'バー', phoneNumber: '090-1234-5678' });
     expect(out).not.toContain('090-1234-5678');
@@ -121,6 +156,35 @@ describe('resolveWorkspaceContext — shop の文体フォールバック（Day8
     const { selfData } = await resolveWorkspaceContext(shopCtx);
     expect(selfData?.stageName).toBe('ルナ');
     expect(selfData?.firstPerson).toBe('うち');
+  });
+
+  // 🔴 P164: **受け渡しの経路**を測る。
+  // ここが無いと、`buildStoreProfileBlock` の単体テストが全部緑でも
+  // 「**wsData から storeProfile へ渡していない**」регресを 1 つも捕まえられない
+  //（実際、3 段目で受け渡しの 1 行を消しても既存テストは全部緑だった＝**今日直した欠陥そのものの形**）。
+  it('🔴 チュートリアルの入力（selfBaseStyle / aiProfile.textNotes）が storeProfile まで届く', async () => {
+    mocks.getDb.mockReturnValue(makeDb({
+      'shop_shops/ws1': {
+        name: '店A', type: 'business', storeTypeName: 'バー',
+        selfBaseStyle: '同伴の話は自分から振らない',
+        aiProfile: { textNotes: ['[接客.txt]\n語尾は柔らかく'], imageRefs: ['gs://x/y.jpg'] },
+      },
+    }));
+    const { storeProfile } = await resolveWorkspaceContext(shopCtx);
+    expect(storeProfile?.selfBaseStyle).toBe('同伴の話は自分から振らない');
+    expect(storeProfile?.aiProfileNotes).toEqual(['[接客.txt]\n語尾は柔らかく']);
+    // ⚠️ 画像はまだ使わない（毎回 vision へ送ると単価が跳ねる）。渡っていないことも固定する
+    expect(storeProfile as unknown as Record<string, unknown>).not.toHaveProperty('imageRefs');
+    // 経路の出口まで見る（ブロックの中身に出ているか）
+    expect(buildStoreProfileBlock(storeProfile)).toContain('同伴の話は自分から振らない');
+  });
+
+  it('textNotes に文字列以外が混ざっていても落とさない（型は Firestore が守らない）', async () => {
+    mocks.getDb.mockReturnValue(makeDb({
+      'shop_shops/ws1': { name: '店A', aiProfile: { textNotes: ['ok', 42, null, { a: 1 }] } },
+    }));
+    const { storeProfile } = await resolveWorkspaceContext(shopCtx);
+    expect(storeProfile?.aiProfileNotes).toEqual(['ok']);
   });
 
   it('shop 側に文体があればそちらを優先する（フォールバックで上書きしない）', async () => {

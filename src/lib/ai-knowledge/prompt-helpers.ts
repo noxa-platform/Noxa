@@ -27,7 +27,30 @@ export type StoreProfileDoc = {
   address?: string;
   phoneNumber?: string;
   businessHours?: string;
+  /**
+   * 🔴 P164（2026-09-04）で追加。**iOS のチュートリアルが入力させているのに
+   * どこにも届いていなかった 2 項目**。
+   *
+   * - `selfBaseStyle` … `NewWorkspaceTutorialView` の自由入力（「お店のルール・接客スタイル」）。
+   *   `data["selfBaseStyle"] = trimmedSeed` で **shop doc 直下**に書かれる。
+   * - `aiProfileNotes` … 同チュートリアルでアップロードした**テキストファイルの中身**
+   *   （`aiProfile.textNotes` ＝ `[ファイル名]\n本文` の配列）。
+   *
+   * ⚠️ どちらも `resolveWorkspaceContext` が**既に読んでいる `wsData` の中に在った**。
+   * 読んでいるのに**プロンプトへ載せていなかった**だけなので、追加の Firestore 読みはゼロ。
+   * 🔴 しかも `night-work-playbook.ts:58,60` は「**必ず myMessageStyle・selfBaseStyle を
+   * 最優先に反映**」と**モデルに指示していた**——**値を渡さずに「反映しろ」とだけ言っていた。**
+   * ＝ 利用者は入力させられ、モデルは守れと言われ、**中身だけが存在しない**状態だった。
+   *
+   * ⚠️ `aiProfile.imageRefs`（店舗写真）は**まだ使っていない**。毎回 vision へ送ると
+   * 単価が跳ねるので、「1 回だけ読んで説明文に変換して保存」を別パスで作る（未着手）。
+   */
+  selfBaseStyle?: string;
+  aiProfileNotes?: string[];
 };
+
+/** 店のルール・スタイルとしてプロンプトへ載せる上限（結合後の文字数）。P164 */
+export const STORE_STYLE_MAX_CHARS = 1200;
 
 const GENDER_LABELS: Record<string, string> = {
   female: '女性',
@@ -94,14 +117,26 @@ export function buildStoreProfileBlock(
   heading = '## 店舗プロファイル（接客文脈の前提として使う）',
 ): string {
   if (!data) return '';
-  const minimalSignal = data.storeTypeName || data.name;
+  // ⚠️ ルールだけ入力してワークスペース名が空、という状態でも**ルールは届かせる**
+  const minimalSignal = data.storeTypeName || data.name || data.selfBaseStyle || (data.aiProfileNotes ?? []).length > 0;
   if (!minimalSignal) return '';
   const isBusiness = data.type === 'business';
+  // 店のルール・接客スタイル（チュートリアルの自由入力 + アップロードしたテキスト）。
+  // ⚠️ 上限で切ったときは**切ったことを本文に書く**（黙って捨てない・`trimmed` と同じ作法）。
+  const styleSource = [
+    data.selfBaseStyle?.trim() || '',
+    ...(data.aiProfileNotes ?? []).map((n) => n.trim()).filter(Boolean),
+  ].filter(Boolean).join('\n');
+  const styleTrimmed = styleSource.length > STORE_STYLE_MAX_CHARS;
+  const style = styleTrimmed ? styleSource.slice(0, STORE_STYLE_MAX_CHARS) : styleSource;
+
   const parts = [
     data.name ? `${isBusiness ? '店舗' : 'ワークスペース'}名: ${data.name}` : '',
     data.storeTypeName ? `業種: ${data.storeTypeName}` : (data.storeType ? `業種: ${data.storeType}` : ''),
     data.address ? `所在地: ${data.address}` : '',
     data.businessHours ? `営業時間: ${data.businessHours}` : '',
+    style ? `店のルール・接客スタイル（利用者が入力した内容。最優先で従う）:\n${style}` : '',
+    styleTrimmed ? `※ 上記のルールは長さの上限（${STORE_STYLE_MAX_CHARS} 文字）で切れている。書かれていない前提を推測で補わないこと。` : '',
   ].filter(Boolean);
   if (parts.length === 0) return '';
   return `\n\n${heading}\n${parts.join('\n')}`;
@@ -156,6 +191,7 @@ export async function resolveWorkspaceContext(ctx: AccessContext) {
   const storeType = resolveStoreHintKey(wsData?.storeTypeName as string | undefined)
     || (wsData?.storeType as StoreType)
     || null;
+  const aiProfile = (wsData?.aiProfile ?? null) as { textNotes?: unknown } | null;
   const storeProfile: StoreProfileDoc | null = wsData ? {
     name: wsData.name as string | undefined,
     type: wsData.type as 'personal' | 'business' | undefined,
@@ -164,6 +200,11 @@ export async function resolveWorkspaceContext(ctx: AccessContext) {
     address: wsData.address as string | undefined,
     phoneNumber: wsData.phoneNumber as string | undefined,
     businessHours: wsData.businessHours as string | undefined,
+    // P164: 読んでいたのに渡していなかった 2 項目（追加の読みはゼロ）
+    selfBaseStyle: typeof wsData.selfBaseStyle === 'string' ? wsData.selfBaseStyle : undefined,
+    aiProfileNotes: Array.isArray(aiProfile?.textNotes)
+      ? (aiProfile.textNotes as unknown[]).filter((n): n is string => typeof n === 'string')
+      : undefined,
   } : null;
   return { wsData, selfData, storeType, storeProfile };
 }
