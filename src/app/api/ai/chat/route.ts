@@ -500,8 +500,16 @@ export async function POST(request: NextRequest) {
     // Gemini 呼出に失敗したら refundAiCredit で巻き戻す
     const reserved = await reserveAiCredit(uid, chatCost);
     if (!reserved.ok) {
+      // 🔴 **存在しない導線を案内しない**（P163・2026-09-04 のユーザー決定を受けて）。
+      // 以前は「プランをアップグレードしてください」と書いていたが、
+      // **β 公開期間中はプラン変更 UI を停止している**（`/account/subscription:160`）ので
+      // 案内先が無い。⚠️ さらに **free の月間枠は 0 が恒久方針**なので、
+      // この 429 は「使い切った人」ではなく **一度も持っていない人**にも出る。
+      // ⇒ 事実（残り / 必要）だけを返し、**次の一手は端末側が持つ**
+      //（iOS は Apple IAP のみ・Guideline 3.1.1。Web のサブスクを想起させない）。
+      // 他の AI 経路 8 本と同じ形に揃えてある。
       return NextResponse.json({
-        error: 'AIクレジットが不足しています。プランをアップグレードしてください。',
+        error: 'AIクレジット不足',
         creditsRemaining: reserved.remaining,
         requiredCredits: chatCost,
       }, { status: 429 });

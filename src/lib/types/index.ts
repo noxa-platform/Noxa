@@ -979,6 +979,12 @@ export const PLAN_LIMITS: Record<PlanTier, {
     maxCustomers: Infinity,
     // 無料の月次 AI 枠は廃止（2026-08-25 ユーザー決定「AI 機能は割高にして利用者を絞る /
     // 無料枠は廃止 / 無料機能と有料機能を完全に分離」）。
+    // ✅ **2026-09-04 に再確認**（ユーザー「無料枠は現状無しにしたい」）＝ **恒久の方針**。
+    // 🔴 したがって **新規ユーザーは残高 0 で始まり、購入するまで AI を 1 度も使えない**。
+    // 無料で得られる唯一の経路はミッション報酬（7 本・計 100cr）だが、
+    // `stopFreeCreditGrants: true` で停止中（`api/missions/lib.ts`）。
+    // ⇒ **「クレジットが切れた」系の文言を書かないこと**——ここに来る人の大半は
+    // **一度も持っていない**（`api/ai/chat` の 429 文言もこの理由で直した・P163）。
     // 0 にしても reserveAiCredit は monthlyRemaining=0 として購入クレジットへ回るだけで、
     // account_subscriptions.purchasedCredits（購入済み残高）には一切触れない。
     maxAiCredits: 0,

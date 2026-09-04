@@ -238,6 +238,36 @@ describe('API route の無音の失敗ガード', () => {
     expect(offenders).toEqual([]);
   });
 
+  it('クレジット不足（429）の文言で、存在しない導線を案内しない（P163）', () => {
+    // 🔴 `ai/chat` は「**プランをアップグレードしてください**」と返していたが、
+    // **β 公開期間中はプラン変更 UI を停止**しており（`/account/subscription`）案内先が無い。
+    // ⚠️ さらに **free の月間枠は 0 が恒久方針**（2026-09-04 ユーザー決定）なので、
+    // この 429 は「使い切った人」ではなく **一度も持っていない人**にも出る。
+    // ＝ 文言が二重に嘘になる（存在しない導線 × 持っていたことがない前提）。
+    // ⇒ 429 の本文は**事実（残り / 必要）だけ**にし、次の一手は端末側に持たせる
+    //（iOS は Apple IAP のみ・Guideline 3.1.1）。
+    const DEAD = /アップグレード|プランを|使い切|切れました|再開するには/;
+    const offenders: string[] = [];
+    for (const { path, src } of ROUTES) {
+      for (const m of src.matchAll(/status:\s*429/g)) {
+        const line = src.slice(0, m.index ?? 0).split('\n').length;
+        // 429 を組み立てている前後 12 行を見る（本文は status より前に書かれる）
+        const around = src.split('\n').slice(Math.max(0, line - 12), line + 1).join('\n');
+        if (DEAD.test(around)) offenders.push(`${path}:${line}`);
+      }
+    }
+    expect(offenders).toEqual([]);
+  });
+
+  it('429 を返す経路の本数を固定（増えたら文言を確かめる・P163）', () => {
+    // ⚠️ 上の判定は「いま在る 429」にしか当たらない。**増えた分を人が読む**ために本数を固定する
+    //（yorulog の「走査本数は増えた側も読む」）。
+    // ⚠️ 走査根は route.ts だけなので **8**。共通ヘルパー `ai/with-credits.ts` に 9 本目があるが
+    // ROUTES の外（＝ この判定の走査外であることを数字に書いておく）。
+    const count = ROUTES.reduce((n, r) => n + [...r.src.matchAll(/status:\s*429/g)].length, 0);
+    expect(count).toBe(8);
+  });
+
   it('通報一覧は「取得失敗」と「削除済み」を区別して返す', () => {
     const src = ROUTES.find((r) => r.path === 'src/app/api/community/admin/reports/route.ts')?.src ?? '';
     // 判定を持つだけでは足りない。**応答に載せて**初めて管理画面が区別できる
