@@ -86,6 +86,27 @@ describe('stripComments の不変条件', () => {
     expect(offenders).toEqual([]);
   });
 
+  it('🔴 消しすぎない③: コメントを 1 つも含まないファイルは 1 バイトも変わらない（書き方に依存しない）', () => {
+    // ⚠️ 上の②（空白へ置き換える以外しない）は **「全部空白」でも緑**になる（定義に合うため）。
+    // ＝ **合成テストは「知っている書き方」しか守れない**（yorulog の整理・2026-09-04）。
+    // ⇒ **前提を 1 つも足さない不変条件**をここに置く:
+    //   **コメントを含まないファイルは、コメント除去の定義上ぜったいに変わらない。**
+    //   ヒューリスティックが要らず、**知らない書き方の消しすぎも捕まえる**。
+    // （向こうは同じ狙いを「出力は入力の接頭辞である」で置いた。前処理の形が違うので判定も違う）
+    const files = [...walk('src'), ...walk('functions/src'), ...walk('test')];
+    const commentFree = files.filter((f) => {
+      const s = readFileSync(f, 'utf8');
+      return !s.includes('//') && !s.includes('/*');
+    });
+    // 走査本数の下限（0 件なら「違反ゼロ」ではなく「何も見ていない」）
+    expect(commentFree.length).toBeGreaterThan(15);
+    const offenders = commentFree.filter((f) => {
+      const raw = readFileSync(f, 'utf8');
+      return stripComments(raw) !== raw;
+    });
+    expect(offenders).toEqual([]);
+  });
+
   it('リポ全体で「コメントが残るファイル」はテンプレート内の既知 2 件だけ', () => {
     // ⚠️ 残り 2 件は**テンプレートリテラルの中に書かれたコメント**で、
     // 素朴な走査では消せない（テンプレートの中身は文字列として正しい）。
