@@ -11,6 +11,8 @@
 import { Timestamp } from 'firebase-admin/firestore';
 import * as logger from 'firebase-functions/logger';
 import { db } from '../admin';
+import { toMillis } from './datetime';
+import { num, str, bool } from './values';
 import type { CustomerLite, ContactLogLite, WorkspaceLite } from '../types';
 
 /** 所属（招待で参加した側）で店舗運営の通知を受け取る role */
@@ -107,14 +109,17 @@ export async function listCustomers(ws: WorkspaceLite): Promise<CustomerLite[]> 
   const snap = await db().collection(collectionPath).get();
   return snap.docs.map((d) => {
     const data = d.data();
+    // ⚠️ ここが `as` のままだと、型違いの値が検証されずに下流へ流れる（P166）。
+    // 時刻は **ミリ秒に揃えて**返す——読み手に `.toMillis()` を呼ばせない形にすることで、
+    // 「Timestamp のはずだ」という前提を関数の外へ出さない。
     return {
       id: d.id,
-      name: (data.name as string) ?? '名前未設定',
-      birthday: (data.birthday as string | null) ?? null,
-      lastContactAt: (data.lastContactAt as Timestamp | null) ?? null,
-      totalSales: (data.totalSales as number) ?? 0,
-      nextAction: (data.nextAction as string | null) ?? null,
-      nextActionDue: (data.nextActionDue as Timestamp | null) ?? null,
+      name: str(data.name) ?? '名前未設定',
+      birthday: str(data.birthday),
+      lastContactAt: toMillis(data.lastContactAt),
+      totalSales: num(data.totalSales),
+      nextAction: str(data.nextAction),
+      nextActionDue: toMillis(data.nextActionDue),
     } satisfies CustomerLite;
   });
 }
@@ -138,10 +143,13 @@ export async function listLogsInRange(
       const data = l.data();
       logs.push({
         id: l.id,
-        type: (data.type as string) ?? 'other',
-        datetime: data.datetime as Timestamp,
-        salesAmount: (data.salesAmount as number) ?? 0,
-        countAsGroup: (data.countAsGroup as boolean | null | undefined) ?? null,
+        type: str(data.type) ?? 'other',
+        // ⚠️ **ここへ来た時点で datetime は範囲クエリを通っている**（型が違えば
+        // そもそも一致しない）。読めない形は null にして、集計側が「時刻不明」を扱えるようにする。
+        datetime: toMillis(data.datetime),
+        // 🔴 文字列の金額を通すと `salesTotal += ...` が文字列連結になり「¥120008000」が出る（P166 実測）
+        salesAmount: num(data.salesAmount),
+        countAsGroup: bool(data.countAsGroup),
       });
     });
   }

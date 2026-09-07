@@ -132,6 +132,29 @@ const RAW_READ = /\.data\(\) as /g;
  * **生のまま項目を取り出す**ものが混在する。前者は直す対象ではない。
  * ここでは**分類せず母集団だけ固定**する（分類は P162。yorulog の
  * 「変種は走査の側で潰す／名前付き型へ寄せる方針は取らない」と同じ判断）。
+ *
+ * ✅ **【P166】`functions/src` の 34 件を 1 件ずつ判定した**（内訳は grind LOG の P166 に全件表）。
+ * 判定は「その `.data()` から**項目を型として取り出しているか**」の一軸:
+ *   - **A: 丸ごと運ぶ / 存在確認だけ**（11 件）——`merge.ts` の doc コピー、
+ *     `v2-sync.ts` の `if (!after) return`、audit ログの before など。項目を主張しないので
+ *     この経路の危険は無い（丸ごとコピーの是非は別問題）。
+ *   - **B: 型で選り分けてから使う**（10 件 → P166 で 12 件）——`sales-sync.ts` の
+ *     `num()` / `str()` / `typeof x === 'string'` 経由＝正しい形。
+ *   - 🔴 **C: 生のまま項目を取り出す**（13 件 → P166 で 11 件）——`(data.totalSales as number) ?? 0` 型。
+ *     `as` は実行時に何も検証せず、`?? 0` が守るのは null / undefined だけなので**型違いは素通り**。
+ * 💡 **A と B と C は同じリポの中に並んでいて、どれになるかは
+ * 「どちらが正しいか」ではなく「たまたまどちらを書いたか」で決まっていた**
+ *（`sales-sync.ts` は自前の `num`/`str` を持っていたのに、時刻だけ素通しだった）。
+ *
+ * P166 で C → B にしたのは **`lib/workspaces.ts` の 2 件**（`listCustomers` /
+ * `listLogsInRange`）。ここだけ先に直したのは、**読み手が `.toMillis()` を直接呼んでいて、
+ * 型違いが来ると利用者ごと通知が throw で消える**＝落ち方が一番重かったから。
+ * ⚠️ **残る C の 11 件は未消化**（`lib/stats.ts` / `credits.ts` / `lib/prefs.ts` / `lib/push.ts` /
+ * `lib/workspaces.ts:46,47,54` / `v2-sync.ts:122,188` / `noxa-auth.ts:107,179`）。
+ * 数を揃えるだけなら今日できるが、**既定へ倒す向きが場所ごとに違う**——
+ * 送信統計の `?? 0`（表示）とクレジットの `?? amount`（課金の巻き戻し）、
+ * 通知設定の欠落（配信する / しない）は、揃えた瞬間に fail-safe の向きを壊し得る。
+ * ⇒ 向きの判断が要るものを「型を締める」ついでに混ぜない。
  */
 const RAW_READ_UNCAST = /\.data\(\)(?! as )/g;
 
@@ -194,7 +217,17 @@ describe('生データ経路のラチェット（.data() as）', () => {
    */
   it('functions/src/lib を実ソースとして走査できている', () => {
     const libFiles = FILES.filter((f) => f.path.startsWith('functions/src/lib/'));
-    expect(libFiles.length).toBe(6);
+    // 6 → 7（P166 で寄せ先 `values.ts` を新設）。⚠️ 数だけ動かすと除外が戻ったのか
+    // ファイルが増えたのか区別できないので、**在るべき実ソース名の方も固定する**
+    expect(libFiles.map((f) => f.path).sort()).toEqual([
+      'functions/src/lib/admin-check.ts',
+      'functions/src/lib/datetime.ts',
+      'functions/src/lib/prefs.ts',
+      'functions/src/lib/push.ts',
+      'functions/src/lib/stats.ts',
+      'functions/src/lib/values.ts',
+      'functions/src/lib/workspaces.ts',
+    ]);
   });
 
   /**

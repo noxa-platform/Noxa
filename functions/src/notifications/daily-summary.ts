@@ -52,8 +52,8 @@ export async function runDailySummary(): Promise<RunResult> {
         }
         const customers = await listCustomers(ws);
         for (const c of customers) {
-          if (!c.nextActionDue) continue;
-          if (c.nextActionDue.toMillis() <= todayCutoff.toMillis()) plannedTotal += 1;
+          if (c.nextActionDue == null) continue;
+          if (c.nextActionDue <= todayCutoff.toMillis()) plannedTotal += 1;
         }
       }
       // 売上 0 / 予定 0 のときも通知する（無風日でも届くことが価値）

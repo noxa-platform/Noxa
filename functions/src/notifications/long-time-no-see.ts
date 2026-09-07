@@ -39,8 +39,9 @@ export async function runLongTimeNoSeeReminder(): Promise<RunResult> {
       for (const ws of workspaces) {
         const customers = await listCustomers(ws);
         for (const c of customers) {
-          if (!c.lastContactAt) continue;
-          const lastMs = c.lastContactAt.toMillis();
+          // ⚠️ 読めない形は `listCustomers` が null にしている。ここで throw させない（P166）
+          if (c.lastContactAt == null) continue;
+          const lastMs = c.lastContactAt;
           // 過去 365 日内に接触あり、かつ 30 日以上連絡なし
           if (lastMs >= threshold365 && lastMs < threshold30 && c.totalSales > 0) {
             matchCount += 1;

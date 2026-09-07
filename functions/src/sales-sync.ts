@@ -28,8 +28,10 @@
  */
 import { onDocumentWritten } from 'firebase-functions/v2/firestore';
 import { logger } from 'firebase-functions';
-import { FieldValue } from 'firebase-admin/firestore';
+import { FieldValue, Timestamp } from 'firebase-admin/firestore';
 import { db } from './admin';
+import { toMillis } from './lib/datetime';
+import { num, str } from './lib/values';
 
 const REGION = 'asia-northeast1';
 
@@ -61,8 +63,33 @@ const shopCustomerRef = (shopId: string, customerId: string) =>
   db().doc(`shop_shops/${shopId}/customers/${customerId}`);
 
 type SaleData = Record<string, unknown>;
-const num = (v: unknown): number => (typeof v === 'number' ? v : 0);
-const str = (v: unknown): string | null => (typeof v === 'string' ? v : null);
+
+/**
+ * 控え／台帳へ書く時刻を **Timestamp に揃える**（P166）。
+ *
+ * 🔴 旧実装は `after.checkoutAt ?? after.createdAt ?? serverTimestamp()` で、
+ * **売上 doc に入っていた形をそのまま書き写していた**。金額（`num`）や区分（`str`）は
+ * 型で選り分けているのに、**時刻だけが素通し**だった。
+ * 通ってしまうと影響が 2 つ出る:
+ *   1. `personal_customers/{cast}/items/{customerId}.lastContactAt` が number や文字列になり、
+ *      通知側がその利用者ごと落ちる（P166 の読み手側の欠陥と対になっている）。
+ *   2. ログの `datetime` が Timestamp でなくなると、**日次サマリの範囲クエリに一致しなくなる**
+ *      （Firestore は型が違えば比較対象にならない）。売上が「無い」ことになるが、
+ *      画面が無いので**もっともらしい ¥0** が届くだけで誰も気付かない。
+ *
+ * ⚠️ 読めない `checkoutAt` が有効な `createdAt` を隠さないよう、**読めた最初の値**を採る
+ *（旧実装は `??` なので、壊れた checkoutAt があると createdAt に落ちなかった）。
+ * ⚠️ どちらも読めなければ `serverTimestamp()`——「時刻不明」を書ける欄が無いため、
+ * 少なくとも順序の壊れない値を入れる。
+ */
+function saleDatetime(after: SaleData): unknown {
+  for (const v of [after.checkoutAt, after.createdAt]) {
+    if (v instanceof Timestamp) return v;          // 正常系はそのまま（変換しない）
+    const ms = toMillis(v);
+    if (ms !== null) return Timestamp.fromMillis(ms);
+  }
+  return FieldValue.serverTimestamp();
+}
 
 /** 個人側へコピーする売上区分（本指名/場内/フリー・同伴・卓・客層）。会計時に POS が確定した値をそのまま控えへ写す。 */
 function saleClassification(after: SaleData): Record<string, unknown> {
@@ -81,7 +108,7 @@ async function writeCustomerLog(shopId: string, cast: string, customerId: string
   const custRef = personalCustomerRef(cast, customerId);
   const shopCustRef = shopCustomerRef(shopId, customerId);
   const amount = num(after.amount);
-  const datetime = after.checkoutAt ?? after.createdAt ?? FieldValue.serverTimestamp();
+  const datetime = saleDatetime(after);
 
   await db().runTransaction(async (tx) => {
     const [logSnap, custSnap, shopCustSnap] = await Promise.all([
@@ -190,7 +217,7 @@ async function writePersonalSale(shopId: string, cast: string, saleId: string, a
     // 旧実装はどちらも欠けており、POS会計の控えが個人売上画面に一切表示されなかった。
     amount: num(after.amount),
     dayKey: str(after.dayKey),
-    datetime: after.checkoutAt ?? after.createdAt ?? FieldValue.serverTimestamp(),
+    datetime: saleDatetime(after),
     customerId: null,
     customerName: str(after.customerName),
     castName: str(after.castName),

@@ -11,12 +11,29 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({ db: vi.fn() }));
 vi.mock('../../functions/src/admin', () => ({ db: mocks.db }));
-vi.mock('firebase-admin/firestore', () => ({
-  FieldValue: {
-    serverTimestamp: () => '__ts__',
-    increment: (n: number) => ({ __increment: n }),
-  },
-}));
+// ⚠️ **このモックは P166 まで一度も効いていなかった。**
+// `functions/` は自分の `node_modules/firebase-admin` を持つため、`functions/src` からの
+// `firebase-admin/firestore` はルートとは**別のファイルに解決**され、`vi.mock` の id と一致
+// しなかった。テストは「差し替えたつもり」で本物の FieldValue を動かしたまま緑だった
+//（`'__ts__'` を誰も assert していなかったので、嘘が表に出なかった）。
+// vitest.config.ts の alias で解決先を 1 つに揃えたので、以降このモックは実際に効く。
+// ⇒ 差し替えるなら**使っている export を全部**置くこと（Timestamp が欠けていた）。
+vi.mock('firebase-admin/firestore', () => {
+  // ⚠️ factory は先頭へ巻き上げられるので、クラスは**この中で**定義する
+  class FakeTimestamp {
+    constructor(readonly ms: number) {}
+    static fromMillis(ms: number) { return new FakeTimestamp(ms); }
+    static fromDate(d: Date) { return new FakeTimestamp(d.getTime()); }
+    toMillis() { return this.ms; }
+  }
+  return {
+    FieldValue: {
+      serverTimestamp: () => '__ts__',
+      increment: (n: number) => ({ __increment: n }),
+    },
+    Timestamp: FakeTimestamp,
+  };
+});
 
 import { syncShopSaleToPersonal } from '../../functions/src/sales-sync';
 
@@ -145,5 +162,120 @@ describe('syncShopSaleToPersonal（売上投影の失敗を無音にしない）
       ).rejects.toThrow();
       expect(spy).toHaveBeenCalled();
     } finally { spy.mockRestore(); }
+  });
+});
+
+describe('控え・台帳へ書く時刻を Timestamp に揃える（P166）', () => {
+  beforeEach(() => { mocks.db.mockReset(); });
+
+  /** FakeTimestamp（factory 内で定義しているので、判定は形で行う） */
+  const asMillis = (v: unknown): number | undefined =>
+    typeof (v as { toMillis?: () => number })?.toMillis === 'function'
+      ? (v as { toMillis: () => number }).toMillis()
+      : undefined;
+
+  it('正常な Timestamp はそのまま書く（余計な変換をしない）', async () => {
+    const { db, store } = makeDb({ store: { 'account_users/cast1': {} } });
+    mocks.db.mockReturnValue(db);
+    const stamp = { toMillis: () => 1_700_000_000_000 };
+
+    await (syncShopSaleToPersonal as unknown as (e: unknown) => Promise<void>)(
+      event({ ...SALE, checkoutAt: stamp }),
+    );
+
+    // instanceof は通らないが toMillis 経由で同じミリ秒に落ちる（値が化けない）ことを見る
+    expect(asMillis(store['personal_sales/cast1/items/sale1'].datetime)).toBe(1_700_000_000_000);
+  });
+
+  /**
+   * 🔴 旧実装は `after.checkoutAt ?? after.createdAt ?? serverTimestamp()` で、
+   * **売上 doc に入っていた形をそのまま書き写していた**。number のまま控えへ入ると
+   * 日次サマリの範囲クエリ（`where('datetime','>=',Timestamp)`）に**型が違って一致しない**。
+   * ⚠️ この一致しない挙動は最小フェイクでは再現できない（フェイクは Number() で比較する）。
+   * だからここでは**書かれた値の形**を見る——それが実 Firestore で効く唯一の条件。
+   */
+  it('★number（ミリ秒）で来た checkoutAt を Timestamp に変換してから書く', async () => {
+    const { db, store } = makeDb({ store: { 'account_users/cast1': {} } });
+    mocks.db.mockReturnValue(db);
+
+    await (syncShopSaleToPersonal as unknown as (e: unknown) => Promise<void>)(
+      event({ ...SALE, checkoutAt: 1_700_000_000_000 }),
+    );
+
+    const written = store['personal_sales/cast1/items/sale1'].datetime;
+    expect(typeof written).not.toBe('number');
+    expect(asMillis(written)).toBe(1_700_000_000_000);
+  });
+
+  it('★ISO 文字列で来た checkoutAt も Timestamp に揃える', async () => {
+    const { db, store } = makeDb({ store: { 'account_users/cast1': {} } });
+    mocks.db.mockReturnValue(db);
+
+    await (syncShopSaleToPersonal as unknown as (e: unknown) => Promise<void>)(
+      event({ ...SALE, checkoutAt: '2026-08-26T03:00:00.000Z' }),
+    );
+
+    expect(asMillis(store['personal_sales/cast1/items/sale1'].datetime))
+      .toBe(Date.parse('2026-08-26T03:00:00.000Z'));
+  });
+
+  /**
+   * ⚠️ 旧実装は `??` なので、**壊れた checkoutAt が有効な createdAt を隠していた**
+   *（null / undefined でなければ `??` は次へ行かない）。
+   */
+  it('★読めない checkoutAt は、有効な createdAt を隠さない', async () => {
+    const { db, store } = makeDb({ store: { 'account_users/cast1': {} } });
+    mocks.db.mockReturnValue(db);
+
+    await (syncShopSaleToPersonal as unknown as (e: unknown) => Promise<void>)(
+      event({ ...SALE, checkoutAt: true, createdAt: 1_700_000_000_000 }),
+    );
+
+    expect(asMillis(store['personal_sales/cast1/items/sale1'].datetime)).toBe(1_700_000_000_000);
+  });
+
+  it('どちらも読めなければサーバ時刻へ倒す（壊れた値をそのまま保存しない）', async () => {
+    const { db, store } = makeDb({ store: { 'account_users/cast1': {} } });
+    mocks.db.mockReturnValue(db);
+
+    await (syncShopSaleToPersonal as unknown as (e: unknown) => Promise<void>)(
+      event({ ...SALE, checkoutAt: {}, createdAt: 'いつか' }),
+    );
+
+    expect(store['personal_sales/cast1/items/sale1'].datetime).toBe('__ts__');
+  });
+
+  /**
+   * 顧客ありの経路（担当台帳）は `lastContactAt` にも同じ値が入る。
+   * ここが number のままだと、通知側（`listCustomers`）が読む形が壊れる＝P166 の読み手側と対。
+   */
+  it('★顧客あり売上でも lastContactAt / ログの datetime が Timestamp で入る', async () => {
+    const { db, store } = makeDb({ store: { 'account_users/cast1': {} } });
+    mocks.db.mockReturnValue(db);
+
+    await (syncShopSaleToPersonal as unknown as (e: unknown) => Promise<void>)(
+      event({ ...SALE, customerId: 'c1', checkoutAt: 1_700_000_000_000 }),
+    );
+
+    const cust = store['personal_customers/cast1/items/c1'];
+    const log = store['personal_customers/cast1/items/c1/logs/sale1'];
+    expect(asMillis(cust.lastContactAt)).toBe(1_700_000_000_000);
+    expect(asMillis(log.datetime)).toBe(1_700_000_000_000);
+  });
+
+  /**
+   * ⚠️ `num()` を共通化したときに **NaN の扱いが変わった**（旧: `typeof v === 'number'` だけ
+   * ＝ NaN も通す / 新: `Number.isFinite` で 0 に倒す）。金額の経路なので固定しておく。
+   * NaN を通すと `increment(NaN)` で**台帳の合計が二度と戻らない NaN に汚染される**。
+   */
+  it('★NaN の金額は 0 に倒す（increment(NaN) で台帳を汚染しない）', async () => {
+    const { db, store } = makeDb({ store: { 'account_users/cast1': {} } });
+    mocks.db.mockReturnValue(db);
+
+    await (syncShopSaleToPersonal as unknown as (e: unknown) => Promise<void>)(
+      event({ ...SALE, amount: Number.NaN }),
+    );
+
+    expect(store['personal_sales/cast1/items/sale1']).toMatchObject({ salesAmount: 0, amount: 0 });
   });
 });
