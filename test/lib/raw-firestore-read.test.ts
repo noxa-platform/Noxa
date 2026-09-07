@@ -22,7 +22,11 @@ import { join, relative } from 'node:path';
 // 数えた値だった（`src/app/api` の 42 箇所が入っていない）。**走査範囲を書かない数字は、
 // 次に読む人が全域だと読む。** ここでは走査範囲をコードで固定する。
 
-const ROOT = join(process.cwd(), 'src');
+/**
+ * 走査ルート。**ここが母集団の唯一の正本**で、文章の側で範囲を広く言わない（P161-PM4 の教訓）。
+ * P165 で `functions/src` を追加（母集団の追加なので additive＝誤検知の測定は不要）。
+ */
+const ROOTS = ['src', 'functions/src'] as const;
 
 /** ファイルごとの現在値。⚠️ 増やすときは理由を、減らすときは**減った理由を確かめてから**下げる。 */
 const BASELINE: Record<string, number> = {
@@ -69,6 +73,14 @@ const BASELINE: Record<string, number> = {
   'src/lib/shopConfig.ts': 1,
   'src/lib/useShopRole.ts': 1,
   'src/lib/workspace.ts': 2,
+
+  // ── functions/src（P165 で母集団に追加・2026-09-07 実測）────────────────────
+  // ⚠️ CF は**トリガで派生データを書く**ので、生読みの取り違えが保存済みデータへ伝播し、
+  // 画面が無いので誰も気付かない。API ルートより上流にある。
+  'functions/src/lib/prefs.ts': 1,
+  'functions/src/lib/push.ts': 1,
+  'functions/src/merge.ts': 1,
+  'functions/src/noxa-auth.ts': 1,
 };
 
 const TOTAL = Object.values(BASELINE).reduce((a, b) => a + b, 0);
@@ -86,10 +98,13 @@ function sourceFiles(dir: string): string[] {
 // ⚠️ 生ソースに当てると、**コメントの言及を実装として数える**（P161-PM で実測）。
 // 判定はコードだけに当てる（`test/helpers/strip-comments.ts` は Day121-PM からある共通ヘルパー。
 // 🔴 P161 で新設したとき、**既にあるこれを使っていなかった**）。
-const FILES = sourceFiles(ROOT).map((p) => ({
-  path: relative(process.cwd(), p).split(/[\\/]/).join('/'),
-  src: stripComments(readFileSync(p, 'utf8')),
-}));
+const FILES = ROOTS.flatMap((root) =>
+  sourceFiles(join(process.cwd(), root)).map((p) => ({
+    root,
+    path: relative(process.cwd(), p).split(/[\\/]/).join('/'),
+    src: stripComments(readFileSync(p, 'utf8')),
+  })),
+);
 
 /** `snap.data() as T` / `d.data() as Partial<T>` … 実行時に検証されない読み */
 const RAW_READ = /\.data\(\) as /g;
@@ -98,15 +113,19 @@ const RAW_READ = /\.data\(\) as /g;
  * ⚠️ **`as` の付かない `.data()` は、この走査から丸ごと外れる**（P161-PM4 で実測）。
  * `src/` で **110 対 111** ——「`.data() as` が 110 件」は**半分の綴りを数えた数**だった。
  *
- * 🔴 **さらにこの走査は `src/` しか見ていない。** `functions/src` に **`.data()` が 34 箇所**
- * （23 ファイル）、`scripts/` に 4 箇所あり、**どちらもここには入っていない**（2026-08-29 実測）。
+ * ✅ **【P165 で解消】`functions/src` を母集団に追加した**（2026-09-07）。
  * ⚠️ Cloud Functions は**トリガで派生データを書く**ので、生読みの取り違えが
  * **保存済みデータに伝播し、画面が無いので誰も気付かない**。API ルートより上流。
- * ＝ **「全域」と書きかけた**（P161-PM4 の初稿がそうだった）。走査範囲は `ROOT` が唯一の正本で、
- * **文章の側で範囲を広く言わない**。⇒ `functions/src` を足すのは P162 以降（母集団の追加なので
- * **締める方向ではなく additive**＝誤検知の測定は不要）。
- * 🔴 これは P161 起票時の「63 件」（`src/app/api` を数え忘れ）と**同じ誤り**で、
- * あのときは**走査範囲**、今回は**走査する綴り**を書かずに数字だけ渡していた。
+ * 実測は **23 ファイル・34 出現**（`.data() as` 4 ／ `as` なし 30）で生 grep と一致。
+ * コメント内の言及はゼロだった＝起票時の「34」は正しかった。
+ * 🔴 **間違っていたのは、追加しようとした側の走査だった。** 最初の測定は `lib` という名前の
+ * ディレクトリを一律に除外していて、`functions/src/lib/`（実ソース 6 ファイル・8 出現）を落とし、
+ * 合計が **26** に見えていた。除外の理由は「ビルド成果物だろう」という**確かめていない推測**。
+ * ＝ 母集団が静かに縮む 3 つ目の形。P161 は**走査範囲**（`src/app/api` の数え忘れ）、
+ * P161-PM4 は**走査する綴りと数え方**（`as` 無しの半分・行 vs 出現）、今回は**除外リスト**。
+ * 💡 3 回とも「数字だけが独り歩きし、その数字がどう作られたかが書かれていなかった」。
+ * ⇒ 走査範囲は `ROOTS`、除外は `sourceFiles` が唯一の正本。**文章の側で範囲を言わない。**
+ * ⇒ `scripts/` は `.mjs` しか無く、この走査の**拡張子フィルタの外**（末尾の専用テストで数だけ固定）。
  *
  * 中身は一様ではない: `mapReservation(d.id, d.data())` のように**項目ごとに検証する
  * 写像関数へ渡す**（＝正しい形）ものと、`d.data().hourlyWage as number` のように
@@ -129,8 +148,14 @@ for (const f of FILES) {
  * ＝ **綴りを直した走査が、今度は数え方（行 vs 出現）で外していた。**
  * 目視で 1 件確かめるまで、この 1 件差は「まあ 110 だろう」で通っていた。
  */
-const UNCAST_TOTAL = 111;
-const uncastTotal = FILES.reduce((acc, f) => acc + [...f.src.matchAll(RAW_READ_UNCAST)].length, 0);
+const UNCAST_TOTAL: Record<(typeof ROOTS)[number], number> = {
+  src: 111,
+  // P165 で追加。生 grep の 34 と一致し、**コメント内の言及はゼロ**だった
+  //（`.data() as` 4 件は BASELINE 側に載っている）。
+  'functions/src': 30,
+};
+const uncastByRoot = Object.fromEntries(ROOTS.map((r) => [r, 0])) as Record<string, number>;
+for (const f of FILES) uncastByRoot[f.root] += [...f.src.matchAll(RAW_READ_UNCAST)].length;
 
 describe('生データ経路のラチェット（.data() as）', () => {
   // ⚠️ グロブが破綻して 0 件になれば、このテストは**全部緑**で通ってしまう（沈黙の段 1）
@@ -153,8 +178,41 @@ describe('生データ経路のラチェット（.data() as）', () => {
   });
 
   // ⚠️ 走査が **1 つの綴りしか見ていない**と、母集団は静かに半分になる（P161-PM4）
-  it('`as` の付かない `.data()` も母集団として固定されている', () => {
-    expect(uncastTotal).toBe(UNCAST_TOTAL);
+  it('`as` の付かない `.data()` も母集団として固定されている（走査ルート別）', () => {
+    // ⚠️ ルートを合算すると、片方が減って片方が増えたときに**相殺で隠れる**
+    //（`BASELINE` をファイル単位にしているのと同じ理由）。
+    expect(uncastByRoot).toEqual(UNCAST_TOTAL);
+  });
+
+  /**
+   * 🔴 P165 で実測した穴: 走査の**除外リスト**が母集団を静かに縮める。
+   * `functions/src/lib/` は**ビルド成果物ではなく実ソース**（`admin-check` / `datetime` /
+   * `prefs` / `push` / `stats` / `workspaces`）。`lib` という名前だけで除外すると
+   * **6 ファイル・8 出現**が母集団から消え、合計が 34 ではなく 26 に見える。
+   * ＝ P161 の「走査範囲」、P161-PM4 の「走査する綴り／数え方」に続く**3 つ目の縮み方**。
+   * 上の `toEqual` が 30 を要求するので、この除外が戻れば赤になる。
+   */
+  it('functions/src/lib を実ソースとして走査できている', () => {
+    const libFiles = FILES.filter((f) => f.path.startsWith('functions/src/lib/'));
+    expect(libFiles.length).toBe(6);
+  });
+
+  /**
+   * ⚠️ `scripts/` は **`.mjs` しか無い**ので、上の走査（`.ts` / `.tsx`）の
+   * **拡張子フィルタから丸ごと外れている**（2026-09-07 実測: `.data()` が 4 出現）。
+   * 除外を書かずに 0 件で通すと「`scripts` には無い」と読めてしまうので、数だけ固定する。
+   * ⚠️ ここは一度きりの移行スクリプト置き場で、常駐経路ではないため寄せ先は作らない。
+   */
+  it('scripts/ の .mjs も数だけ固定する（拡張子フィルタの外）', () => {
+    const dir = join(process.cwd(), 'scripts');
+    const total = readdirSync(dir, { withFileTypes: true })
+      .filter((e) => e.isFile() && e.name.endsWith('.mjs'))
+      .reduce(
+        (acc, e) =>
+          acc + [...stripComments(readFileSync(join(dir, e.name), 'utf8')).matchAll(/\.data\(\)/g)].length,
+        0,
+      );
+    expect(total).toBe(4);
   });
 
   it('減った分は理由を確かめてから baseline を下げる', () => {
